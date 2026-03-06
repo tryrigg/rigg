@@ -1,0 +1,5 @@
+/target/
+/.rigg/runs/
+
+.DS_Store
+/private/

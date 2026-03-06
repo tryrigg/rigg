@@ -1,0 +1,65 @@
+[workspace]
+members = [
+    "crates/cli",
+    "crates/config",
+    "crates/core",
+    "crates/runtime",
+    "crates/store",
+]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+version = "0.1.0"
+
+[workspace.lints.rust]
+elided_lifetimes_in_paths = "warn"
+explicit_outlives_requirements = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+unreachable_pub = "warn"
+unused_extern_crates = "warn"
+unused_lifetimes = "warn"
+
+[workspace.dependencies]
+clap = { version = "4.5.48", features = ["derive"] }
+serde = { version = "1.0.226", features = ["derive"] }
+serde_json = "1.0.145"
+thiserror = "2.0.16"
+miette = { version = "7.6.0", features = ["fancy"] }
+tokio = { version = "1.47.1", features = ["rt-multi-thread", "macros"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.20", features = ["fmt", "env-filter"] }
+schemars = "1.0.4"
+cel-parser = "0.10.1"
+cel-interpreter = { version = "0.10.0", features = ["json"] }
+serde-saphyr = "0.0.17"
+sha2 = "0.10.9"
+time = { version = "0.3.47", features = ["formatting", "parsing", "serde", "macros"] }
+uuid = { version = "1.21.0", features = ["serde", "v7"] }
+expect-test = "1.5.1"
+
+[workspace.lints.clippy]
+complexity = { level = "warn", priority = -1 }
+correctness = { level = "deny", priority = -1 }
+perf = { level = "deny", priority = -1 }
+style = { level = "warn", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+await_holding_lock = "deny"
+dbg_macro = "deny"
+expect_used = "deny"
+manual_clamp = "deny"
+manual_ok_or = "deny"
+manual_strip = "deny"
+needless_borrow = "deny"
+needless_collect = "deny"
+needless_question_mark = "deny"
+redundant_clone = "deny"
+redundant_closure = "deny"
+redundant_closure_for_method_calls = "deny"
+todo = "deny"
+uninlined_format_args = "deny"
+unnecessary_lazy_evaluations = "deny"
+unnecessary_to_owned = "deny"
+unwrap_used = "deny"
+wildcard_imports = "deny"

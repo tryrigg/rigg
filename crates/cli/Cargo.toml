@@ -1,0 +1,27 @@
+[package]
+name = "rigg-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "rigg"
+path = "src/main.rs"
+
+[dependencies]
+rigg-config = { path = "../config" }
+rigg-core = { path = "../core" }
+rigg-runtime = { path = "../runtime" }
+rigg-store = { path = "../store" }
+clap.workspace = true
+miette.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+time.workspace = true
+
+[lints]
+workspace = true

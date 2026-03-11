@@ -1,4 +1,5 @@
-use serde_json::{Map, Number, Value as JsonValue};
+use crate::ResultShape;
+use serde_json::{Number, Value as JsonValue};
 use std::collections::BTreeSet;
 use thiserror::Error;
 
@@ -63,7 +64,9 @@ pub enum EvalError {
     Execute { expression: String, message: String },
     #[error("expression `{expression}` evaluated to non-boolean value")]
     NonBool { expression: String },
-    #[error("expression `{expression}` evaluated to non-scalar template value")]
+    #[error(
+        "expression `{expression}` evaluated to non-scalar template value; use toJSON(...) or join(...) to render arrays or objects"
+    )]
     NonScalar { expression: String },
 }
 
@@ -146,6 +149,22 @@ impl CompiledExpr {
         &self.path_references
     }
 
+    pub fn direct_path_reference(&self) -> Option<PathReference> {
+        match &self.ast {
+            Expr::Path { root, segments } => {
+                Some(PathReference { root: *root, segments: segments.clone() })
+            }
+            _ => None,
+        }
+    }
+
+    pub fn infer_result_shape(
+        &self,
+        mut resolve_path: impl FnMut(&PathReference) -> ResultShape,
+    ) -> ResultShape {
+        infer_expr_shape(&self.ast, &mut resolve_path)
+    }
+
     pub fn evaluate(&self, context_value: &JsonValue) -> Result<EvalOutcome, EvalError> {
         let value = eval_expr(&self.ast, context_value)
             .map_err(|message| EvalError::Execute { expression: self.source.clone(), message })?;
@@ -224,6 +243,142 @@ fn eval_expr(expr: &Expr, context: &JsonValue) -> Result<JsonValue, String> {
         Expr::UnaryNot(inner) => Ok(JsonValue::Bool(!truthy(&eval_expr(inner, context)?))),
         Expr::Binary { left, op, right } => eval_binary(left, *op, right, context),
         Expr::Call { name, args } => eval_call(name, args, context),
+    }
+}
+
+fn infer_expr_shape(
+    expr: &Expr,
+    resolve_path: &mut impl FnMut(&PathReference) -> ResultShape,
+) -> ResultShape {
+    match expr {
+        Expr::Literal(literal) => infer_literal_shape(literal),
+        Expr::Path { root, segments } => {
+            resolve_path(&PathReference { root: *root, segments: segments.clone() })
+        }
+        Expr::UnaryNot(_) => ResultShape::Boolean,
+        Expr::Binary { .. } => ResultShape::Boolean,
+        Expr::Call { name, args } => infer_call_shape(name, args, resolve_path),
+    }
+}
+
+fn infer_call_shape(
+    name: &str,
+    args: &[Expr],
+    resolve_path: &mut impl FnMut(&PathReference) -> ResultShape,
+) -> ResultShape {
+    match name {
+        "contains" | "startsWith" | "endsWith" => ResultShape::Boolean,
+        "format" | "join" | "toJSON" => ResultShape::String,
+        "fromJSON" => infer_from_json_shape(args, resolve_path),
+        _ => ResultShape::AnyJson,
+    }
+}
+
+fn infer_from_json_shape(
+    args: &[Expr],
+    resolve_path: &mut impl FnMut(&PathReference) -> ResultShape,
+) -> ResultShape {
+    let Some(arg) = args.first() else {
+        return ResultShape::AnyJson;
+    };
+
+    match arg {
+        Expr::Literal(Literal::String(value)) => serde_json::from_str::<JsonValue>(value)
+            .map(|value| infer_json_shape(&value))
+            .unwrap_or(ResultShape::AnyJson),
+        Expr::Call { name, args } if name == "toJSON" && args.len() == 1 => {
+            infer_expr_shape(&args[0], resolve_path)
+        }
+        _ => ResultShape::AnyJson,
+    }
+}
+
+fn infer_literal_shape(literal: &Literal) -> ResultShape {
+    match literal {
+        Literal::Null => ResultShape::AnyJson,
+        Literal::Bool(_) => ResultShape::Boolean,
+        Literal::String(_) => ResultShape::String,
+        Literal::Number(value) => {
+            if value.parse::<i64>().is_ok() || value.parse::<u64>().is_ok() {
+                ResultShape::Integer
+            } else {
+                ResultShape::Number
+            }
+        }
+    }
+}
+
+fn infer_json_shape(value: &JsonValue) -> ResultShape {
+    match value {
+        JsonValue::Null => ResultShape::AnyJson,
+        JsonValue::Bool(_) => ResultShape::Boolean,
+        JsonValue::Number(number) => {
+            if number.as_i64().is_some() || number.as_u64().is_some() {
+                ResultShape::Integer
+            } else {
+                ResultShape::Number
+            }
+        }
+        JsonValue::String(_) => ResultShape::String,
+        JsonValue::Array(items) => ResultShape::Array {
+            items: merge_array_item_shapes(
+                items.iter().map(infer_json_shape).collect::<Vec<_>>().as_slice(),
+            )
+            .map(Box::new),
+        },
+        JsonValue::Object(fields) => ResultShape::Object(
+            fields.iter().map(|(key, value)| (key.clone(), infer_json_shape(value))).collect(),
+        ),
+    }
+}
+
+fn merge_array_item_shapes(shapes: &[ResultShape]) -> Option<ResultShape> {
+    let mut merged = None;
+    for shape in shapes {
+        merged = Some(match merged {
+            None => shape.clone(),
+            Some(current) => merge_inferred_shapes(&current, shape),
+        });
+    }
+    merged
+}
+
+fn merge_inferred_shapes(left: &ResultShape, right: &ResultShape) -> ResultShape {
+    match (left, right) {
+        (ResultShape::AnyJson, _) | (_, ResultShape::AnyJson) => ResultShape::AnyJson,
+        (ResultShape::None, _) | (_, ResultShape::None) => ResultShape::AnyJson,
+        (ResultShape::String, ResultShape::String) => ResultShape::String,
+        (ResultShape::Integer, ResultShape::Integer) => ResultShape::Integer,
+        (ResultShape::Number, ResultShape::Number) => ResultShape::Number,
+        (ResultShape::Integer, ResultShape::Number)
+        | (ResultShape::Number, ResultShape::Integer) => ResultShape::Number,
+        (ResultShape::Boolean, ResultShape::Boolean) => ResultShape::Boolean,
+        (ResultShape::Object(left_fields), ResultShape::Object(right_fields))
+            if left_fields.keys().eq(right_fields.keys()) =>
+        {
+            ResultShape::Object(
+                left_fields
+                    .iter()
+                    .filter_map(|(key, left_shape)| {
+                        right_fields.get(key).map(|right_shape| {
+                            (key.clone(), merge_inferred_shapes(left_shape, right_shape))
+                        })
+                    })
+                    .collect(),
+            )
+        }
+        (ResultShape::Array { items: left_items }, ResultShape::Array { items: right_items }) => {
+            ResultShape::Array {
+                items: match (left_items, right_items) {
+                    (Some(left_item), Some(right_item)) => {
+                        Some(Box::new(merge_inferred_shapes(left_item, right_item)))
+                    }
+                    (Some(item), None) | (None, Some(item)) => Some(item.clone()),
+                    (None, None) => None,
+                },
+            }
+        }
+        _ => ResultShape::AnyJson,
     }
 }
 
@@ -449,20 +604,6 @@ fn as_f64(value: &JsonValue) -> Option<f64> {
     }
 }
 
-pub(crate) fn context(
-    inputs: JsonValue,
-    steps: JsonValue,
-    env: JsonValue,
-    run: JsonValue,
-) -> JsonValue {
-    JsonValue::Object(Map::from_iter([
-        ("inputs".to_owned(), inputs),
-        ("steps".to_owned(), steps),
-        ("env".to_owned(), env),
-        ("run".to_owned(), run),
-    ]))
-}
-
 struct Parser<'a> {
     source: &'a str,
     tokens: Vec<Token>,
@@ -674,10 +815,20 @@ fn tokenize(source: &str) -> Result<Vec<Token>, ExprError> {
             '\'' | '"' => Token::String(read_string(source, &mut chars, ch, index)?),
             '-' | '0'..='9' => {
                 let mut literal = String::from(ch);
-                while let Some((_, next)) = chars.peek() {
-                    if next.is_ascii_digit() || *next == '.' {
-                        literal.push(*next);
+                while let Some((_, next)) = chars.peek().copied() {
+                    if next.is_ascii_digit() {
+                        literal.push(next);
                         chars.next();
+                    } else if next == '.' {
+                        let mut lookahead = chars.clone();
+                        lookahead.next();
+                        if matches!(lookahead.peek(), Some((_, after_dot)) if after_dot.is_ascii_digit())
+                        {
+                            literal.push(next);
+                            chars.next();
+                        } else {
+                            break;
+                        }
                     } else {
                         break;
                     }

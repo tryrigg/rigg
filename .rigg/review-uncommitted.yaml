@@ -1,0 +1,45 @@
+id: review-uncommitted
+steps:
+  - id: remediation
+    type: loop
+    max: 5
+    until: ${{ steps.judge.result.accepted_count == 0 }}
+    steps:
+      - id: review
+        type: codex
+        with:
+          action: review
+          target: uncommitted
+          prompt: Review current uncommitted changes for bugs and missing tests.
+
+      - id: judge
+        type: claude
+        with:
+          action: prompt
+          prompt: |
+            Read the review below.
+            
+            Review:
+            ${{ steps.review.result }}
+            
+            Accept only findings that are valid and actionable.
+          output_schema:
+            type: object
+            required: [accepted_count, fix_brief]
+            additionalProperties: false
+            properties:
+              accepted_count:
+                type: integer
+              fix_brief:
+                type: string
+
+      - id: fix
+        if: ${{ steps.judge.result.accepted_count > 0 }}
+        type: codex
+        with:
+          action: exec
+          mode: full_auto
+          prompt: ${{ steps.judge.result.fix_brief }}
+    exports:
+      accepted_count: ${{ steps.judge.result.accepted_count }}
+      fix_brief: ${{ steps.judge.result.fix_brief }}

@@ -1090,9 +1090,11 @@ name = "rigg-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "libc",
  "miette",
  "rigg-config",
  "rigg-core",
+ "rigg-engine",
  "rigg-runtime",
  "rigg-store",
  "serde",
@@ -1102,6 +1104,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "unicode-width 0.2.2",
 ]
 
 [[package]]
@@ -1121,16 +1124,30 @@ name = "rigg-core"
 version = "0.1.0"
 dependencies = [
  "cel-interpreter",
+ "regex",
  "serde_json",
  "thiserror 2.0.18",
+ "time",
  "uuid",
+]
+
+[[package]]
+name = "rigg-engine"
+version = "0.1.0"
+dependencies = [
+ "rigg-core",
+ "serde_json",
+ "thiserror 2.0.18",
+ "time",
 ]
 
 [[package]]
 name = "rigg-runtime"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "rigg-core",
+ "rigg-engine",
  "serde_json",
  "thiserror 2.0.18",
  "time",
@@ -1142,6 +1159,7 @@ name = "rigg-store"
 version = "0.1.0"
 dependencies = [
  "rigg-core",
+ "rigg-engine",
  "serde",
  "serde_json",
  "sha2",

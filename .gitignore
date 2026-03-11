@@ -1,5 +1,7 @@
 /target/
 /.rigg/runs/
-
+/.claude
+/.agent/
+/.agents/
 .DS_Store
 /private/

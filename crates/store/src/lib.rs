@@ -1,10 +1,12 @@
-mod fs;
-mod mapping;
-mod protocol;
+mod fs_recorder;
+mod fs_store;
+mod projection;
+mod record;
+mod store;
 
-pub use fs::{LogSelection, LogStream, StatusQuery, StoreError, StoreReader, StoreWriter};
-pub use mapping::{event_record_from_core, meta_from_core, snapshot_from_core};
-pub use protocol::{
-    Event, EventRecord, LoopEvaluated, Meta, RunFinished, RunReason, RunSnapshot, RunStatus,
-    StepRecord, StepSnapshot, StepStatus,
+pub use fs_store::{LogSelection, LogStream, StatusQuery, StoreError};
+pub use record::{
+    ConversationSnapshot, NodeSnapshot, NodeStatus, RunReason, RunSnapshot, RunStatus,
 };
+pub(crate) use record::{EventRecord, Meta};
+pub use store::{FsRunRecorder, RunStore};

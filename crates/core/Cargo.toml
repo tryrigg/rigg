@@ -6,8 +6,10 @@ license.workspace = true
 
 [dependencies]
 cel-interpreter.workspace = true
+regex.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+time.workspace = true
 uuid.workspace = true
 
 [lints]

@@ -1,0 +1,74 @@
+id: debug-progress
+steps:
+  - id: preflight_wait
+    type: shell
+    with:
+      command: sleep 2
+      result: none
+
+  - id: codex_probe
+    type: codex
+    with:
+      action: exec
+      model: gpt-5.1-codex-mini
+      prompt: |
+        Inspect this repository and produce a short debug note for a workflow progress UI check.
+
+        Constraints:
+        - Do not modify any files.
+        - Read only a few files.
+        - Mention at least one file path you inspected.
+        - Keep the answer concise.
+
+        Return JSON matching the provided schema.
+      output_schema:
+        type: object
+        required: [markdown]
+        additionalProperties: false
+        properties:
+          markdown:
+            type: string
+
+  - id: midrun_wait
+    type: shell
+    with:
+      command: sleep 2
+      result: none
+
+  - id: claude_probe
+    type: claude
+    with:
+      action: prompt
+      model: haiku
+      prompt: |
+        You are validating a CLI progress display.
+
+        Read the note below and turn it into a compact final summary for a human operator.
+
+        Requirements:
+        - Keep it to 3 short bullet points.
+        - Mention that this run is intended for debugging progress rendering.
+        - Do not ask follow-up questions.
+
+        Note:
+        ${{ steps.codex_probe.result.markdown }}
+      output_schema:
+        type: object
+        required: [markdown]
+        additionalProperties: false
+        properties:
+          markdown:
+            type: string
+
+  - id: write
+    type: write_file
+    with:
+      path: .rigg/debug-progress.md
+      content: |
+        # Debug Progress Run
+
+        ## Codex
+        ${{ steps.codex_probe.result.markdown }}
+
+        ## Claude
+        ${{ steps.claude_probe.result.markdown }}

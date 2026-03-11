@@ -10,10 +10,12 @@ path = "src/main.rs"
 
 [dependencies]
 rigg-config = { path = "../config" }
+rigg-engine = { path = "../engine" }
 rigg-core = { path = "../core" }
 rigg-runtime = { path = "../runtime" }
 rigg-store = { path = "../store" }
 clap.workspace = true
+libc.workspace = true
 miette.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -22,6 +24,7 @@ tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 time.workspace = true
+unicode-width = "0.2.2"
 
 [lints]
 workspace = true

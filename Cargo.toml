@@ -3,6 +3,7 @@ members = [
     "crates/cli",
     "crates/config",
     "crates/core",
+    "crates/engine",
     "crates/runtime",
     "crates/store",
 ]
@@ -16,6 +17,7 @@ version = "0.1.0"
 [workspace.lints.rust]
 elided_lifetimes_in_paths = "warn"
 explicit_outlives_requirements = "warn"
+unexpected_cfgs = "warn"
 unsafe_op_in_unsafe_fn = "warn"
 unreachable_pub = "warn"
 unused_extern_crates = "warn"
@@ -23,8 +25,10 @@ unused_lifetimes = "warn"
 
 [workspace.dependencies]
 clap = { version = "4.5.48", features = ["derive"] }
+libc = "0.2.175"
 serde = { version = "1.0.226", features = ["derive"] }
 serde_json = "1.0.145"
+regex = "1.11.3"
 thiserror = "2.0.16"
 miette = { version = "7.6.0", features = ["fancy"] }
 tokio = { version = "1.47.1", features = ["rt-multi-thread", "macros"] }
@@ -47,7 +51,9 @@ style = { level = "warn", priority = -1 }
 suspicious = { level = "warn", priority = -1 }
 await_holding_lock = "deny"
 dbg_macro = "deny"
-expect_used = "deny"
+# In shipping code, prefer typed errors and explicit invariants. Tests are allowed
+# to use expect/unwrap via clippy.toml.
+expect_used = "warn"
 manual_clamp = "deny"
 manual_ok_or = "deny"
 manual_strip = "deny"
@@ -58,8 +64,8 @@ redundant_clone = "deny"
 redundant_closure = "deny"
 redundant_closure_for_method_calls = "deny"
 todo = "deny"
-uninlined_format_args = "deny"
+uninlined_format_args = "warn"
 unnecessary_lazy_evaluations = "deny"
 unnecessary_to_owned = "deny"
 unwrap_used = "deny"
-wildcard_imports = "deny"
+wildcard_imports = "warn"

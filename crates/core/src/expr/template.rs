@@ -78,3 +78,31 @@ impl Template {
         Ok(rendered)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Template;
+    use serde_json::json;
+
+    #[test]
+    fn non_scalar_template_error_mentions_stringify_helpers() {
+        let template =
+            Template::parse("${{ steps.review.result.findings }}").expect("template should parse");
+        let context = json!({
+            "steps": {
+                "review": {
+                    "result": {
+                        "findings": [{"severity": "low"}]
+                    }
+                }
+            }
+        });
+
+        let error = template.render(&context).expect_err("template should fail to render");
+
+        assert_eq!(
+            error.to_string(),
+            "expression `steps.review.result.findings` evaluated to non-scalar template value; use toJSON(...) or join(...) to render arrays or objects"
+        );
+    }
+}

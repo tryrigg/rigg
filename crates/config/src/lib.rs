@@ -1,5 +1,9 @@
-pub mod load;
-mod model;
+mod compile;
+mod loader;
+mod source;
+mod syntax;
 
-pub use load::{ConfigError, ConfigLoader};
-pub use model::SourceLocation;
+pub use compile::{ValidatedWorkspace, compile_workspace, load_workspace};
+pub use loader::ConfigError;
+pub use source::{ConfigSource, LoadedWorkspace};
+pub use syntax::SourceLocation;

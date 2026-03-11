@@ -5,7 +5,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+rigg-engine = { path = "../engine" }
 rigg-core = { path = "../core" }
+libc.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 time.workspace = true

@@ -1,0 +1,341 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+
+const usecases = [
+  {
+    tab: 'Review & Auto-fix',
+    runCmd: 'rigg run review-and-fix',
+    filename: '.rigg/review-and-fix.yaml',
+    code: `<span class="hl-key">id</span>: review-and-fix
+<span class="hl-key">steps</span>:
+  - <span class="hl-key">id</span>: loop
+    <span class="hl-key">type</span>: <span class="hl-type">loop</span>
+    <span class="hl-key">until</span>: <span class="hl-str">\${{ steps.judge.result.needs_fix == false }}</span>
+    <span class="hl-key">max</span>: 5
+    <span class="hl-key">steps</span>:
+      - <span class="hl-key">id</span>: review
+        <span class="hl-key">type</span>: <span class="hl-type">codex</span>
+        <span class="hl-key">with</span>:
+          <span class="hl-key">action</span>: review
+          <span class="hl-key">prompt</span>: <span class="hl-str">Review uncommitted changes for bugs.</span>
+          <span class="hl-key">output_schema</span>:
+            <span class="hl-key">properties</span>:
+              <span class="hl-key">findings</span>: { <span class="hl-key">type</span>: <span class="hl-type">array</span> }
+      - <span class="hl-key">id</span>: judge
+        <span class="hl-key">type</span>: <span class="hl-type">claude</span>
+        <span class="hl-key">with</span>:
+          <span class="hl-key">prompt</span>: <span class="hl-str">Evaluate findings and decide which need fixing.</span>
+          <span class="hl-key">output_schema</span>:
+            <span class="hl-key">properties</span>:
+              <span class="hl-key">needs_fix</span>: { <span class="hl-key">type</span>: <span class="hl-type">boolean</span> }
+      - <span class="hl-key">id</span>: fix
+        <span class="hl-key">if</span>: <span class="hl-str">\${{ steps.judge.result.needs_fix }}</span>
+        <span class="hl-key">type</span>: <span class="hl-type">codex</span>
+        <span class="hl-key">with</span>:
+          <span class="hl-key">action</span>: exec
+          <span class="hl-key">prompt</span>: <span class="hl-str">\${{ steps.judge.result.valid_findings }}</span>`,
+    steps: [
+      { num: 1, title: 'Codex reviews your changes', desc: 'Scans uncommitted changes and returns structured findings — bugs, style issues, potential regressions.' },
+      { num: 2, title: 'Claude judges the findings', desc: 'Evaluates each finding, filters out noise, and decides whether fixes are actually needed.' },
+      { num: 3, title: 'Codex auto-fixes, then loops', desc: 'Valid issues get fixed automatically. The loop repeats until clean — up to 5 iterations.' },
+    ],
+  },
+  {
+    tab: 'Plan & Refine',
+    runCmd: 'rigg run plan --input requirements="Add auth to the API"',
+    filename: '.rigg/plan.yaml',
+    code: `<span class="hl-key">id</span>: plan
+<span class="hl-key">inputs</span>:
+  <span class="hl-key">requirements</span>: { <span class="hl-key">type</span>: <span class="hl-type">string</span> }
+<span class="hl-key">steps</span>:
+  - <span class="hl-key">id</span>: draft
+    <span class="hl-key">type</span>: <span class="hl-type">codex</span>
+    <span class="hl-key">with</span>:
+      <span class="hl-key">action</span>: exec
+      <span class="hl-key">prompt</span>: <span class="hl-str">Draft an implementation plan for: \${{ inputs.requirements }}</span>
+      <span class="hl-key">output_schema</span>:
+        <span class="hl-key">properties</span>:
+          <span class="hl-key">plan</span>: { <span class="hl-key">type</span>: <span class="hl-type">string</span> }
+  - <span class="hl-key">id</span>: review
+    <span class="hl-key">type</span>: <span class="hl-type">claude</span>
+    <span class="hl-key">with</span>:
+      <span class="hl-key">prompt</span>: <span class="hl-str">Review this plan for gaps: \${{ steps.draft.result.plan }}</span>
+      <span class="hl-key">output_schema</span>:
+        <span class="hl-key">properties</span>:
+          <span class="hl-key">has_issues</span>: { <span class="hl-key">type</span>: <span class="hl-type">boolean</span> }
+          <span class="hl-key">feedback</span>: { <span class="hl-key">type</span>: <span class="hl-type">string</span> }
+  - <span class="hl-key">id</span>: refine
+    <span class="hl-key">if</span>: <span class="hl-str">\${{ steps.review.result.has_issues }}</span>
+    <span class="hl-key">type</span>: <span class="hl-type">codex</span>
+    <span class="hl-key">with</span>:
+      <span class="hl-key">action</span>: exec
+      <span class="hl-key">prompt</span>: <span class="hl-str">Improve the plan based on: \${{ steps.review.result.feedback }}</span>
+  - <span class="hl-key">id</span>: save
+    <span class="hl-key">type</span>: <span class="hl-type">write_file</span>
+    <span class="hl-key">with</span>:
+      <span class="hl-key">path</span>: <span class="hl-str">PLAN.md</span>
+      <span class="hl-key">content</span>: <span class="hl-str">\${{ steps.refine.result.plan || steps.draft.result.plan }}</span>`,
+    steps: [
+      { num: 1, title: 'Codex drafts the plan', desc: 'Analyzes requirements and produces a structured implementation plan with file paths and steps.' },
+      { num: 2, title: 'Claude reviews for gaps', desc: 'A second AI reviews the plan for ambiguities, missing edge cases, and architectural issues.' },
+      { num: 3, title: 'Refine and save', desc: 'Refinement only runs when issues are found. The final plan is saved to PLAN.md.' },
+    ],
+  },
+  {
+    tab: 'Parallel Checks',
+    runCmd: 'rigg run parallel-checks',
+    filename: '.rigg/parallel-checks.yaml',
+    code: `<span class="hl-key">id</span>: parallel-checks
+<span class="hl-key">steps</span>:
+  - <span class="hl-key">id</span>: checks
+    <span class="hl-key">type</span>: <span class="hl-type">parallel</span>
+    <span class="hl-key">branches</span>:
+      - <span class="hl-key">id</span>: security
+        <span class="hl-key">steps</span>:
+          - <span class="hl-key">id</span>: scan
+            <span class="hl-key">type</span>: <span class="hl-type">codex</span>
+            <span class="hl-key">with</span>:
+              <span class="hl-key">action</span>: review
+              <span class="hl-key">prompt</span>: <span class="hl-str">Audit for security vulnerabilities.</span>
+      - <span class="hl-key">id</span>: architecture
+        <span class="hl-key">steps</span>:
+          - <span class="hl-key">id</span>: review
+            <span class="hl-key">type</span>: <span class="hl-type">claude</span>
+            <span class="hl-key">with</span>:
+              <span class="hl-key">prompt</span>: <span class="hl-str">Review architecture and design patterns.</span>
+      - <span class="hl-key">id</span>: tests
+        <span class="hl-key">steps</span>:
+          - <span class="hl-key">id</span>: run
+            <span class="hl-key">type</span>: <span class="hl-type">shell</span>
+            <span class="hl-key">with</span>:
+              <span class="hl-key">command</span>: <span class="hl-str">cargo test --workspace</span>
+  - <span class="hl-key">id</span>: summary
+    <span class="hl-key">type</span>: <span class="hl-type">claude</span>
+    <span class="hl-key">with</span>:
+      <span class="hl-key">prompt</span>: <span class="hl-str">Summarize all results: \${{ steps.checks.result }}</span>`,
+    steps: [
+      { num: 1, title: 'Three checks run at once', desc: 'Security audit, architecture review, and test suite run simultaneously — not sequentially.' },
+      { num: 2, title: 'Claude summarizes everything', desc: 'All parallel results flow into a single summary step. One command, full picture.' },
+    ],
+  },
+];
+
+const teamExample = `<span class="hl-comment">your-project/</span>
+├── <span class="hl-accent">.rigg/</span>
+│   ├── <span class="hl-str">plan.yaml</span>          <span class="hl-comment"># Claude plans → Codex builds</span>
+│   ├── <span class="hl-str">review.yaml</span>        <span class="hl-comment"># Automated code review loop</span>
+│   └── <span class="hl-str">fix-loop.yaml</span>      <span class="hl-comment"># Review → judge → fix cycle</span>
+├── src/
+├── package.json
+└── ...`;
+---
+
+<BaseLayout title="Rigg — Local-first workflow runner for agentic coding">
+	<nav>
+		<a href="/" class="logo"><img src="/icon.png" alt="Rigg" width="16" height="16" />Rigg</a>
+		<div class="nav-links">
+			<a href="https://github.com/tryrigg/rigg/tree/main/.rigg/docs">Docs</a>
+			<a href="https://github.com/tryrigg/rigg" class="gh-link">
+				<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+				GitHub
+			</a>
+		</div>
+	</nav>
+
+	<main>
+		<section class="hero">
+			<span class="eyebrow">Open Source</span>
+			<h1>Local-first workflows for agentic coding</h1>
+			<p class="subtitle">
+				Wire Codex, Claude, and shell commands into repeatable YAML pipelines.
+				Run locally, version in Git, share with your team.
+			</p>
+			<div class="hero-install" id="hero-install">
+				<div class="hero-install-inner">
+					<span class="prompt">$</span>
+					<code>curl -fsSL https://tryrigg.com/install | bash</code>
+					<button class="copy-btn" type="button" data-copy="curl -fsSL https://tryrigg.com/install | bash" aria-label="Copy install command">
+						<svg class="copy-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+						<svg class="check-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+					</button>
+				</div>
+				<span class="hero-install-hint">Works on macOS and Linux</span>
+			</div>
+
+			<div class="hero-agents">
+				<div class="agent-chip available">
+					<img src="/icons/openai.svg" alt="Codex" width="18" height="18" />
+					<span>Codex</span>
+				</div>
+				<div class="agent-chip available">
+					<img src="/icons/claude.svg" alt="Claude Code" width="18" height="18" />
+					<span>Claude Code</span>
+				</div>
+				<div class="agent-chip coming">
+					<img src="/icons/opencode.svg" alt="opencode" width="18" height="18" />
+					<span>opencode</span>
+					<span class="coming-label">Soon</span>
+				</div>
+				<div class="agent-chip coming">
+					<img src="/icons/kimi.svg" alt="Kimi Code" width="18" height="18" />
+					<span>Kimi Code</span>
+					<span class="coming-label">Soon</span>
+				</div>
+			</div>
+		</section>
+
+		<section class="workflow-section" id="example">
+			<span class="section-eyebrow">Use Cases</span>
+			<h2 class="section-title">No more copy-pasting between agents</h2>
+			<p class="section-desc">
+				Wire your agents into a repeatable YAML pipeline.
+				Define it once, run it with one command.
+			</p>
+
+			<div class="usecase-tabs" role="tablist">
+				{usecases.map((uc, i) => (
+					<button
+						role="tab"
+						class={`usecase-tab ${i === 0 ? 'active' : ''}`}
+						aria-selected={i === 0 ? 'true' : 'false'}
+						data-tab={i}
+					>
+						{uc.tab}
+					</button>
+				))}
+			</div>
+
+			{usecases.map((uc, i) => (
+				<div class={`usecase-panel ${i === 0 ? 'active' : ''}`} data-panel={i} role="tabpanel">
+					<div class="run-cmd">
+						<span class="prompt">$</span>
+						<code>{uc.runCmd}</code>
+						<button class="copy-btn" type="button" data-copy={uc.runCmd} aria-label="Copy run command">
+							<svg class="copy-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+							<svg class="check-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+						</button>
+					</div>
+					<div class="code-panel">
+						<div class="code-header">
+							<span class="dot"></span>
+							<span class="dot"></span>
+							<span class="dot"></span>
+							<span class="filename">{uc.filename}</span>
+						</div>
+						<pre><code set:html={uc.code} /></pre>
+					</div>
+					<div class="step-annotations">
+						{uc.steps.map(step => (
+							<div class="step-annotation">
+								<span class="step-num">{step.num}</span>
+								<div class="step-body">
+									<strong>{step.title}</strong>
+									<span>{step.desc}</span>
+								</div>
+							</div>
+						))}
+					</div>
+				</div>
+			))}
+		</section>
+
+		<section class="team-section">
+			<div class="team-layout">
+				<div class="team-text">
+					<span class="section-eyebrow">For Teams</span>
+					<h2 class="section-title">Same workflow, every engineer</h2>
+					<p class="section-desc">
+						Drop <code>.rigg/*.yaml</code> into your repo. Every engineer runs the same
+						agent pipeline. Update workflows in PRs, review them like code.
+					</p>
+					<p class="team-detail">
+						No more "how do you use Claude for code review?" in Slack.
+						The answer is in the repo.
+					</p>
+				</div>
+				<div class="code-panel code-panel-compact">
+					<div class="code-header">
+						<span class="dot"></span>
+						<span class="dot"></span>
+						<span class="dot"></span>
+						<span class="filename">project structure</span>
+					</div>
+					<pre><code set:html={teamExample} /></pre>
+				</div>
+			</div>
+		</section>
+
+		<section class="panel bottom-cta">
+			<h2>Start building agent workflows</h2>
+			<p>
+				Open source, written in Rust, runs locally.
+				Three commands to your first workflow.
+			</p>
+			<div class="cta-install">
+				<div class="install-snippet">
+					<span class="prompt">$</span>
+					<code>rigg init && rigg run plan --input requirements="..."</code>
+				</div>
+			</div>
+			<div class="cta-group">
+				<a href="https://github.com/tryrigg/rigg" class="btn btn-primary">
+					View on GitHub
+				</a>
+				<a href="https://github.com/tryrigg/rigg/tree/main/.rigg/docs" class="btn btn-secondary">
+					Read the Docs
+				</a>
+			</div>
+		</section>
+	</main>
+
+	<footer>
+		<span>Rigg &mdash; Local-first workflow runner for agentic coding</span>
+		<div class="footer-links">
+			<a href="https://github.com/tryrigg/rigg">GitHub</a>
+			<a href="https://github.com/tryrigg/rigg/tree/main/.rigg/docs">Docs</a>
+		</div>
+	</footer>
+<script>
+	document.querySelectorAll('.usecase-tab').forEach((tab) => {
+		tab.addEventListener('click', () => {
+			const idx = tab.getAttribute('data-tab');
+			document.querySelectorAll('.usecase-tab').forEach((t) => {
+				t.classList.remove('active');
+				t.setAttribute('aria-selected', 'false');
+			});
+			document.querySelectorAll('.usecase-panel').forEach((p) => {
+				p.classList.remove('active');
+			});
+			tab.classList.add('active');
+			tab.setAttribute('aria-selected', 'true');
+			document.querySelector(`.usecase-panel[data-panel="${idx}"]`)?.classList.add('active');
+		});
+	});
+
+	document.querySelectorAll('.copy-btn').forEach((btn) => {
+		btn.addEventListener('click', async () => {
+			const text = btn.getAttribute('data-copy');
+			if (!text) return;
+
+			try {
+				await navigator.clipboard.writeText(text);
+			} catch {
+				const ta = document.createElement('textarea');
+				ta.value = text;
+				ta.style.position = 'fixed';
+				ta.style.opacity = '0';
+				document.body.appendChild(ta);
+				ta.select();
+				document.execCommand('copy');
+				document.body.removeChild(ta);
+			}
+
+			btn.classList.add('copied');
+
+			setTimeout(() => {
+				btn.classList.remove('copied');
+			}, 2000);
+		});
+	});
+</script>
+</BaseLayout>

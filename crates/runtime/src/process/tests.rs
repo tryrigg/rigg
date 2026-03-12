@@ -8,7 +8,9 @@ use fixture::{
     FailingReader, check_timeout_error, printf_arg, run_non_streaming, run_streaming, shell,
 };
 use rigg_core::StreamKind;
+use std::fs;
 use std::io::{self, ErrorKind};
+use std::path::Path;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -73,20 +75,47 @@ fn run_program_captures_stdout_without_streaming_callback() -> Result<(), Box<dy
 
 #[test]
 fn finished_process_drains_output_after_exit() -> Result<(), Box<dyn std::error::Error>> {
-    let payload = "x".repeat(256 * 1024);
-    let output = run_streaming(
-        printf_arg("%s", &payload),
-        CommandTimeouts::none(),
-        &mut |stream, _chunk| {
-            if stream == StreamKind::Stdout {
-                thread::sleep(Duration::from_millis(5));
+    let chunk = "x".repeat(1024);
+    let repetitions = 256;
+    let payload = chunk.repeat(repetitions);
+    let temp_root = std::env::temp_dir().join(format!(
+        "rigg-runtime-process-test-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_nanos()
+    ));
+    fs::create_dir_all(&temp_root)?;
+    let exit_marker = temp_root.join("child-exited");
+    let trap_command = format!("touch {}", shell_single_quote_path(&exit_marker));
+    let script = format!(
+        "trap {} EXIT; i=0; while [ \"$i\" -lt {repetitions} ]; do printf '%s' '{chunk}'; i=$((i + 1)); done",
+        shell_single_quote_string(&trap_command)
+    );
+    let mut stdout_chunks_after_exit = 0_usize;
+    let output = run_streaming(shell(&script), CommandTimeouts::none(), &mut |stream, _chunk| {
+        if stream == StreamKind::Stdout {
+            if exit_marker.exists() {
+                stdout_chunks_after_exit += 1;
             }
-        },
-    )?;
+            thread::sleep(Duration::from_millis(10));
+        }
+    })?;
 
     assert_eq!(output.stdout.len(), payload.len());
     assert_eq!(output.stdout, payload);
+    assert!(
+        stdout_chunks_after_exit > 0,
+        "expected to keep draining stdout after the child exited"
+    );
+    let _ = fs::remove_dir_all(&temp_root);
     Ok(())
+}
+
+fn shell_single_quote_path(path: &Path) -> String {
+    shell_single_quote_string(&path.as_os_str().to_string_lossy())
+}
+
+fn shell_single_quote_string(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
 #[test]

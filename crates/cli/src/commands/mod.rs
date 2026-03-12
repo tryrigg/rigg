@@ -12,6 +12,7 @@ use miette::Result;
 #[derive(Debug, Parser)]
 #[command(name = "rigg")]
 #[command(about = "Local QA workflow runner")]
+#[command(version = env!("CARGO_PKG_VERSION"))]
 struct Cli {
     #[command(subcommand)]
     command: Command,

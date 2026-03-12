@@ -17,12 +17,21 @@ The goal is to help teams use local coding agents in a safer and more repeatable
 ## Install
 
 ```bash
-cargo install --path crates/cli
+curl -fsSL https://tryrigg.com/install | bash
 ```
 
-Or run it from the workspace:
+Install a specific version:
 
 ```bash
+curl -fsSL https://tryrigg.com/install | bash -s -- --version v0.1.0
+```
+
+The installer currently supports macOS and installs a prebuilt `rigg` binary from GitHub Releases.
+
+Or build from source:
+
+```bash
+cargo install --path crates/cli
 cargo run -p rigg-cli -- --help
 ```
 

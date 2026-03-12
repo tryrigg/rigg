@@ -6,9 +6,10 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "dev": "astro dev",
-    "build": "astro build",
-    "check": "astro check",
+    "sync:install": "install -m 755 ../install public/install",
+    "dev": "bun run sync:install && astro dev",
+    "build": "bun run sync:install && astro build",
+    "check": "bun run sync:install && astro check",
     "preview": "astro preview",
     "astro": "astro"
   },

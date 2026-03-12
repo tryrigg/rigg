@@ -1,0 +1,429 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO="${RIGG_INSTALL_REPO:-tryrigg/rigg}"
+RIGG_VERSION="${RIGG_VERSION:-}"
+RIGG_INSTALL_DIR="${RIGG_INSTALL_DIR:-}"
+RIGG_INSTALL_SELF_CHECK_TIMEOUT="${RIGG_INSTALL_SELF_CHECK_TIMEOUT:-10}"
+RIGG_INSTALL_ALLOW_INSECURE_PROTOCOLS="${RIGG_INSTALL_ALLOW_INSECURE_PROTOCOLS:-0}"
+RIGG_RELEASE_BASE_URL="${RIGG_RELEASE_BASE_URL:-https://github.com/${REPO}/releases/download}"
+RIGG_LATEST_URL="${RIGG_LATEST_URL:-https://github.com/${REPO}/releases/latest}"
+
+log() {
+  printf '%s\n' "rigg-installer: $*"
+}
+
+warn() {
+  printf '%s\n' "rigg-installer: warning: $*" >&2
+}
+
+die() {
+  printf '%s\n' "rigg-installer: error: $*" >&2
+  exit 1
+}
+
+usage() {
+  cat <<'USAGE'
+Usage: install [--version <semver>] [-h|--help]
+
+Options:
+  --version <semver>  Install a specific release version (example: 0.1.2 or v0.1.2)
+  -h, --help          Show this help text
+USAGE
+}
+
+parse_args() {
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      --version)
+        [ -n "${2:-}" ] || die "missing value for --version"
+        RIGG_VERSION="$2"
+        shift 2
+        ;;
+      *)
+        die "unknown option: $1"
+        ;;
+    esac
+  done
+}
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+check_platform() {
+  local os
+  os="$(uname -s)"
+  [ "${os}" = "Darwin" ] || die "Rigg installer currently supports macOS only (detected: ${os})"
+}
+
+resolve_target() {
+  local machine
+  local translated
+
+  machine="$(uname -m)"
+  if [ "${machine}" = "x86_64" ] && [ "$(uname -s)" = "Darwin" ]; then
+    translated="$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)"
+    if [ "${translated}" = "1" ]; then
+      printf '%s\n' "aarch64-apple-darwin"
+      return
+    fi
+  fi
+
+  case "${machine}" in
+    arm64|aarch64)
+      printf '%s\n' "aarch64-apple-darwin"
+      ;;
+    x86_64)
+      printf '%s\n' "x86_64-apple-darwin"
+      ;;
+    *)
+      die "unsupported CPU architecture: ${machine}"
+      ;;
+  esac
+}
+
+choose_install_dir() {
+  local target="${1:-}"
+
+  if [ -n "${RIGG_INSTALL_DIR}" ]; then
+    printf '%s\n' "${RIGG_INSTALL_DIR}"
+    return
+  fi
+
+  if [ -z "${target}" ]; then
+    target="$(resolve_target)"
+  fi
+
+  if [ "${target}" = "aarch64-apple-darwin" ]; then
+    if [ -d "/opt/homebrew/bin" ] && [ -w "/opt/homebrew/bin" ]; then
+      printf '%s\n' "/opt/homebrew/bin"
+      return
+    fi
+  fi
+
+  if [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
+    printf '%s\n' "/usr/local/bin"
+    return
+  fi
+
+  printf '%s\n' "${HOME}/.local/bin"
+}
+
+normalize_tag() {
+  local version="$1"
+  if [ -z "${version}" ]; then
+    printf '\n'
+    return
+  fi
+
+  case "${version}" in
+    v*) printf '%s\n' "${version}" ;;
+    *) printf 'v%s\n' "${version}" ;;
+  esac
+}
+
+resolve_tag_from_latest() {
+  local resolved
+  resolved="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "${RIGG_LATEST_URL}")"
+  [ -n "${resolved}" ] || die "failed to resolve latest stable release"
+  printf '%s\n' "${resolved##*/}"
+}
+
+release_base_is_latest_shortcut() {
+  case "${RIGG_RELEASE_BASE_URL}" in
+    */latest/download) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+resolve_release_tag() {
+  if [ -n "${RIGG_VERSION}" ]; then
+    normalize_tag "${RIGG_VERSION}"
+    return
+  fi
+
+  if release_base_is_latest_shortcut; then
+    printf '\n'
+    return
+  fi
+
+  resolve_tag_from_latest
+}
+
+resolve_release_download_base() {
+  local tag="$1"
+  if [ -n "${tag}" ]; then
+    printf '%s/%s\n' "${RIGG_RELEASE_BASE_URL}" "${tag}"
+  else
+    printf '%s\n' "${RIGG_RELEASE_BASE_URL}"
+  fi
+}
+
+download() {
+  local url="$1"
+  local out="$2"
+  if [ "${RIGG_INSTALL_ALLOW_INSECURE_PROTOCOLS}" = "1" ]; then
+    curl --retry 3 --retry-delay 1 --retry-connrefused -fsSL "${url}" -o "${out}"
+  else
+    curl --proto '=https' --tlsv1.2 --retry 3 --retry-delay 1 --retry-connrefused -fsSL "${url}" -o "${out}"
+  fi
+}
+
+sha256_file() {
+  local path="$1"
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "${path}" | awk '{print $1}'
+    return
+  fi
+
+  if command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "${path}" | awk '{print $2}'
+    return
+  fi
+
+  die "could not verify checksum (need shasum or openssl)"
+}
+
+verify_checksum() {
+  local checksums_file="$1"
+  local archive_name="$2"
+  local archive_path="$3"
+  local expected
+  local actual
+
+  expected="$(awk -v name="${archive_name}" '$2 == name { print $1 }' "${checksums_file}")"
+  [ -n "${expected}" ] || die "checksum not found for ${archive_name}"
+
+  actual="$(sha256_file "${archive_path}")"
+  if [ "${expected}" != "${actual}" ]; then
+    die "checksum mismatch for ${archive_name} (expected ${expected}, got ${actual})"
+  fi
+}
+
+extract_binary_path() {
+  local root="$1"
+  local binary="$2"
+  local candidate
+
+  if [ -f "${root}/${binary}" ]; then
+    printf '%s\n' "${root}/${binary}"
+    return 0
+  fi
+
+  candidate="$(find "${root}" -maxdepth 2 -type f -name "${binary}" 2>/dev/null | head -n 1 || true)"
+  [ -n "${candidate}" ] || return 1
+  printf '%s\n' "${candidate}"
+}
+
+run_binary_check() {
+  local binary="$1"
+  shift
+  local timeout_seconds="${RIGG_INSTALL_SELF_CHECK_TIMEOUT}"
+  local pid
+  local elapsed=0
+
+  if ! [[ "${timeout_seconds}" =~ ^[0-9]+$ ]] || [ "${timeout_seconds}" -lt 1 ]; then
+    timeout_seconds=10
+  fi
+
+  "${binary}" "$@" >/dev/null &
+  pid=$!
+
+  while kill -0 "${pid}" >/dev/null 2>&1; do
+    if [ "${elapsed}" -ge "${timeout_seconds}" ]; then
+      kill "${pid}" >/dev/null 2>&1 || true
+      wait "${pid}" >/dev/null 2>&1 || true
+      return 124
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+
+  wait "${pid}"
+}
+
+binary_check_failure_message() {
+  local label="$1"
+  local status="$2"
+  if [ "${status}" -eq 124 ]; then
+    printf '%s timed out\n' "${label}"
+  else
+    printf '%s failed\n' "${label}"
+  fi
+}
+
+ensure_path_hint() {
+  local install_dir="$1"
+  case ":${PATH}:" in
+    *":${install_dir}:"*)
+      ;;
+    *)
+      warn "install dir is not on PATH: ${install_dir}"
+      warn "add this line to your shell profile:"
+      warn "  export PATH=\"${install_dir}:\$PATH\""
+      ;;
+  esac
+}
+
+rollback_binary() {
+  local final_path="$1"
+  local backup_path="$2"
+  local moved="$3"
+
+  if [ "${moved}" != "1" ]; then
+    return
+  fi
+
+  if [ -n "${backup_path}" ] && [ -f "${backup_path}" ]; then
+    mv -f "${backup_path}" "${final_path}" >/dev/null 2>&1 || true
+  else
+    rm -f "${final_path}" >/dev/null 2>&1 || true
+  fi
+}
+
+print_next_steps() {
+  local rigg_bin="$1"
+  printf '\n'
+  printf '%s\n' "Next steps:"
+  printf '%s\n' "  1. ${rigg_bin} init"
+  printf '%s\n' "  2. ${rigg_bin} validate"
+  printf '%s\n' "  3. ${rigg_bin} run <workflow_id> --input key=value"
+}
+
+main() {
+  local target
+  local install_dir
+  local release_tag
+  local release_download_base
+  local archive_name
+  local checksums_name
+  local tmpdir
+  local archive_path
+  local checksums_path
+
+  local src_rigg
+  local final_rigg
+  local staged_rigg
+  local backup_rigg=""
+  local moved_rigg=0
+  local install_error=""
+  local check_error=""
+  local status=0
+  local rigg_bin
+  local installed_version
+
+  parse_args "$@"
+
+  require_command curl
+  require_command tar
+  require_command awk
+  require_command mktemp
+  require_command uname
+
+  check_platform
+
+  if [ -n "${RIGG_VERSION}" ] && release_base_is_latest_shortcut; then
+    die "RIGG_RELEASE_BASE_URL points to /latest/download and cannot be combined with RIGG_VERSION"
+  fi
+
+  target="$(resolve_target)"
+  archive_name="rigg-${target}.tar.gz"
+  checksums_name="rigg-checksums.txt"
+  release_tag="$(resolve_release_tag)"
+  release_download_base="$(resolve_release_download_base "${release_tag}")"
+
+  if [ -n "${release_tag}" ]; then
+    log "resolved release tag ${release_tag}"
+  else
+    log "using release base ${release_download_base}"
+  fi
+
+  install_dir="$(choose_install_dir "${target}")"
+  mkdir -p "${install_dir}"
+
+  tmpdir="$(mktemp -d)"
+  trap "rm -rf -- $(printf '%q' "${tmpdir}")" EXIT
+
+  archive_path="${tmpdir}/${archive_name}"
+  checksums_path="${tmpdir}/${checksums_name}"
+
+  log "downloading ${archive_name}"
+  download "${release_download_base}/${archive_name}" "${archive_path}"
+  log "downloading ${checksums_name}"
+  download "${release_download_base}/${checksums_name}" "${checksums_path}"
+  log "verifying checksum"
+  verify_checksum "${checksums_path}" "${archive_name}" "${archive_path}"
+
+  log "extracting archive"
+  tar -xzf "${archive_path}" -C "${tmpdir}"
+
+  src_rigg="$(extract_binary_path "${tmpdir}" "rigg")" || die "binary missing from release archive: rigg"
+
+  final_rigg="${install_dir}/rigg"
+  staged_rigg="$(mktemp "${install_dir}/.rigg.new.XXXXXX")"
+
+  cp "${src_rigg}" "${staged_rigg}"
+  chmod 0755 "${staged_rigg}"
+
+  if run_binary_check "${staged_rigg}" --version; then
+    :
+  else
+    status=$?
+    rm -f "${staged_rigg}"
+    die "$(binary_check_failure_message "downloaded rigg binary self-check" "${status}")"
+  fi
+
+  if [ -f "${final_rigg}" ]; then
+    backup_rigg="$(mktemp "${install_dir}/.rigg.backup.XXXXXX")"
+    cp "${final_rigg}" "${backup_rigg}" || {
+      rm -f "${staged_rigg}" "${backup_rigg}"
+      die "failed to back up existing rigg binary"
+    }
+  fi
+
+  if mv -f "${staged_rigg}" "${final_rigg}"; then
+    moved_rigg=1
+  else
+    install_error="failed to install rigg binary"
+  fi
+
+  if [ -n "${install_error}" ]; then
+    warn "${install_error}; rolling back"
+    rollback_binary "${final_rigg}" "${backup_rigg}" "${moved_rigg}"
+    rm -f "${staged_rigg}" "${backup_rigg}"
+    die "install failed"
+  fi
+
+  if run_binary_check "${final_rigg}" --version; then
+    :
+  else
+    status=$?
+    check_error="$(binary_check_failure_message "installed rigg binary self-check" "${status}")"
+  fi
+
+  if [ -n "${check_error}" ]; then
+    warn "${check_error}; rolling back"
+    rollback_binary "${final_rigg}" "${backup_rigg}" "${moved_rigg}"
+    rm -f "${backup_rigg}"
+    die "install aborted because post-install self-check failed"
+  fi
+
+  rm -f "${backup_rigg}"
+
+  rigg_bin="${final_rigg}"
+  log "installed binary to ${install_dir}"
+  ensure_path_hint "${install_dir}"
+
+  if installed_version="$("${rigg_bin}" --version 2>/dev/null)"; then
+    log "installed ${installed_version}"
+  fi
+
+  print_next_steps "${rigg_bin}"
+}
+
+main "$@"

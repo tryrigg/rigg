@@ -1,0 +1,25 @@
+:root {
+  --sl-color-accent-low: #0f2718;
+  --sl-color-accent: #16a34a;
+  --sl-color-accent-high: #b6f0c8;
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: #dcfce7;
+  --sl-color-accent: #16a34a;
+  --sl-color-accent-high: #14532d;
+}
+
+.site-title {
+  font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.hero {
+  max-width: 72rem;
+}
+
+.hero .tagline {
+  max-width: 40rem;
+}

@@ -15,3 +15,13 @@ When writing or editing Rigg workflow files, read the documentation in `.rigg/do
 - `.rigg/docs/examples.md` — Common workflow patterns (review loops, parallel execution, branching, etc.)
 
 Always read these files before creating or modifying workflows to ensure valid YAML.
+
+## Online Documentation
+
+For the latest and most detailed documentation, see:
+
+- https://tryrigg.com/docs/ — Getting started guide
+- https://tryrigg.com/docs/workflows/ — Workflow concepts (steps, control flow, expressions, conversations)
+- https://tryrigg.com/docs/reference/schema — Complete schema reference
+- https://tryrigg.com/docs/reference/cli — CLI command reference
+- https://tryrigg.com/docs/examples/ — Workflow examples and patterns

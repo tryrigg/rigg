@@ -1,0 +1,35 @@
+id: debug-shell-output
+steps:
+  - id: echo_text
+    type: shell
+    with:
+      command: echo "hello"
+      result: text
+
+  - id: printf_text
+    type: shell
+    with:
+      command: printf 'hello'
+      result: text
+
+  - id: json_text
+    type: shell
+    with:
+      command: printf '{"message":"hello","safe_for_fields":true}\n'
+      result: json
+
+  - id: write_snapshot
+    type: write_file
+    with:
+      path: .rigg/debug-shell-output.md
+      content: |
+        # Debug Shell Output
+
+        echo_text_raw: ${{ toJSON(steps.echo_text.result) }}
+        printf_text_raw: ${{ toJSON(steps.printf_text.result) }}
+        json_text_raw: ${{ toJSON(steps.json_text.result) }}
+
+        notes:
+        - `echo` with `result: text` includes the trailing newline.
+        - `printf` with `result: text` preserves exactly what was printed.
+        - `result: json` is the safe option when downstream steps need field access.

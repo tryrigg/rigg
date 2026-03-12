@@ -1,0 +1,78 @@
+id: debug-inputs-shell
+inputs:
+  name:
+    type: string
+    default: rigg
+    minLength: 1
+  count:
+    type: integer
+    default: 2
+    minimum: 1
+    maximum: 5
+  rating:
+    type: number
+    default: 4.5
+    minimum: 0
+    maximum: 5
+  enabled:
+    type: boolean
+    default: true
+  tags:
+    type: array
+    default: ["debug", "sample"]
+    minItems: 1
+    items:
+      type: string
+  profile:
+    type: object
+    default:
+      owner: rigg-dev
+      priority: high
+    required: [owner]
+    properties:
+      owner:
+        type: string
+      priority:
+        type: string
+env:
+  DEBUG_GREETING: ${{ format('hello-{0}', inputs.name) }}
+  DEBUG_TAGS: ${{ join(inputs.tags, ',') }}
+steps:
+  - id: inspect_inputs
+    type: shell
+    env:
+      OWNER: ${{ inputs.profile.owner }}
+      PRIORITY: ${{ inputs.profile.priority }}
+      COUNT: ${{ inputs.count }}
+      RATING: ${{ inputs.rating }}
+      ENABLED: ${{ inputs.enabled }}
+      TAGS_JSON: ${{ toJSON(inputs.tags) }}
+    with:
+      command: |
+        printf '{"greeting":"%s","owner":"%s","priority":"%s","enabled":%s,"count":%s,"rating":%s,"tags":%s}\n' \
+          "$DEBUG_GREETING" "$OWNER" "$PRIORITY" "$ENABLED" "$COUNT" "$RATING" "$TAGS_JSON"
+      result: json
+
+  - id: render_summary
+    type: shell
+    with:
+      command: |
+        echo "owner=${{ steps.inspect_inputs.result.owner }} enabled=${{ steps.inspect_inputs.result.enabled }} tags=${{ env.DEBUG_TAGS }}"
+      result: text
+
+  - id: maybe_noop
+    if: ${{ inputs.enabled }}
+    type: shell
+    with:
+      command: "true"
+      result: none
+
+  - id: write_snapshot
+    type: write_file
+    with:
+      path: .rigg/debug-inputs-shell.md
+      content: |
+        # Debug Inputs Shell
+
+        summary: ${{ steps.render_summary.result }}
+        payload: ${{ toJSON(steps.inspect_inputs.result) }}

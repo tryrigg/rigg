@@ -9,11 +9,14 @@ export default defineConfig({
   output: 'static',
   integrations: [
     starlight({
-      title: 'Rigg docs',
+      title: 'Rigg',
       description:
         'Documentation for building, validating, and running local-first agent workflows with Rigg.',
       tagline: 'Documentation for local-first agent workflows',
       favicon: '/favicon.svg',
+      logo: {
+        src: './public/icon.png',
+      },
       social: [
         {
           icon: 'github',

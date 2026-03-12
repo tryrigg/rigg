@@ -1,4 +1,4 @@
-# Rigg Website
+# Rigg website
 
 The `www` app is a static Astro site deployed with Cloudflare Workers Static Assets.
 

@@ -1,8 +1,297 @@
 ---
 title: Examples
-description: Example workflows and patterns for common agentic coding tasks.
+description: Workflow patterns for common agentic coding tasks.
 sidebar:
-  order: 4
+  order: 1
 ---
 
-Placeholder page for example-driven documentation.
+## Review & auto-fix loop
+
+Reviews uncommitted changes, filters findings, auto-fixes in a loop.
+
+```yaml
+id: review-uncommitted
+steps:
+  - id: remediation
+    type: loop
+    max: 5
+    until: ${{ steps.judge.result.accepted_count == 0 }}
+    steps:
+      - id: review
+        type: codex
+        with:
+          action: review
+          target: uncommitted
+          prompt: Review for bugs and missing tests.
+
+      - id: judge
+        type: claude
+        with:
+          action: prompt
+          prompt: |
+            Accept only valid, actionable findings:
+            ${{ steps.review.result }}
+          output_schema:
+            type: object
+            required: [accepted_count, fix_brief]
+            additionalProperties: false
+            properties:
+              accepted_count:
+                type: integer
+              fix_brief:
+                type: string
+
+      - id: fix
+        if: ${{ steps.judge.result.accepted_count > 0 }}
+        type: codex
+        with:
+          action: exec
+          mode: full_auto
+          prompt: ${{ steps.judge.result.fix_brief }}
+    exports:
+      accepted_count: ${{ steps.judge.result.accepted_count }}
+```
+
+## Plan, review, and refine
+
+Drafts a plan, reviews for gaps, conditionally refines, then saves.
+
+```yaml
+id: plan
+inputs:
+  requirements:
+    type: string
+  output_path:
+    type: string
+steps:
+  - id: draft
+    type: codex
+    with:
+      action: exec
+      prompt: |
+        Draft an implementation plan:
+        ${{ inputs.requirements }}
+      output_schema:
+        type: object
+        required: [markdown]
+        additionalProperties: false
+        properties:
+          markdown:
+            type: string
+
+  - id: review
+    type: claude
+    with:
+      action: prompt
+      prompt: |
+        Review for gaps:
+        ${{ steps.draft.result.markdown }}
+      output_schema:
+        type: object
+        required: [has_findings, findings]
+        additionalProperties: false
+        properties:
+          has_findings:
+            type: boolean
+          findings:
+            type: array
+            items:
+              type: object
+              required: [description, suggestion]
+              additionalProperties: false
+              properties:
+                description:
+                  type: string
+                suggestion:
+                  type: string
+
+  - id: finalize
+    type: branch
+    cases:
+      - if: ${{ steps.review.result.has_findings }}
+        steps:
+          - id: improve
+            type: codex
+            with:
+              action: exec
+              prompt: |
+                Apply feedback:
+                Original: ${{ steps.draft.result.markdown }}
+                Findings: ${{ toJSON(steps.review.result.findings) }}
+              output_schema:
+                type: object
+                required: [markdown]
+                additionalProperties: false
+                properties:
+                  markdown:
+                    type: string
+        exports:
+          markdown: ${{ steps.improve.result.markdown }}
+      - else:
+        steps: []
+        exports:
+          markdown: ${{ steps.draft.result.markdown }}
+
+  - id: save
+    type: write_file
+    with:
+      path: ${{ inputs.output_path }}
+      content: ${{ steps.finalize.result.markdown }}
+```
+
+## Parallel checks
+
+Runs security audit, architecture review, and tests concurrently.
+
+```yaml
+id: parallel-checks
+steps:
+  - id: all
+    type: parallel
+    branches:
+      - id: unit
+        steps:
+          - id: run_unit
+            type: shell
+            with:
+              command: cargo test --lib
+              result: text
+      - id: integration
+        steps:
+          - id: run_integration
+            type: shell
+            with:
+              command: cargo test --test '*'
+              result: text
+      - id: lint
+        steps:
+          - id: run_lint
+            type: shell
+            with:
+              command: cargo clippy -- -D warnings
+              result: text
+    exports:
+      unit: ${{ steps.run_unit.result }}
+      integration: ${{ steps.run_integration.result }}
+      lint: ${{ steps.run_lint.result }}
+
+  - id: report
+    type: claude
+    with:
+      action: prompt
+      prompt: |
+        Summarize:
+        Unit: ${{ steps.all.result.unit }}
+        Integration: ${{ steps.all.result.integration }}
+        Lint: ${{ steps.all.result.lint }}
+      output_schema:
+        type: object
+        required: [summary, passed]
+        additionalProperties: false
+        properties:
+          summary:
+            type: string
+          passed:
+            type: boolean
+```
+
+## Iterative refinement with conversation
+
+Codex maintains context across iterations via `scope: loop`.
+
+```yaml
+id: iterative-refinement
+inputs:
+  task:
+    type: string
+steps:
+  - id: refine
+    type: loop
+    max: 3
+    until: ${{ steps.eval.result.quality >= 8 }}
+    steps:
+      - id: work
+        type: codex
+        with:
+          action: exec
+          prompt: |
+            Iteration ${{ run.iteration }}/${{ run.max_iterations }}.
+            Task: ${{ inputs.task }}
+          conversation:
+            name: worker
+            scope: loop
+      - id: eval
+        type: claude
+        with:
+          action: prompt
+          prompt: Rate quality (1-10).
+          output_schema:
+            type: object
+            required: [quality]
+            additionalProperties: false
+            properties:
+              quality:
+                type: integer
+    exports:
+      quality: ${{ steps.eval.result.quality }}
+```
+
+## Patterns
+
+### Strict output_schema
+
+Always use `additionalProperties: false` + `required`:
+
+```yaml
+output_schema:
+  type: object
+  required: [status, count]
+  additionalProperties: false
+  properties:
+    status:
+      type: string
+    count:
+      type: integer
+```
+
+### Branch passthrough
+
+```yaml
+- else:
+  steps: []
+  exports:
+    value: ${{ steps.earlier.result }}
+```
+
+### Conditional step
+
+```yaml
+- id: deploy
+  if: ${{ inputs.environment == 'prod' }}
+  type: shell
+  env:
+    DEPLOY_ENV: ${{ inputs.environment }}
+  with:
+    command: ./deploy.sh
+```
+
+### Group for encapsulation
+
+```yaml
+- id: gather
+  type: group
+  steps:
+    - id: log
+      type: shell
+      with:
+        command: git log --oneline -20
+        result: text
+    - id: diff
+      type: shell
+      with:
+        command: git diff --stat
+        result: text
+  exports:
+    log: ${{ steps.log.result }}
+    diff: ${{ steps.diff.result }}
+```

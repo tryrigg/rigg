@@ -9,7 +9,7 @@ export default defineConfig({
   output: 'static',
   integrations: [
     starlight({
-      title: 'Rigg Docs',
+      title: 'Rigg docs',
       description:
         'Documentation for building, validating, and running local-first agent workflows with Rigg.',
       tagline: 'Documentation for local-first agent workflows',
@@ -27,10 +27,6 @@ export default defineConfig({
       customCss: ['./src/styles/starlight.css'],
       sidebar: [
         { slug: 'docs' },
-        {
-          label: 'Getting Started',
-          autogenerate: { directory: 'docs/getting-started' },
-        },
         {
           label: 'Workflows',
           autogenerate: { directory: 'docs/workflows' },

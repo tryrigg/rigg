@@ -1,0 +1,140 @@
+---
+title: Steps
+description: Action step types — shell, codex, claude, and write_file.
+sidebar:
+  order: 2
+---
+
+## shell
+
+Runs a shell command.
+
+```yaml
+- id: test
+  type: shell
+  with:
+    command: cargo test
+    result: text          # none | text | json (default: text)
+```
+
+`result` controls stdout capture: `none` discards it, `text` captures as string, `json` parses as structured data.
+
+## codex
+
+Two actions: `review` and `exec`.
+
+### review
+
+Scans diffs and returns review findings.
+
+```yaml
+- id: review
+  type: codex
+  with:
+    action: review
+    target: uncommitted       # uncommitted | base | commit
+    prompt: Review for bugs.
+    # target: base → requires base: <branch>
+    # target: commit → requires commit: <sha>
+    title: Optional title     # review-only
+    model: model_name         # optional
+    mode: full_auto           # default | full_auto
+```
+
+If `target` is omitted, presence of `base` infers `target: base`. `commit` alone does **not** infer target — you must set `target: commit` explicitly.
+
+Review does **not** support `conversation` or `output_schema`.
+
+### exec
+
+Generates or modifies code.
+
+```yaml
+- id: implement
+  type: codex
+  with:
+    action: exec
+    prompt: Add input validation.    # required
+    mode: full_auto                  # default | full_auto
+    model: model_name                # optional
+    add_dirs:                        # optional: additional directories
+      - ../shared
+    persist: true                    # session persistence (default: true)
+    conversation:                    # optional: see Conversations
+      name: planner
+      scope: workflow
+    output_schema:                   # optional: see below
+      type: object
+      required: [result]
+      additionalProperties: false
+      properties:
+        result:
+          type: string
+```
+
+Exec does **not** support `target`, `base`, `commit`, or `title`.
+
+## claude
+
+Prompts Claude Code. Only action is `prompt`.
+
+```yaml
+- id: judge
+  type: claude
+  with:
+    action: prompt
+    prompt: Evaluate this code.
+    permission_mode: default  # default | plan | acceptEdits | dontAsk | bypassPermissions
+    model: model_name         # optional
+    add_dirs: []              # optional
+    persist: true             # default: true
+    conversation:             # optional
+      name: reviewer
+      scope: workflow
+    output_schema:            # optional
+      type: object
+      required: [accepted]
+      additionalProperties: false
+      properties:
+        accepted:
+          type: boolean
+```
+
+## write_file
+
+Writes content to a file.
+
+```yaml
+- id: save
+  type: write_file
+  with:
+    path: ${{ inputs.output_path }}
+    content: ${{ steps.draft.result.markdown }}
+```
+
+## Structured output (output_schema)
+
+Available on `codex` (exec) and `claude` steps. Must be `type: object` at the root.
+
+```yaml
+output_schema:
+  type: object
+  required: [status, findings]
+  additionalProperties: false
+  properties:
+    status:
+      type: string
+      enum: ["pass", "fail"]
+    findings:
+      type: array
+      items:
+        type: object
+        required: [description]
+        properties:
+          description:
+            type: string
+```
+
+Result fields are accessed via `steps.<id>.result.<field>`.
+
+Supported types: `string`, `number`, `integer`, `boolean`, `object`, `array`.

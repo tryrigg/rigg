@@ -1,0 +1,72 @@
+---
+title: CLI reference
+description: Complete reference for all rigg CLI commands and flags.
+sidebar:
+  order: 2
+---
+
+## rigg init
+
+Create a `.rigg/` directory with example workflow files.
+
+```bash
+rigg init
+```
+
+## rigg validate
+
+Validate all `.rigg/*.yaml` workflow files. Reports syntax errors, unknown fields, invalid references, and schema violations.
+
+```bash
+rigg validate
+```
+
+## rigg run
+
+Execute a workflow by ID.
+
+```bash
+rigg run <workflow_id> [options]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--input key=value` | Set input parameter (repeatable). Values are JSON-parsed when possible. |
+| `--json` | Output a JSON snapshot to stdout |
+| `--quiet` | Minimal output |
+
+Interactive progress is shown by default on TTY. `--json`, `--quiet`, and non-TTY suppress it.
+
+## rigg status
+
+List recent runs or inspect a specific run.
+
+```bash
+rigg status                    # list all runs
+rigg status <run_id>           # show run details
+rigg status <run_id> --json    # details as JSON
+```
+
+## rigg logs
+
+View execution logs for a run.
+
+```bash
+rigg logs <run_id> [options]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--node <step_id>` | Show logs for a specific step only |
+| `--stderr` | Show stderr instead of stdout |
+
+## File layout
+
+```
+.rigg/
+├── *.yaml              # Workflow files (auto-discovered)
+└── runs/
+    └── <run_id>/       # Run data (logs, results)
+```
+
+Workflows are discovered from the nearest `.rigg/` directory.

@@ -49,3 +49,6 @@ jobs:
 
       - name: Astro type/content checks
         run: bun run check
+
+      - name: Build website
+        run: bun run build

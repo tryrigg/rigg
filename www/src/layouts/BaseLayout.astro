@@ -4,9 +4,36 @@ interface Props {
 	description?: string;
 }
 
-const { title = 'Rigg', description = 'Local-first workflow runner for agentic coding' } = Astro.props;
-const ogImage = new URL('/og.png', Astro.site ?? 'https://tryrigg.com').href;
-const canonicalURL = new URL(Astro.url.pathname, Astro.site ?? 'https://tryrigg.com').href;
+const {
+	title = 'Rigg',
+	description = 'Open-source, local-first workflow runner for agentic coding. Wire Codex, Claude Code, and shell commands into repeatable YAML pipelines. Run locally, version in Git, share with your team.',
+} = Astro.props;
+const siteBase = Astro.site ?? 'https://tryrigg.com';
+const ogImage = new URL('/og.png', siteBase).href;
+const canonicalURL = new URL(Astro.url.pathname, siteBase).href;
+
+const jsonLd = {
+	'@context': 'https://schema.org',
+	'@graph': [
+		{
+			'@type': 'SoftwareApplication',
+			name: 'Rigg',
+			url: 'https://tryrigg.com',
+			applicationCategory: 'DeveloperApplication',
+			operatingSystem: 'macOS',
+			description: 'Local-first workflow runner for agentic coding. Wire Codex, Claude Code, and shell commands into repeatable YAML pipelines.',
+			offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+			license: 'https://github.com/tryrigg/rigg/blob/main/LICENSE',
+			codeRepository: 'https://github.com/tryrigg/rigg',
+			programmingLanguage: 'Rust',
+		},
+		{
+			'@type': 'WebSite',
+			name: 'Rigg',
+			url: 'https://tryrigg.com',
+		},
+	],
+};
 ---
 
 <!doctype html>
@@ -16,6 +43,7 @@ const canonicalURL = new URL(Astro.url.pathname, Astro.site ?? 'https://tryrigg.
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<meta name="generator" content={Astro.generator} />
 		<meta name="description" content={description} />
+		<meta name="theme-color" content="#111111" />
 		<link rel="canonical" href={canonicalURL} />
 		<!-- OGP -->
 		<meta property="og:title" content={title} />
@@ -25,14 +53,22 @@ const canonicalURL = new URL(Astro.url.pathname, Astro.site ?? 'https://tryrigg.
 		<meta property="og:image" content={ogImage} />
 		<meta property="og:image:width" content="1200" />
 		<meta property="og:image:height" content="630" />
+		<meta property="og:image:type" content="image/png" />
+		<meta property="og:image:alt" content="Rigg — Local-first workflow runner for agentic coding" />
 		<meta property="og:site_name" content="Rigg" />
+		<meta property="og:locale" content="en_US" />
 		<!-- Twitter Card -->
 		<meta name="twitter:card" content="summary_large_image" />
 		<meta name="twitter:title" content={title} />
 		<meta name="twitter:description" content={description} />
 		<meta name="twitter:image" content={ogImage} />
+		<meta name="twitter:image:alt" content="Rigg — Local-first workflow runner for agentic coding" />
+		<!-- Favicon -->
 		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 		<link rel="icon" href="/favicon.ico" />
+		<link rel="apple-touch-icon" href="/icon.png" />
+		<!-- JSON-LD -->
+		<script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
 		<title>{title}</title>
 	</head>
 	<body>

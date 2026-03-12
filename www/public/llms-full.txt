@@ -1,0 +1,782 @@
+# Rigg
+
+> Rigg is an open-source, local-first workflow runner for agentic coding. Written in Rust, it lets you wire Codex, Claude Code, and shell commands into repeatable YAML pipelines that run locally and version in Git.
+
+As more engineering work moves into local AI agents, teams need a way to turn the good repetitive parts of their day-to-day workflow into something explicit and reusable: implementation planning, review loops, fix verification, codebase checks, and other multi-step flows that are usually done ad hoc in prompts and terminals.
+
+Rigg lets you capture those workflows as `.rigg/*.yaml`, run them locally with tools like Codex and Claude, and keep them in Git alongside the code they operate on. That makes agent workflows easier to review, share, standardize, and evolve as a team, instead of living as private prompt habits.
+
+The goal is to help teams use local coding agents in a safer and more repeatable way: common workflows are versioned, execution is visible, and every run is recorded under `.rigg/runs/`.
+
+## Requirements
+
+- macOS
+- Rust 1.94.0 (for building from source)
+- `codex` on PATH for `type: codex` steps
+- `claude` on PATH for `type: claude` steps
+
+## Install
+
+```bash
+curl -fsSL https://tryrigg.com/install | bash
+```
+
+Install a specific version:
+
+```bash
+curl -fsSL https://tryrigg.com/install | bash -s -- --version v0.1.0
+```
+
+Or build from source:
+
+```bash
+cargo install --path crates/cli
+```
+
+## CLI Commands
+
+```bash
+rigg init                                    # Generate .rigg/ with example workflows
+rigg validate                                # Validate all .rigg/*.yaml files
+rigg run <workflow_id> --input key=value     # Execute a workflow
+rigg run <workflow_id> --json                # JSON output mode
+rigg run <workflow_id> --quiet               # Minimal output
+rigg status [run_id]                         # Check execution status
+rigg status <run_id> --json                  # JSON status output
+rigg logs <run_id> [--node id] [--stderr]    # View execution logs
+```
+
+`--input key=value` parses JSON when possible, so values like `true`, `42`, `["a"]`, and `{"x":1}` work as expected.
+
+## Workflow Structure
+
+Workflow files live in `.rigg/` and are run with `rigg run <workflow_id>`.
+
+```yaml
+id: workflow_name           # Required: unique identifier
+inputs:                     # Optional: JSON Schema input definitions
+  param_name:
+    type: string
+    description: ...
+    default: default_value  # Only top-level inputs support defaults
+env:                        # Optional: environment variables
+  VAR_NAME: ${{ expr }}
+steps:                      # Required: non-empty array of steps
+  - id: step_name
+    type: shell|codex|claude|write_file|group|loop|branch|parallel
+    ...
+```
+
+### Top-Level Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | string | Yes | Unique workflow identifier |
+| `inputs` | map<string, JSONSchema> | No | Input parameter definitions (JSON Schema objects) |
+| `env` | map<string, template> | No | Workflow-level environment variables |
+| `steps` | array<Step> | Yes | Non-empty array of workflow steps |
+
+### Input Schema
+
+Inputs are JSON Schema objects. Top-level inputs may have `default`. Nested properties cannot have defaults.
+
+```yaml
+inputs:
+  name:
+    type: string
+    description: User's name
+    default: "world"
+    minLength: 1
+    maxLength: 100
+    pattern: "^[a-zA-Z]+$"
+    enum: ["Alice", "Bob"]
+  count:
+    type: integer
+    minimum: 0
+    maximum: 100
+  rating:
+    type: number
+    minimum: 0.0
+    maximum: 5.0
+  enabled:
+    type: boolean
+  config:
+    type: object
+    required: [name]
+    properties:
+      name:
+        type: string
+      timeout:
+        type: integer
+  tags:
+    type: array
+    items:
+      type: string
+    minItems: 1
+    maxItems: 10
+```
+
+Supported types: `string`, `number`, `integer`, `boolean`, `object`, `array`
+
+- `object` requires `properties`
+- `array` requires `items`
+- Nested objects cannot have `default`
+
+## Step Common Fields
+
+All step types support these fields:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | string | No | Unique identifier (must start with ASCII letter or `_`; remaining characters may be alphanumeric, `_`, or `-`) |
+| `type` | string | Yes | Step type |
+| `if` | expression | No | Conditional execution (`${{ bool_expr }}`) |
+| `env` | map<string, template> | No | Step-level environment variables |
+
+## Action Steps
+
+### type: shell
+
+Run shell commands.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `with.command` | template | Yes | — | Shell command to execute |
+| `with.result` | enum | No | `text` | `none`, `text`, or `json` |
+
+```yaml
+- id: check
+  type: shell
+  with:
+    command: echo "hello ${{ inputs.name }}"
+    result: text
+```
+
+### type: codex (action: review)
+
+AI code review.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `with.action` | `review` | Yes | — | Review action |
+| `with.prompt` | template | No | — | Review instructions |
+| `with.target` | enum | Yes* | — | `uncommitted`, `base`, or `commit` |
+| `with.base` | template | Cond. | — | Required when `target: base` |
+| `with.commit` | template | Cond. | — | Required when `target: commit` |
+| `with.title` | template | No | — | Review title |
+| `with.model` | string | No | — | Model override |
+| `with.mode` | enum | No | `default` | `default` or `full_auto` |
+| `with.add_dirs` | array<template> | No | `[]` | Additional directories |
+| `with.persist` | bool | No | `true` | Session persistence |
+
+Target resolution: `target: uncommitted` requires no other fields. `target: base` requires `base`. `target: commit` requires `commit`. If `target` is omitted, presence of `base` infers `target: base`. However, `commit` alone does NOT infer `target: commit` — you must explicitly set `target: commit` with `commit`.
+
+NOT supported in review: `conversation`, `output_schema`
+
+```yaml
+- id: review
+  type: codex
+  with:
+    action: review
+    target: uncommitted
+    prompt: Review for bugs.
+```
+
+### type: codex (action: exec)
+
+AI code execution.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `with.action` | `exec` | Yes | — | Exec action |
+| `with.prompt` | template | Yes | — | Execution instructions |
+| `with.mode` | enum | No | `default` | `default` or `full_auto` |
+| `with.model` | string | No | — | Model override |
+| `with.add_dirs` | array<template> | No | `[]` | Additional directories |
+| `with.persist` | bool | No | `true` | Session persistence |
+| `with.conversation` | object | No | — | Conversation context (requires persist: true) |
+| `with.output_schema` | JSONSchema | No | — | Structured output validation |
+
+NOT supported in exec: `target`, `base`, `commit`, `title`
+
+Note: `conversation` and `output_schema` cannot be used together when the conversation will be resumed (e.g., in a loop or when another step shares the same conversation name). Resumed Codex exec turns reject `output_schema` and `add_dirs`.
+
+```yaml
+- id: implement
+  type: codex
+  with:
+    action: exec
+    prompt: Implement the feature.
+    mode: full_auto
+    output_schema:
+      type: object
+      required: [plan]
+      additionalProperties: false
+      properties:
+        plan:
+          type: string
+```
+
+### type: claude
+
+Interactive AI with permission control.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `with.action` | `prompt` | Yes | — | Only supported action |
+| `with.prompt` | template | Yes | — | Prompt text |
+| `with.permission_mode` | enum | No | `default` | `default`, `plan`, `acceptEdits`, `dontAsk`, `bypassPermissions` |
+| `with.model` | string | No | — | Model override |
+| `with.add_dirs` | array<template> | No | `[]` | Additional directories |
+| `with.persist` | bool | No | `true` | Session persistence |
+| `with.conversation` | object | No | — | Conversation context (requires persist: true) |
+| `with.output_schema` | JSONSchema | No | — | Structured output validation |
+
+```yaml
+- id: judge
+  type: claude
+  with:
+    action: prompt
+    prompt: Evaluate this: ${{ steps.review.result }}
+    output_schema:
+      type: object
+      required: [accepted]
+      additionalProperties: false
+      properties:
+        accepted:
+          type: boolean
+```
+
+### type: write_file
+
+Write content to a file.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `with.path` | template | Yes | File path to write |
+| `with.content` | template | Yes | File content |
+
+```yaml
+- id: save
+  type: write_file
+  with:
+    path: ${{ inputs.output_path }}
+    content: ${{ steps.draft.result.markdown }}
+```
+
+## Conversation Binding
+
+```yaml
+conversation:
+  name: 123 reviewer / main # Required: any non-blank string
+  scope: iteration           # Optional: iteration | loop | workflow
+```
+
+- Default scope: `iteration` inside loops, `workflow` outside
+- `scope: iteration` and `scope: loop` are only valid inside a loop body
+- Requires `persist: true` (the default)
+
+## Output Schema
+
+Must be a JSON Schema with `type: object` at the root.
+
+```yaml
+output_schema:
+  type: object
+  required: [status, findings]
+  additionalProperties: false
+  properties:
+    status:
+      type: string
+      enum: ["pass", "fail"]
+    findings:
+      type: array
+      items:
+        type: object
+        required: [severity, description]
+        properties:
+          severity:
+            type: string
+          description:
+            type: string
+    count:
+      type: integer
+    score:
+      type: number
+    approved:
+      type: boolean
+```
+
+## Control Flow Steps
+
+### type: group
+
+Encapsulate steps with exports.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `steps` | array<Step> | Yes | Nested steps |
+| `exports` | map<string, template> | No | Expose internal results |
+
+Exports make inner step results visible outside the group. Without exports, inner steps are hidden from downstream.
+
+```yaml
+- id: analysis
+  type: group
+  steps:
+    - id: internal_step
+      type: shell
+      with:
+        command: echo "hidden"
+  exports:
+    summary: ${{ steps.internal_step.result }}
+```
+
+### type: loop
+
+Iterate until condition or max.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `max` | integer | Yes | Maximum iterations |
+| `until` | expression | Yes | Exit condition (`${{ bool_expr }}`) |
+| `steps` | array<Step> | Yes | Loop body |
+| `exports` | map<string, template> | No | Expose final iteration values |
+
+Inside loops, these `run.*` variables are available:
+- `run.iteration` — Current iteration (1-based integer)
+- `run.max_iterations` — Maximum iterations (integer)
+- `run.node_path` — Node path (string)
+
+```yaml
+- id: remediation
+  type: loop
+  max: 5
+  until: ${{ steps.judge.result.accepted_count == 0 }}
+  steps:
+    - id: review
+      type: codex
+      with:
+        action: review
+        target: uncommitted
+        prompt: Review changes.
+    - id: judge
+      type: claude
+      with:
+        action: prompt
+        prompt: Accept valid findings from ${{ steps.review.result }}
+        output_schema:
+          type: object
+          required: [accepted_count]
+          additionalProperties: false
+          properties:
+            accepted_count:
+              type: integer
+  exports:
+    count: ${{ steps.judge.result.accepted_count }}
+```
+
+### type: branch
+
+Conditional execution.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `cases` | array<Case> | Yes | At least one case |
+
+```yaml
+- id: decide
+  type: branch
+  cases:
+    - if: ${{ steps.check.result.has_issues }}
+      steps:
+        - id: fix
+          type: codex
+          with:
+            action: exec
+            prompt: Fix the issues.
+      exports:
+        outcome: ${{ steps.fix.result }}
+    - else:
+      steps: []
+      exports:
+        outcome: "no issues"
+```
+
+Rules:
+- First matching `if` executes; `else` is the fallback
+- All cases must export the same shape, or none at all
+- If any case declares `exports`, an `else` case is required
+- `else:` marker must be empty (just `else:` with no value)
+
+### type: parallel
+
+Concurrent execution.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `branches` | array<Branch> | Yes | At least one branch |
+| `exports` | map<string, template> | No | Expose results from any branch |
+
+```yaml
+- id: tests
+  type: parallel
+  branches:
+    - id: unit
+      steps:
+        - id: run_unit
+          type: shell
+          with:
+            command: cargo test --lib
+    - id: integration
+      steps:
+        - id: run_integration
+          type: shell
+          with:
+            command: cargo test --tests
+  exports:
+    unit_result: ${{ steps.run_unit.result }}
+    integration_result: ${{ steps.run_integration.result }}
+```
+
+Exports can reference `steps.*` from any branch within the parallel block.
+
+## Expression Syntax
+
+Templates embed expressions in `${{ }}`:
+
+```yaml
+prompt: "Hello ${{ inputs.name }}, iteration ${{ run.iteration }}"
+```
+
+Plain strings without `${{ }}` are literal values.
+
+### Expression Roots
+
+| Root | Available | Description |
+|------|-----------|-------------|
+| `inputs` | Always | Workflow input parameters |
+| `steps` | Always | Results from previous steps in scope |
+| `env` | Always | Environment variables |
+| `run` | Inside loops only | Loop iteration context |
+
+### Path Access
+
+```
+inputs.name                    → input value
+inputs.config.timeout          → nested object field
+steps.review.result            → step result (text or full object)
+steps.judge.result.count       → nested field in structured output
+steps.list.result.0.name       → array index access
+env.CI                         → environment variable
+run.iteration                  → loop iteration number
+```
+
+### Operators
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `==` | Equal | `steps.x.result == 'ok'` |
+| `!=` | Not equal | `steps.x.result != null` |
+| `>` | Greater than | `steps.x.result.count > 0` |
+| `>=` | Greater or equal | `run.iteration >= 3` |
+| `<` | Less than | `steps.x.result.score < 0.5` |
+| `<=` | Less or equal | `steps.x.result.count <= 10` |
+| `&&` | Logical AND | `steps.a.result && steps.b.result` |
+| `\|\|` | Logical OR | `steps.a.result \|\| steps.b.result` |
+| `!` | Logical NOT | `!steps.x.result.has_issues` |
+
+### Built-in Functions
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `format(fmt, ...)` | String formatting | `format('{0}:{1}', a, b)` |
+| `toJSON(value)` | JSON stringification | `toJSON(steps.data.result)` |
+| `join(array, delim)` | Join array elements | `join(steps.x.result.tags, ', ')` |
+
+### Literals
+
+- `null`, `true`, `false`
+- Numbers: `42`, `3.14`
+- Strings: `'single quoted'`
+
+## Validation Rules
+
+1. Step IDs must be unique across the entire workflow
+2. Step IDs must start with an ASCII letter or `_`; remaining characters may be alphanumeric, `_`, or `-`
+3. `steps` arrays cannot be empty (except in branch cases, where `steps: []` is allowed)
+4. `steps.<id>.result` only references previous (not forward) steps
+5. Exported fields from branch cases must have matching shapes
+6. `with` is required for all action types
+7. `deny_unknown_fields` is enforced — unknown YAML keys cause errors
+8. All expression roots must be valid for the current scope
+
+## Workflow Examples
+
+### Simple Shell Pipeline
+
+```yaml
+id: build-and-test
+steps:
+  - id: install
+    type: shell
+    with:
+      command: npm install
+      result: none
+  - id: build
+    type: shell
+    with:
+      command: npm run build
+      result: text
+  - id: test
+    type: shell
+    with:
+      command: npm test
+      result: json
+```
+
+### Code Review with Remediation Loop
+
+```yaml
+id: review-uncommitted
+steps:
+  - id: remediation
+    type: loop
+    max: 5
+    until: ${{ steps.judge.result.accepted_count == 0 }}
+    steps:
+      - id: review
+        type: codex
+        with:
+          action: review
+          target: uncommitted
+          prompt: Review current uncommitted changes for bugs and missing tests.
+      - id: judge
+        type: claude
+        with:
+          action: prompt
+          prompt: |
+            Read the review below.
+            Review:
+            ${{ steps.review.result }}
+            Accept only findings that are valid and actionable.
+          output_schema:
+            type: object
+            required: [accepted_count, fix_brief]
+            additionalProperties: false
+            properties:
+              accepted_count:
+                type: integer
+              fix_brief:
+                type: string
+      - id: fix
+        if: ${{ steps.judge.result.accepted_count > 0 }}
+        type: codex
+        with:
+          action: exec
+          mode: full_auto
+          prompt: ${{ steps.judge.result.fix_brief }}
+    exports:
+      accepted_count: ${{ steps.judge.result.accepted_count }}
+      fix_brief: ${{ steps.judge.result.fix_brief }}
+```
+
+### Plan with Review and Conditional Refinement
+
+```yaml
+id: plan
+inputs:
+  requirements:
+    type: string
+  output_path:
+    type: string
+steps:
+  - id: draft
+    type: codex
+    with:
+      action: exec
+      prompt: |
+        Draft a detailed implementation plan from the requirements below.
+        Requirements:
+        ${{ inputs.requirements }}
+      output_schema:
+        type: object
+        required: [markdown]
+        additionalProperties: false
+        properties:
+          markdown:
+            type: string
+  - id: review
+    type: claude
+    with:
+      action: prompt
+      prompt: |
+        Review this plan critically. Identify ambiguities, gaps, or technical issues.
+        Draft:
+        ${{ steps.draft.result.markdown }}
+      output_schema:
+        type: object
+        required: [has_findings, findings]
+        additionalProperties: false
+        properties:
+          has_findings:
+            type: boolean
+          findings:
+            type: array
+            items:
+              type: object
+              required: [description, suggestion]
+              additionalProperties: false
+              properties:
+                description:
+                  type: string
+                suggestion:
+                  type: string
+  - id: finalize
+    type: branch
+    cases:
+      - if: ${{ steps.review.result.has_findings }}
+        steps:
+          - id: improve
+            type: codex
+            with:
+              action: exec
+              prompt: |
+                Apply review feedback to improve the plan.
+                Original: ${{ steps.draft.result.markdown }}
+                Findings: ${{ toJSON(steps.review.result.findings) }}
+              output_schema:
+                type: object
+                required: [markdown]
+                additionalProperties: false
+                properties:
+                  markdown:
+                    type: string
+        exports:
+          markdown: ${{ steps.improve.result.markdown }}
+      - else:
+        steps:
+          - id: noop
+            type: shell
+            with:
+              command: "true"
+              result: none
+        exports:
+          markdown: ${{ steps.draft.result.markdown }}
+  - id: write
+    type: write_file
+    with:
+      path: ${{ inputs.output_path }}
+      content: ${{ steps.finalize.result.markdown }}
+```
+
+### Parallel Test Execution
+
+```yaml
+id: parallel-tests
+steps:
+  - id: all_tests
+    type: parallel
+    branches:
+      - id: unit
+        steps:
+          - id: run_unit
+            type: shell
+            with:
+              command: cargo test --lib
+              result: text
+      - id: integration
+        steps:
+          - id: run_integration
+            type: shell
+            with:
+              command: cargo test --test '*'
+              result: text
+      - id: lint
+        steps:
+          - id: run_lint
+            type: shell
+            with:
+              command: cargo clippy -- -D warnings
+              result: text
+    exports:
+      unit_output: ${{ steps.run_unit.result }}
+      integration_output: ${{ steps.run_integration.result }}
+      lint_output: ${{ steps.run_lint.result }}
+  - id: report
+    type: claude
+    with:
+      action: prompt
+      prompt: |
+        Summarize the test results:
+        Unit: ${{ steps.all_tests.result.unit_output }}
+        Integration: ${{ steps.all_tests.result.integration_output }}
+        Lint: ${{ steps.all_tests.result.lint_output }}
+      output_schema:
+        type: object
+        required: [summary, passed]
+        additionalProperties: false
+        properties:
+          summary:
+            type: string
+          passed:
+            type: boolean
+```
+
+### Conversation Persistence Across Loop Iterations
+
+```yaml
+id: iterative-refinement
+inputs:
+  task:
+    type: string
+steps:
+  - id: refine
+    type: loop
+    max: 3
+    until: ${{ steps.evaluate.result.quality >= 8 }}
+    steps:
+      - id: work
+        type: codex
+        with:
+          action: exec
+          prompt: |
+            Iteration ${{ run.iteration }} of ${{ run.max_iterations }}.
+            Task: ${{ inputs.task }}
+            Refine and improve the implementation.
+          conversation:
+            name: worker
+            scope: loop
+      - id: evaluate
+        type: claude
+        with:
+          action: prompt
+          prompt: |
+            Rate the quality of this work (1-10):
+            ${{ steps.work.result }}
+          output_schema:
+            type: object
+            required: [quality, feedback]
+            additionalProperties: false
+            properties:
+              quality:
+                type: integer
+              feedback:
+                type: string
+    exports:
+      work_result: ${{ steps.work.result }}
+      quality: ${{ steps.evaluate.result.quality }}
+```
+
+## Notes
+
+- Workflows are discovered from the nearest `.rigg/` directory.
+- `rigg run --json` writes a JSON snapshot to stdout.
+- Interactive runs show live progress; `--json`, `--quiet`, and non-TTY runs do not.
+- Run data is stored under `.rigg/runs/<run_id>/`.
+
+## Links
+
+- Website: https://tryrigg.com
+- GitHub: https://github.com/tryrigg/rigg
+- Docs: https://github.com/tryrigg/rigg/tree/main/.rigg/docs

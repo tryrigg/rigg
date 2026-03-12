@@ -66,7 +66,7 @@ All step types support these fields:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `id` | string | No | Unique identifier (alphanumeric + underscore + hyphen) |
+| `id` | string | No | Unique identifier (must start with ASCII letter or `_`; remaining characters may be alphanumeric, `_`, or `-`) |
 | `type` | string | Yes | Step type |
 | `if` | expression | No | Conditional execution (`${{ bool_expr }}`) |
 | `env` | map<string, template> | No | Step-level environment variables |
@@ -138,7 +138,7 @@ All step types support these fields:
 
 ```yaml
 conversation:
-  name: conversation_id     # Required: alphanumeric + underscore/hyphen
+  name: 123 reviewer / main # Required: any non-blank string
   scope: iteration           # Optional: iteration | loop | workflow
 ```
 
@@ -304,7 +304,7 @@ run.iteration                  → loop iteration number
 ## Validation Rules
 
 1. Step IDs must be unique across the entire workflow
-2. Step IDs must be alphanumeric + underscore + hyphen
+2. Step IDs must start with an ASCII letter or `_`; remaining characters may be alphanumeric, `_`, or `-`
 3. `steps` arrays cannot be empty (except in branch cases, where `steps: []` is allowed)
 4. `steps.<id>.result` only references previous (not forward) steps
 5. Exported fields from branch cases must have matching shapes

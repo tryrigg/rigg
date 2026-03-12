@@ -94,9 +94,11 @@ Supported step types:
 
 ## Docs
 
-- [`.rigg/docs/workflow-syntax.md`](./.rigg/docs/workflow-syntax.md)
-- [`.rigg/docs/schema-reference.md`](./.rigg/docs/schema-reference.md)
-- [`.rigg/docs/examples.md`](./.rigg/docs/examples.md)
+- [Getting started](https://tryrigg.com/docs/)
+- [Workflows](https://tryrigg.com/docs/workflows/) — steps, control flow, expressions, conversations
+- [Schema reference](https://tryrigg.com/docs/reference/schema/)
+- [CLI reference](https://tryrigg.com/docs/reference/cli/)
+- [Examples](https://tryrigg.com/docs/examples/)
 
 ## Development
 

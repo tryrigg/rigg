@@ -1,8 +1,10 @@
-use super::fixture::{claude_node, shell_node};
+use super::fixture::{action_node, claude_node, shell_node};
 use crate::result::finalize_result;
 use crate::{
-    CapturedValue, EngineError, OutputType, ResultContract, ResultError, ShellOutput, ValidatedNode,
+    ActionKind, CapturedValue, EngineError, OutputType, ResultContract, ResultError, ShellOutput,
+    ShellStep, Template, ValidatedNode,
 };
+use rigg_core::codex_review_result_schema;
 
 fn check_finalize_error(
     node: &ValidatedNode,
@@ -157,5 +159,42 @@ fn rejects_missing_structured_result() -> Result<(), Box<dyn std::error::Error>>
             EngineError::Result(ResultError::MissingStructuredResult { node }) if node == "judge"
         ));
     });
+    Ok(())
+}
+
+#[test]
+fn review_contract_allows_missing_priority() -> Result<(), Box<dyn std::error::Error>> {
+    let node = action_node(
+        0,
+        Some("review"),
+        ActionKind::Shell(ShellStep {
+            command: Template::parse("echo review")?,
+            result_mode: ShellOutput::Json,
+        }),
+        ResultContract::Review { schema: codex_review_result_schema() },
+        None,
+    )?;
+
+    let result = finalize_result(
+        &node,
+        Some(&CapturedValue::Json(serde_json::json!({
+            "findings": [
+                {
+                    "title": "[P1] Example finding",
+                    "body": "Body",
+                    "confidence_score": 0.9,
+                    "code_location": {
+                        "absolute_file_path": "/tmp/file.rs",
+                        "line_range": { "start": 10, "end": 12 }
+                    }
+                }
+            ],
+            "overall_correctness": "patch is incorrect",
+            "overall_explanation": "Explanation",
+            "overall_confidence_score": 0.8
+        }))),
+    )?;
+
+    assert!(matches!(result, Some(CapturedValue::Json(_))));
     Ok(())
 }

@@ -10,7 +10,7 @@ use super::io::read_optional_text;
 use crate::process::CommandOutput;
 use rigg_core::progress::{ProviderEvent, StepProgressSink};
 use rigg_core::{CapturedValue, ConversationHandle};
-use rigg_engine::{EngineError, RenderedCodexRequest, StepRunResult};
+use rigg_engine::{EngineError, ExecutorError, RenderedCodexRequest, StepRunResult};
 
 impl DefaultStepRunner {
     pub(super) fn execute_codex(
@@ -40,27 +40,46 @@ impl DefaultStepRunner {
         let mut emitter = ProgressEmitter::new(progress);
         emitter.emit_provider_events(stream_state.finish_stdout());
         let provider_events = stream_state.take_provider_events();
-        let result_text = read_optional_text(&output_path).map_err(|error| {
-            error.with_partial_execution(build_codex_execution(
-                request,
-                &output,
-                &stream_state,
-                provider_events.clone(),
-                None,
-                None,
-            ))
-        })?;
+        let result_text = output_path
+            .as_ref()
+            .map(|path| {
+                read_optional_text(path).map_err(|error| {
+                    error.with_partial_execution(build_codex_execution(
+                        request,
+                        &output,
+                        &stream_state,
+                        provider_events.clone(),
+                        None,
+                        None,
+                    ))
+                })
+            })
+            .transpose()?
+            .flatten();
         let result = if output.exit_code == 0 {
-            result_kind.capture(result_text.as_deref()).map_err(|error| {
-                error.with_partial_execution(build_codex_execution(
-                    request,
-                    &output,
-                    &stream_state,
-                    provider_events.clone(),
-                    result_text.as_deref(),
-                    None,
-                ))
-            })?
+            let result =
+                result_kind.capture(result_text.as_deref(), &stream_state).map_err(|error| {
+                    error.with_partial_execution(build_codex_execution(
+                        request,
+                        &output,
+                        &stream_state,
+                        provider_events.clone(),
+                        result_text.as_deref(),
+                        None,
+                    ))
+                })?;
+            if result.is_none() && matches!(result_kind, args::CodexResultKind::ReviewStructured) {
+                return Err(EngineError::Executor(ExecutorError::MissingCodexReviewOutput)
+                    .with_partial_execution(build_codex_execution(
+                        request,
+                        &output,
+                        &stream_state,
+                        provider_events,
+                        result_text.as_deref(),
+                        None,
+                    )));
+            }
+            result
         } else {
             None
         };
@@ -299,6 +318,145 @@ printf '%s' '{"markdown":"ok"}' > "$output"
                 .collect::<Result<Vec<_>, _>>()?;
             assert!(artifact_files.iter().any(|name| name.starts_with("exec-output-")));
             assert!(artifact_files.iter().any(|name| name.starts_with("exec-schema-")));
+
+            fs::remove_dir_all(&temp_dir)?;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn review_uses_structured_review_output() -> Result<(), Box<dyn std::error::Error>> {
+        #[cfg(not(unix))]
+        {
+            return Ok(());
+        }
+
+        #[cfg(unix)]
+        {
+            let temp_dir = std::env::temp_dir().join(format!(
+                "rigg-codex-test-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_nanos()
+            ));
+            fs::create_dir_all(&temp_dir)?;
+            let tool_path = temp_dir.join("codex");
+            fs::write(
+                &tool_path,
+                r#"#!/bin/sh
+printf '%s\n' '{"type":"agent_message_delta","delta":{"text":"Reviewing diff..."}}'
+printf '%s\n' '{"type":"exited_review_mode","review_output":{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"looks good","overall_confidence_score":0.91}}'
+"#,
+            )?;
+            fs::set_permissions(&tool_path, fs::Permissions::from_mode(0o755))?;
+
+            let request = RenderedCodexRequest {
+                cwd: temp_dir.clone(),
+                artifacts_dir: temp_dir
+                    .join(".rigg")
+                    .join("runs")
+                    .join("test-run")
+                    .join("artifacts")
+                    .join("codex"),
+                env: BTreeMap::from([(
+                    "PATH".to_owned(),
+                    temp_dir.as_os_str().to_string_lossy().into_owned(),
+                )]),
+                result_schema: None,
+                conversation: None,
+                action: RenderedCodexAction::Review {
+                    prompt: Some("review it".to_owned()),
+                    model: None,
+                    mode: CodexMode::Default,
+                    title: None,
+                    add_dirs: Vec::new(),
+                    persistence: rigg_core::Persistence::Ephemeral,
+                    scope: rigg_engine::RenderedReviewScope::Uncommitted,
+                },
+            };
+            let mut progress = RecordingProgressSink::default();
+            let execution = DefaultStepRunner::default().execute_codex(&request, &mut progress)?;
+
+            assert_eq!(
+                execution.stdout,
+                r#"{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"looks good","overall_confidence_score":0.91}"#
+            );
+            assert_eq!(
+                execution.result,
+                Some(CapturedValue::Json(serde_json::json!({
+                    "findings": [],
+                    "overall_correctness": "patch is correct",
+                    "overall_explanation": "looks good",
+                    "overall_confidence_score": 0.91
+                })))
+            );
+
+            fs::remove_dir_all(&temp_dir)?;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn review_without_review_output_returns_partial_execution()
+    -> Result<(), Box<dyn std::error::Error>> {
+        #[cfg(not(unix))]
+        {
+            return Ok(());
+        }
+
+        #[cfg(unix)]
+        {
+            let temp_dir = std::env::temp_dir().join(format!(
+                "rigg-codex-test-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_nanos()
+            ));
+            fs::create_dir_all(&temp_dir)?;
+            let tool_path = temp_dir.join("codex");
+            fs::write(
+                &tool_path,
+                r#"#!/bin/sh
+printf '%s\n' '{"type":"agent_message_delta","delta":{"text":"Reviewing diff..."}}'
+"#,
+            )?;
+            fs::set_permissions(&tool_path, fs::Permissions::from_mode(0o755))?;
+
+            let request = RenderedCodexRequest {
+                cwd: temp_dir.clone(),
+                artifacts_dir: temp_dir
+                    .join(".rigg")
+                    .join("runs")
+                    .join("test-run")
+                    .join("artifacts")
+                    .join("codex"),
+                env: BTreeMap::from([(
+                    "PATH".to_owned(),
+                    temp_dir.as_os_str().to_string_lossy().into_owned(),
+                )]),
+                result_schema: None,
+                conversation: None,
+                action: RenderedCodexAction::Review {
+                    prompt: Some("review it".to_owned()),
+                    model: None,
+                    mode: CodexMode::Default,
+                    title: None,
+                    add_dirs: Vec::new(),
+                    persistence: rigg_core::Persistence::Ephemeral,
+                    scope: rigg_engine::RenderedReviewScope::Uncommitted,
+                },
+            };
+            let mut progress = RecordingProgressSink::default();
+            let error = DefaultStepRunner::default()
+                .execute_codex(&request, &mut progress)
+                .expect_err("missing review output should fail");
+
+            let EngineError::Executor(ExecutorError::StepPostProcess { execution, source }) = error
+            else {
+                panic!("expected partial execution error");
+            };
+            assert!(matches!(source.as_ref(), ExecutorError::MissingCodexReviewOutput));
+            assert_eq!(execution.exit_code, 0);
+            assert_eq!(execution.stdout, "Reviewing diff...");
+            assert_eq!(execution.result, None);
 
             fs::remove_dir_all(&temp_dir)?;
             Ok(())

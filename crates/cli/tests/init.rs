@@ -19,13 +19,16 @@ fn init_generates_valid_examples() -> Result<(), Box<dyn Error>> {
 
     let review_uncommitted = fs::read_to_string(root.join(".rigg/review-uncommitted.yaml"))?;
     assert!(review_uncommitted.contains("type: loop"));
-    assert!(review_uncommitted.contains("until: ${{ steps.judge.result.accepted_count == 0 }}"));
+    assert!(review_uncommitted.contains(
+        "until: ${{ len(steps.review.result.findings) == 0 || steps.judge.result.accepted_count == 0 }}"
+    ));
+    assert!(review_uncommitted.contains("${{ toJSON(steps.review.result) }}"));
 
     let plan = fs::read_to_string(root.join(".rigg/plan.yaml"))?;
     assert!(plan.contains("requirements:\n    type: string"));
     assert!(plan.contains("output_path:\n    type: string"));
     assert!(plan.contains("additionalProperties: false"));
-    assert!(plan.contains("${{ toJSON(steps.review.result.findings) }}"));
+    assert!(plan.contains("${{ toJSON(steps.critique.result.findings) }}"));
     assert!(!plan.contains("requirements: string"));
     assert!(!plan.contains("output_path: string"));
 

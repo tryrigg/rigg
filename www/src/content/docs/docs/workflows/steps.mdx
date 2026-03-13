@@ -43,7 +43,24 @@ Scans diffs and returns review findings.
 
 If `target` is omitted, presence of `base` infers `target: base`. `commit` alone does **not** infer target — you must set `target: commit` explicitly.
 
-Review does **not** support `conversation` or `output_schema`.
+Review does **not** support `conversation` or `output_schema`. It always returns the built-in structured result below:
+
+```yaml
+result:
+  findings:
+    - title: string
+      body: string
+      confidence_score: number
+      priority: integer
+      code_location:
+        absolute_file_path: string
+        line_range:
+          start: integer
+          end: integer
+  overall_correctness: string
+  overall_explanation: string
+  overall_confidence_score: number
+```
 
 ### exec
 

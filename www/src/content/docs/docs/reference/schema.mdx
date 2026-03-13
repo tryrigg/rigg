@@ -49,6 +49,24 @@ sidebar:
 
 **Unsupported:** `conversation`, `output_schema`
 
+**Built-in result shape:**
+
+```yaml
+findings:
+  - title: string
+    body: string
+    confidence_score: number
+    priority: integer
+    code_location:
+      absolute_file_path: string
+      line_range:
+        start: integer
+        end: integer
+overall_correctness: string
+overall_explanation: string
+overall_confidence_score: number
+```
+
 ## type: codex (action: exec)
 
 | Field | Type | Required | Default |

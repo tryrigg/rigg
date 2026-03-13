@@ -128,6 +128,8 @@ pub enum ExecutorError {
         #[source]
         source: serde_json::Error,
     },
+    #[error("`codex review` completed without emitting `review_output`")]
+    MissingCodexReviewOutput,
     #[error("`codex exec resume` does not support `{option}`")]
     UnsupportedCodexResumeOption { option: &'static str },
     #[error("`{tool}` did not return a conversation handle for a persisted conversation node")]
@@ -163,6 +165,7 @@ impl ExecutorError {
     pub(super) fn run_reason(&self) -> RunReason {
         match self {
             Self::ParseJsonOutput { .. } => RunReason::StepFailed,
+            Self::MissingCodexReviewOutput => RunReason::StepFailed,
             Self::UnsupportedCodexResumeOption { .. } => RunReason::StepFailed,
             Self::MissingConversationHandle { .. } => RunReason::StepFailed,
             Self::StepPostProcess { source, .. } => source.run_reason(),

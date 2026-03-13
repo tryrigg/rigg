@@ -106,7 +106,7 @@ steps:
           markdown:
             type: string
 
-  - id: review
+  - id: critique
     type: claude
     with:
       action: prompt
@@ -151,7 +151,7 @@ steps:
   - id: finalize
     type: branch
     cases:
-      - if: ${{ steps.review.result.has_findings }}
+      - if: ${{ steps.critique.result.has_findings }}
         steps:
           - id: evaluate_and_apply
             type: codex
@@ -172,7 +172,7 @@ steps:
                 ${{ steps.draft.result.markdown }}
 
                 Review findings:
-                ${{ toJSON(steps.review.result.findings) }}
+                ${{ toJSON(steps.critique.result.findings) }}
               output_schema:
                 type: object
                 required: [markdown]
@@ -205,7 +205,7 @@ steps:
   - id: remediation
     type: loop
     max: 5
-    until: ${{ steps.judge.result.accepted_count == 0 }}
+    until: ${{ len(steps.review.result.findings) == 0 || steps.judge.result.accepted_count == 0 }}
     steps:
       - id: review
         type: codex
@@ -224,7 +224,7 @@ steps:
             Read the review below.
             
             Review:
-            ${{ steps.review.result }}
+            ${{ toJSON(steps.review.result) }}
             
             Accept only findings that are valid and actionable.
           output_schema:
@@ -260,7 +260,7 @@ steps:
   - id: remediation
     type: loop
     max: 5
-    until: ${{ steps.judge.result.accepted_count == 0 }}
+    until: ${{ len(steps.review.result.findings) == 0 || steps.judge.result.accepted_count == 0 }}
     steps:
       - id: review
         type: codex
@@ -280,7 +280,7 @@ steps:
             Read the review below.
             
             Review:
-            ${{ steps.review.result }}
+            ${{ toJSON(steps.review.result) }}
             
             Accept only findings that are valid and actionable.
           output_schema:
@@ -316,7 +316,7 @@ steps:
   - id: remediation
     type: loop
     max: 5
-    until: ${{ steps.judge.result.accepted_count == 0 }}
+    until: ${{ len(steps.review.result.findings) == 0 || steps.judge.result.accepted_count == 0 }}
     steps:
       - id: review
         type: codex
@@ -337,7 +337,7 @@ steps:
             Read the review below.
 
             Review:
-            ${{ steps.review.result }}
+            ${{ toJSON(steps.review.result) }}
 
             Accept only findings that are valid and actionable.
           output_schema:

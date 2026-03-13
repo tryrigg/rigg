@@ -603,6 +603,7 @@ pub enum InputErrorKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OutputSchema {
+    Nullable(Box<OutputSchema>),
     String,
     Integer,
     Number,
@@ -621,6 +622,7 @@ impl OutputSchema {
 
     pub fn output_type(&self) -> OutputType {
         match self {
+            Self::Nullable(inner) => inner.output_type(),
             Self::String => OutputType::String,
             Self::Integer => OutputType::Integer,
             Self::Number => OutputType::Number,
@@ -632,6 +634,7 @@ impl OutputSchema {
 
     pub fn result_shape(&self) -> ResultShape {
         match self {
+            Self::Nullable(inner) => inner.result_shape(),
             Self::String => ResultShape::String,
             Self::Integer => ResultShape::Integer,
             Self::Number => ResultShape::Number,
@@ -650,6 +653,29 @@ impl OutputSchema {
 
     pub fn to_json_schema(&self) -> JsonValue {
         match self {
+            Self::Nullable(inner) => {
+                let mut schema = inner.to_json_schema();
+                let JsonValue::Object(object) = &mut schema else {
+                    unreachable!("output schemas always serialize to JSON objects");
+                };
+                let Some(type_value) = object.get_mut("type") else {
+                    unreachable!("output schemas always serialize a `type` keyword");
+                };
+                *type_value = match type_value.clone() {
+                    JsonValue::String(schema_type) => JsonValue::Array(vec![
+                        JsonValue::String(schema_type),
+                        JsonValue::String("null".to_owned()),
+                    ]),
+                    JsonValue::Array(mut schema_types) => {
+                        if !schema_types.iter().any(|value| value == "null") {
+                            schema_types.push(JsonValue::String("null".to_owned()));
+                        }
+                        JsonValue::Array(schema_types)
+                    }
+                    _ => unreachable!("output schema `type` must serialize as string or array"),
+                };
+                schema
+            }
             Self::String | Self::Integer | Self::Number | Self::Boolean => {
                 self.output_type().to_schema()
             }
@@ -680,6 +706,13 @@ impl OutputSchema {
         field_path: Option<&str>,
         value: &JsonValue,
     ) -> Result<(), ResultValidationError> {
+        if let Self::Nullable(inner) = self {
+            if value.is_null() {
+                return Ok(());
+            }
+            return inner.validate_value(field_path, value);
+        }
+
         let field_name = field_path.unwrap_or("result");
         let output_type = self.output_type();
         if !output_type.matches_json_value(value) {
@@ -690,6 +723,7 @@ impl OutputSchema {
         }
 
         match self {
+            Self::Nullable(_) => unreachable!("nullable schemas are handled before matching"),
             Self::String | Self::Integer | Self::Number | Self::Boolean => Ok(()),
             Self::Object { required, properties } => {
                 let Some(object) = value.as_object() else {
@@ -744,11 +778,9 @@ impl OutputSchema {
             kind: OutputSchemaErrorKind::ExpectedObject,
         })?;
 
-        let schema_type = object.get("type").and_then(JsonValue::as_str).ok_or_else(|| {
-            OutputSchemaError { path: path.clone(), kind: OutputSchemaErrorKind::MissingType }
-        })?;
+        let (schema_type, nullable) = parse_output_type_keyword(object, &path)?;
 
-        match schema_type {
+        let schema = match schema_type {
             "string" => Ok(Self::String),
             "integer" => Ok(Self::Integer),
             "number" => Ok(Self::Number),
@@ -798,7 +830,9 @@ impl OutputSchema {
                 path,
                 kind: OutputSchemaErrorKind::UnsupportedType { schema_type: other.to_owned() },
             }),
-        }
+        }?;
+
+        if nullable { Ok(Self::Nullable(Box::new(schema))) } else { Ok(schema) }
     }
 }
 
@@ -943,6 +977,59 @@ fn parse_input_type_keyword(
             path.to_owned(),
             format!("uses unsupported schema type `{schema_type}`"),
         )),
+    }
+}
+
+fn parse_output_type_keyword<'a>(
+    object: &'a JsonMap<String, JsonValue>,
+    path: &str,
+) -> Result<(&'a str, bool), OutputSchemaError> {
+    let type_value = object.get("type").ok_or_else(|| OutputSchemaError {
+        path: path.to_owned(),
+        kind: OutputSchemaErrorKind::MissingType,
+    })?;
+
+    match type_value {
+        JsonValue::String(schema_type) => Ok((schema_type.as_str(), false)),
+        JsonValue::Array(schema_types) => {
+            let mut nullable = false;
+            let mut base_type: Option<&str> = None;
+
+            for schema_type in schema_types {
+                let schema_type = schema_type.as_str().ok_or_else(|| OutputSchemaError {
+                    path: format!("{path}.type"),
+                    kind: OutputSchemaErrorKind::UnsupportedType {
+                        schema_type: type_value.to_string(),
+                    },
+                })?;
+                if schema_type == "null" {
+                    nullable = true;
+                    continue;
+                }
+                if base_type.replace(schema_type).is_some() {
+                    return Err(OutputSchemaError {
+                        path: format!("{path}.type"),
+                        kind: OutputSchemaErrorKind::UnsupportedType {
+                            schema_type: type_value.to_string(),
+                        },
+                    });
+                }
+            }
+
+            let Some(base_type) = base_type else {
+                return Err(OutputSchemaError {
+                    path: format!("{path}.type"),
+                    kind: OutputSchemaErrorKind::UnsupportedType {
+                        schema_type: type_value.to_string(),
+                    },
+                });
+            };
+            Ok((base_type, nullable))
+        }
+        _ => Err(OutputSchemaError {
+            path: path.to_owned(),
+            kind: OutputSchemaErrorKind::MissingType,
+        }),
     }
 }
 
@@ -1675,6 +1762,33 @@ mod tests {
                 &serde_json::from_str::<JsonValue>("[1.0]")?,
             )?,
             serde_json::from_str::<JsonValue>("[1.0]")?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn output_schema_supports_nullable_types() -> Result<(), Box<dyn std::error::Error>> {
+        let schema = OutputSchema::parse_at(
+            &json!({
+                "type": ["integer", "null"]
+            }),
+            "workflow.result.priority",
+        )?;
+
+        schema.validate_value(Some("priority"), &json!(1)).expect("integer should be accepted");
+        schema.validate_value(Some("priority"), &JsonValue::Null).expect("null should be accepted");
+        assert_eq!(schema.result_shape(), ResultShape::Integer);
+        assert_eq!(schema.to_json_schema(), json!({ "type": ["integer", "null"] }));
+
+        let error = schema
+            .validate_value(Some("priority"), &json!("high"))
+            .expect_err("string should be rejected");
+        assert_eq!(
+            error,
+            ResultValidationError::TypeMismatch {
+                field: "priority".to_owned(),
+                expected: OutputType::Integer,
+            }
         );
         Ok(())
     }

@@ -4,7 +4,7 @@ use rigg_core::{
     ActionKind, ActionNode, ClaudeStep, CodexAction, CodexExec, CodexMode, CodexReview, CodexStep,
     ConversationBinding, ConversationName, ConversationScope, JsonResultSchema, OutputSchema,
     PermissionMode, Persistence, ResultContract, ReviewScope, ShellOutput, ShellStep,
-    WriteFileStep,
+    WriteFileStep, codex_review_result_schema,
 };
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
@@ -254,7 +254,7 @@ fn compile_codex(
                         scope,
                     }),
                 }),
-                result_contract: ResultContract::Text,
+                result_contract: ResultContract::Review { schema: codex_review_result_schema() },
             })
         }
         RawCodexAction::Exec => {

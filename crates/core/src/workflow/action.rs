@@ -1,7 +1,7 @@
 use super::schema::{JsonResultSchema, OutputSchema};
 use crate::conversation::ConversationBinding;
 use crate::expr::Template;
-use serde_json::Value as JsonValue;
+use serde_json::{Value as JsonValue, json};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActionNode {
@@ -41,6 +41,7 @@ pub enum ResultContract {
     None,
     Text,
     Json { schema: Option<JsonResultSchema> },
+    Review { schema: JsonResultSchema },
     WriteFile,
 }
 
@@ -48,6 +49,7 @@ impl ResultContract {
     pub fn result_schema(&self) -> Option<&OutputSchema> {
         match self {
             Self::Json { schema } => schema.as_ref().map(JsonResultSchema::structured),
+            Self::Review { schema } => Some(schema.structured()),
             Self::None | Self::Text | Self::WriteFile => None,
         }
     }
@@ -55,8 +57,127 @@ impl ResultContract {
     pub fn provider_schema(&self) -> Option<&JsonValue> {
         match self {
             Self::Json { schema } => schema.as_ref().map(JsonResultSchema::json_schema),
-            Self::None | Self::Text | Self::WriteFile => None,
+            Self::Review { .. } | Self::None | Self::Text | Self::WriteFile => None,
         }
+    }
+}
+
+pub fn codex_review_result_schema() -> JsonResultSchema {
+    match JsonResultSchema::parse_at(
+        &json!({
+            "type": "object",
+            "required": [
+                "findings",
+                "overall_correctness",
+                "overall_explanation",
+                "overall_confidence_score"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "findings": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "title",
+                            "body",
+                            "confidence_score",
+                            "code_location"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                            "title": { "type": "string" },
+                            "body": { "type": "string" },
+                            "confidence_score": { "type": "number" },
+                            "priority": { "type": ["integer", "null"] },
+                            "code_location": {
+                                "type": "object",
+                                "required": ["absolute_file_path", "line_range"],
+                                "additionalProperties": false,
+                                "properties": {
+                                    "absolute_file_path": { "type": "string" },
+                                    "line_range": {
+                                        "type": "object",
+                                        "required": ["start", "end"],
+                                        "additionalProperties": false,
+                                        "properties": {
+                                            "start": { "type": "integer" },
+                                            "end": { "type": "integer" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "overall_correctness": { "type": "string" },
+                "overall_explanation": { "type": "string" },
+                "overall_confidence_score": { "type": "number" }
+            }
+        }),
+        "with.review_output_schema",
+    ) {
+        Ok(schema) => schema,
+        Err(error) => panic!("internal codex review schema must remain valid: {error}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::codex_review_result_schema;
+    use serde_json::json;
+
+    #[test]
+    fn codex_review_schema_accepts_missing_priority() {
+        codex_review_result_schema()
+            .structured()
+            .validate_value(
+                None,
+                &json!({
+                    "findings": [
+                        {
+                            "title": "[P1] Example finding",
+                            "body": "Body",
+                            "confidence_score": 0.9,
+                            "code_location": {
+                                "absolute_file_path": "/tmp/example.rs",
+                                "line_range": { "start": 10, "end": 12 }
+                            }
+                        }
+                    ],
+                    "overall_correctness": "patch is incorrect",
+                    "overall_explanation": "Explanation",
+                    "overall_confidence_score": 0.8
+                }),
+            )
+            .expect("missing priority should be accepted");
+    }
+
+    #[test]
+    fn codex_review_schema_accepts_null_priority() {
+        codex_review_result_schema()
+            .structured()
+            .validate_value(
+                None,
+                &json!({
+                    "findings": [
+                        {
+                            "title": "[P1] Example finding",
+                            "body": "Body",
+                            "confidence_score": 0.9,
+                            "priority": null,
+                            "code_location": {
+                                "absolute_file_path": "/tmp/example.rs",
+                                "line_range": { "start": 10, "end": 12 }
+                            }
+                        }
+                    ],
+                    "overall_correctness": "patch is incorrect",
+                    "overall_explanation": "Explanation",
+                    "overall_confidence_score": 0.8
+                }),
+            )
+            .expect("null priority should be accepted");
     }
 }
 

@@ -37,7 +37,7 @@ steps:
     max: 5
     until: ${{ steps.judge.result.accepted_count == 0 }}
     steps:
-      - id: review
+      - id: inspect
         type: shell
         with:
           command: echo review
@@ -45,7 +45,7 @@ steps:
         type: claude
         with:
           action: prompt
-          prompt: ${{ steps.review.result }}
+          prompt: ${{ steps.inspect.result }}
           output_schema:
             type: object
             required: [accepted_count, fix_brief]
@@ -193,6 +193,28 @@ steps:
 "#,
         "`steps.maybe.result` is not available for this node",
     )
+}
+
+#[test]
+fn len_can_be_used_with_review_findings() -> Result<(), Box<dyn std::error::Error>> {
+    parse_and_validate(
+        "valid.yaml",
+        r#"
+id: valid
+steps:
+  - id: review
+    type: codex
+    with:
+      action: review
+      target: uncommitted
+  - id: gate
+    type: shell
+    with:
+      command: echo ${{ len(steps.review.result.findings) }}
+"#,
+    )?;
+
+    Ok(())
 }
 
 #[test]

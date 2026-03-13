@@ -79,15 +79,15 @@ steps:                      # Required: non-empty array of steps
 - id: judge
   type: claude
   with:
-    action: prompt                                        # Only action type
-    prompt: Evaluate this: ${{ steps.review.result }}      # Required
-    permission_mode: default                               # default|plan|acceptEdits|dontAsk|bypassPermissions
-    model: model_name                                      # Optional
-    persist: true                                          # Default: true
-    conversation:                                          # Optional
+    action: prompt                                             # Only action type
+    prompt: Evaluate this: ${{ toJSON(steps.review.result) }}  # Required
+    permission_mode: default                                   # default|plan|acceptEdits|dontAsk|bypassPermissions
+    model: model_name                                          # Optional
+    persist: true                                              # Default: true
+    conversation:                                              # Optional
       name: reviewer
       scope: workflow
-    output_schema:                                         # Optional
+    output_schema:                                            # Optional
       type: object
       required: [accepted]
       additionalProperties: false
@@ -125,7 +125,7 @@ steps:                      # Required: non-empty array of steps
 - id: remediation
   type: loop
   max: 5                                                    # Required
-  until: ${{ steps.judge.result.accepted_count == 0 }}      # Required
+  until: ${{ len(steps.review.result.findings) == 0 || steps.judge.result.accepted_count == 0 }}  # Required
   steps:
     - id: review
       type: codex
@@ -137,7 +137,7 @@ steps:                      # Required: non-empty array of steps
       type: claude
       with:
         action: prompt
-        prompt: Accept valid findings from ${{ steps.review.result }}
+        prompt: Accept valid findings from ${{ toJSON(steps.review.result) }}
         output_schema:
           type: object
           required: [accepted_count]

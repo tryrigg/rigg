@@ -45,7 +45,7 @@ run.iteration                  → loop counter (1-based)
 | `==` `!=` | `steps.x.result == 'ok'` |
 | `>` `>=` `<` `<=` | `steps.x.result.count > 0` |
 | `&&` `\|\|` | `a && b` |
-| `!` | `!steps.x.result.has_issues` |
+| `!` | `!steps.x.result.passed` |
 
 ## Functions
 
@@ -54,6 +54,7 @@ run.iteration                  → loop counter (1-based)
 | `format(fmt, ...)` | String formatting | `format('{0}:{1}', a, b)` |
 | `toJSON(value)` | JSON stringification | `toJSON(steps.data.result)` |
 | `join(array, delim)` | Join array | `join(steps.x.result.tags, ', ')` |
+| `len(value)` | Count string chars, array items, or object keys | `len(steps.review.result.findings)` |
 
 ## Literals
 

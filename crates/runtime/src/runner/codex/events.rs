@@ -1,11 +1,13 @@
+use super::super::json::extract_top_level_json_field;
 use super::super::lines::preview;
 use serde_json::Value as JsonValue;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(super) enum CodexStreamEvent {
     ToolUse { tool: String, detail: Option<String> },
     MessageDelta(String),
     Message(String),
+    ReviewOutput { value: JsonValue, raw_text: String },
     Error(String),
     Status(String),
     Ignore,
@@ -17,6 +19,14 @@ impl CodexStreamEvent {
             return Self::Ignore;
         };
 
+        if let Some(review_output) = value.get("review_output") {
+            return Self::ReviewOutput {
+                value: review_output.clone(),
+                raw_text: extract_top_level_json_field(line, "review_output")
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| review_output.to_string()),
+            };
+        }
         if let Some(status) = parse_status(&value) {
             return Self::Status(status);
         }
@@ -230,6 +240,22 @@ mod tests {
         check(
             r#"{"type":"agent_message_delta","delta":{"text":"Inspecting the repository now."}}"#,
             CodexStreamEvent::MessageDelta("Inspecting the repository now.".to_owned()),
+        );
+    }
+
+    #[test]
+    fn parses_review_output_event() {
+        check(
+            r#"{"type":"exited_review_mode","review_output":{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"looks good","overall_confidence_score":0.91}}"#,
+            CodexStreamEvent::ReviewOutput {
+                value: serde_json::json!({
+                    "findings": [],
+                    "overall_correctness": "patch is correct",
+                    "overall_explanation": "looks good",
+                    "overall_confidence_score": 0.91
+                }),
+                raw_text: r#"{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"looks good","overall_confidence_score":0.91}"#.to_owned(),
+            },
         );
     }
 

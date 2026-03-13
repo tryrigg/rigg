@@ -4,7 +4,7 @@ mod schema;
 pub use action::{
     ActionKind, ActionNode, ClaudeStep, CodexAction, CodexExec, CodexMode, CodexReview, CodexStep,
     PermissionMode, Persistence, ResultContract, ReviewScope, ShellOutput, ShellStep,
-    WriteFileStep,
+    WriteFileStep, codex_review_result_schema,
 };
 pub use schema::{
     InputErrorKind, InputPathError, InputSchema, InputSchemaError, InputValidationError,
@@ -166,6 +166,7 @@ impl ResultContract {
             Self::None => ResultShape::None,
             Self::Text => ResultShape::String,
             Self::Json { schema: Some(schema) } => schema.result_shape(),
+            Self::Review { schema } => schema.result_shape(),
             Self::Json { schema: None } => ResultShape::AnyJson,
             Self::WriteFile => {
                 ResultShape::Object(BTreeMap::from([("path".to_owned(), ResultShape::String)]))

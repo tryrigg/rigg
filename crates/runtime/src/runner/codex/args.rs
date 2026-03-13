@@ -1,4 +1,5 @@
 use super::super::io::{artifact_file, write_schema_file};
+use super::stream::CodexStreamState;
 use rigg_core::{CapturedValue, CodexMode, Persistence};
 use rigg_engine::{
     EngineError, ExecutorError, RenderedCodexAction, RenderedCodexRequest, RenderedReviewScope,
@@ -9,21 +10,30 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum CodexResultKind {
     Text,
-    Structured,
+    ExecStructured,
+    ReviewStructured,
 }
 
 impl CodexResultKind {
     fn for_request(request: &RenderedCodexRequest) -> Self {
-        if request.result_schema.is_some() { Self::Structured } else { Self::Text }
+        match &request.action {
+            RenderedCodexAction::Review { .. } => Self::ReviewStructured,
+            RenderedCodexAction::Exec { .. } if request.result_schema.is_some() => {
+                Self::ExecStructured
+            }
+            RenderedCodexAction::Exec { .. } => Self::Text,
+        }
     }
 
     pub(super) fn capture(
         self,
         result_text: Option<&str>,
+        stream_state: &CodexStreamState,
     ) -> Result<Option<CapturedValue>, EngineError> {
         match self {
             Self::Text => Ok(result_text.map(|text| CapturedValue::Text(text.to_owned()))),
-            Self::Structured => result_text.map(parse_json_text).transpose(),
+            Self::ExecStructured => result_text.map(parse_json_text).transpose(),
+            Self::ReviewStructured => stream_state.capture_review_result(),
         }
     }
 }
@@ -31,7 +41,7 @@ impl CodexResultKind {
 #[derive(Debug)]
 pub(super) struct PreparedCodexCommand {
     pub(super) args: Vec<OsString>,
-    pub(super) output_path: PathBuf,
+    pub(super) output_path: Option<PathBuf>,
     pub(super) result_kind: CodexResultKind,
 }
 
@@ -67,7 +77,7 @@ impl PreparedCodexCommand {
                     output_path: &output_path,
                     schema_path: schema_path.as_deref(),
                 });
-                Ok(Self { args, output_path, result_kind })
+                Ok(Self { args, output_path: Some(output_path), result_kind })
             }
             RenderedCodexAction::Review {
                 prompt,
@@ -78,7 +88,6 @@ impl PreparedCodexCommand {
                 persistence,
                 scope,
             } => {
-                let output_path = artifact_file(&request.artifacts_dir, "review-output", "txt")?;
                 let args = build_codex_review_args(CodexReviewArgs {
                     prompt: prompt.as_deref(),
                     model: model.as_deref(),
@@ -87,9 +96,8 @@ impl PreparedCodexCommand {
                     add_dirs,
                     persistence: *persistence,
                     scope,
-                    output_path: &output_path,
                 });
-                Ok(Self { args, output_path, result_kind })
+                Ok(Self { args, output_path: None, result_kind })
             }
         }
     }
@@ -139,7 +147,6 @@ pub(super) struct CodexReviewArgs<'a> {
     pub(super) add_dirs: &'a [String],
     pub(super) persistence: Persistence,
     pub(super) scope: &'a RenderedReviewScope,
-    pub(super) output_path: &'a Path,
 }
 
 pub(super) fn build_codex_review_args(config: CodexReviewArgs<'_>) -> Vec<OsString> {
@@ -166,8 +173,6 @@ pub(super) fn build_codex_review_args(config: CodexReviewArgs<'_>) -> Vec<OsStri
         args.push(OsString::from("--title"));
         args.push(OsString::from(title));
     }
-    args.push(OsString::from("-o"));
-    args.push(config.output_path.as_os_str().to_os_string());
     if let Some(prompt) = config.prompt {
         args.push(OsString::from(prompt));
     }
@@ -282,7 +287,6 @@ mod tests {
             add_dirs: &add_dirs,
             persistence: Persistence::Ephemeral,
             scope: &scope,
-            output_path: Path::new("/tmp/out.txt"),
         });
         assert_eq!(
             stringify(&args),
@@ -302,8 +306,6 @@ mod tests {
                 "abc123",
                 "--title",
                 "Bug sweep",
-                "-o",
-                "/tmp/out.txt",
                 "review this",
             ]
         );
@@ -441,7 +443,10 @@ mod tests {
         };
 
         let prepared = PreparedCodexCommand::from_request(&request)?;
-        assert_eq!(prepared.output_path.parent(), Some(codex_dir.as_path()));
+        assert_eq!(
+            prepared.output_path.as_deref().and_then(Path::parent),
+            Some(codex_dir.as_path())
+        );
         let args = stringify(&prepared.args);
         let schema_path = args
             .windows(2)
@@ -476,6 +481,35 @@ mod tests {
 
         let prepared = PreparedCodexCommand::from_request(&request)?;
         assert!(stringify(&prepared.args).iter().any(|arg| arg == "--json"));
+        assert!(prepared.output_path.is_some());
+
+        fs::remove_dir_all(artifacts_dir).ok();
+        Ok(())
+    }
+
+    #[test]
+    fn review_requests_do_not_use_output_files() -> Result<(), Box<dyn std::error::Error>> {
+        let artifacts_dir = temp_artifacts_dir("review-json");
+        let request = RenderedCodexRequest {
+            cwd: std::env::temp_dir(),
+            artifacts_dir: artifacts_dir.join("codex"),
+            env: BTreeMap::new(),
+            result_schema: None,
+            conversation: None,
+            action: RenderedCodexAction::Review {
+                prompt: Some("review this".to_owned()),
+                model: None,
+                mode: CodexMode::Default,
+                title: None,
+                add_dirs: vec![],
+                persistence: Persistence::Ephemeral,
+                scope: RenderedReviewScope::Uncommitted,
+            },
+        };
+
+        let prepared = PreparedCodexCommand::from_request(&request)?;
+        assert!(prepared.output_path.is_none());
+        assert!(!stringify(&prepared.args).iter().any(|arg| arg == "-o"));
 
         fs::remove_dir_all(artifacts_dir).ok();
         Ok(())

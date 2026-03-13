@@ -56,7 +56,7 @@ const usecases = [
       <span class="hl-key">output_schema</span>:
         <span class="hl-key">properties</span>:
           <span class="hl-key">plan</span>: { <span class="hl-key">type</span>: <span class="hl-type">string</span> }
-  - <span class="hl-key">id</span>: review
+  - <span class="hl-key">id</span>: critique
     <span class="hl-key">type</span>: <span class="hl-type">claude</span>
     <span class="hl-key">with</span>:
       <span class="hl-key">prompt</span>: <span class="hl-str">Review this plan for gaps: \${{ steps.draft.result.plan }}</span>
@@ -65,11 +65,11 @@ const usecases = [
           <span class="hl-key">has_issues</span>: { <span class="hl-key">type</span>: <span class="hl-type">boolean</span> }
           <span class="hl-key">feedback</span>: { <span class="hl-key">type</span>: <span class="hl-type">string</span> }
   - <span class="hl-key">id</span>: refine
-    <span class="hl-key">if</span>: <span class="hl-str">\${{ steps.review.result.has_issues }}</span>
+    <span class="hl-key">if</span>: <span class="hl-str">\${{ steps.critique.result.has_issues }}</span>
     <span class="hl-key">type</span>: <span class="hl-type">codex</span>
     <span class="hl-key">with</span>:
       <span class="hl-key">action</span>: exec
-      <span class="hl-key">prompt</span>: <span class="hl-str">Improve the plan based on: \${{ steps.review.result.feedback }}</span>
+      <span class="hl-key">prompt</span>: <span class="hl-str">Improve the plan based on: \${{ steps.critique.result.feedback }}</span>
   - <span class="hl-key">id</span>: save
     <span class="hl-key">type</span>: <span class="hl-type">write_file</span>
     <span class="hl-key">with</span>:

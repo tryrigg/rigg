@@ -4,6 +4,7 @@ use crate::runner::lines::LineBuffer;
 use rigg_core::conversation::ConversationProvider;
 use rigg_core::progress::StepProgressSink;
 use rigg_core::{CapturedValue, StreamKind};
+use rigg_engine::{EngineError, ExecutorError};
 use serde_json::Value as JsonValue;
 
 #[derive(Debug, Default)]
@@ -11,6 +12,8 @@ pub(super) struct CodexStreamState {
     stdout_lines: LineBuffer,
     pending_message: String,
     stdout: String,
+    review_output: Option<JsonValue>,
+    review_output_text: Option<String>,
     thread_id: Option<String>,
     provider_events: Vec<ProviderEvent>,
 }
@@ -88,6 +91,11 @@ impl CodexStreamState {
                     self.flush_pending_message();
                 }
             }
+            CodexStreamEvent::ReviewOutput { value, raw_text } => {
+                self.flush_pending_message();
+                self.review_output = Some(value);
+                self.review_output_text = Some(raw_text);
+            }
             CodexStreamEvent::Error(error) => {
                 self.push_provider_event(
                     events,
@@ -144,6 +152,25 @@ impl CodexStreamState {
     pub(super) fn thread_id(&self) -> Option<&str> {
         self.thread_id.as_deref()
     }
+
+    pub(super) fn capture_review_result(&self) -> Result<Option<CapturedValue>, EngineError> {
+        match (&self.review_output, &self.review_output_text) {
+            (Some(value), _) => Ok(Some(CapturedValue::Json(value.clone()))),
+            (None, Some(raw_text)) => serde_json::from_str(raw_text.trim())
+                .map(CapturedValue::Json)
+                .map(Some)
+                .map_err(|source| {
+                    EngineError::Executor(ExecutorError::ParseJsonOutput { tool: "codex", source })
+                }),
+            (None, None) => Ok(None),
+        }
+    }
+
+    fn review_stdout(&self) -> Option<String> {
+        self.review_output_text
+            .clone()
+            .or_else(|| self.review_output.as_ref().map(JsonValue::to_string))
+    }
 }
 
 pub(super) fn handle_codex_stream(
@@ -167,6 +194,9 @@ pub(super) fn normalize_codex_stdout(
     stream_state: &CodexStreamState,
 ) -> String {
     if succeeded {
+        if let Some(text) = stream_state.review_stdout() {
+            return text;
+        }
         if let Some(text) = result_text {
             return text.to_owned();
         }
@@ -194,6 +224,7 @@ mod tests {
     use rigg_core::conversation::ConversationProvider;
     use rigg_core::progress::{ProviderEvent, StepProgressSink};
     use rigg_core::{CapturedValue, StreamKind};
+    use rigg_engine::{EngineError, ExecutorError};
 
     #[test]
     fn buffers_json_records_across_chunks() {
@@ -262,6 +293,60 @@ mod tests {
 
         assert_eq!(state.stdout, "Scanning files...");
         assert!(state.pending_message.is_empty());
+    }
+
+    #[test]
+    fn captures_review_output_as_structured_result() {
+        let mut state = CodexStreamState::default();
+        let mut progress = RecordingProgressSink::default();
+
+        handle_codex_stream(
+            &mut progress,
+            &mut state,
+            StreamKind::Stdout,
+            r#"{"type":"exited_review_mode","review_output":{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"looks good","overall_confidence_score":0.91}}"#,
+        );
+        finish_codex_progress(&mut state, &mut progress);
+
+        assert_eq!(
+            state.capture_review_result().unwrap(),
+            Some(CapturedValue::Json(serde_json::json!({
+                "findings": [],
+                "overall_correctness": "patch is correct",
+                "overall_explanation": "looks good",
+                "overall_confidence_score": 0.91
+            })))
+        );
+    }
+
+    #[test]
+    fn review_stdout_prefers_review_output_json() {
+        let state = CodexStreamState {
+            review_output_text: Some(
+                r#"{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"looks good","overall_confidence_score":0.91}"#
+                    .to_owned(),
+            ),
+            ..CodexStreamState::default()
+        };
+
+        assert_eq!(
+            normalize_codex_stdout(true, "raw", None, None, &state),
+            r#"{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"looks good","overall_confidence_score":0.91}"#
+        );
+    }
+
+    #[test]
+    fn review_result_can_fail_json_parsing_from_raw_text() {
+        let state = CodexStreamState {
+            review_output: None,
+            review_output_text: Some("{".to_owned()),
+            ..CodexStreamState::default()
+        };
+
+        assert!(matches!(
+            state.capture_review_result(),
+            Err(EngineError::Executor(ExecutorError::ParseJsonOutput { tool: "codex", .. }))
+        ));
     }
 
     #[test]

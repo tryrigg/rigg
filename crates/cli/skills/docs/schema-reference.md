@@ -266,7 +266,7 @@ Plain strings without `${{ }}` are literal values.
 ```
 inputs.name                    → input value
 inputs.config.timeout          → nested object field
-steps.review.result            → step result (text or full object)
+steps.review.result            → step result
 steps.judge.result.count       → nested field in structured output
 steps.list.result.0.name       → array index access
 env.CI                         → environment variable
@@ -285,7 +285,7 @@ run.iteration                  → loop iteration number
 | `<=` | Less or equal | `steps.x.result.count <= 10` |
 | `&&` | Logical AND | `steps.a.result && steps.b.result` |
 | `\|\|` | Logical OR | `steps.a.result \|\| steps.b.result` |
-| `!` | Logical NOT | `!steps.x.result.has_issues` |
+| `!` | Logical NOT | `!steps.x.result.passed` |
 
 ### Built-in Functions
 
@@ -294,6 +294,7 @@ run.iteration                  → loop iteration number
 | `format(fmt, ...)` | String formatting | `format('{0}:{1}', a, b)` |
 | `toJSON(value)` | JSON stringification | `toJSON(steps.data.result)` |
 | `join(array, delim)` | Join array elements | `join(steps.x.result.tags, ', ')` |
+| `len(value)` | Count string chars, array items, or object keys | `len(steps.review.result.findings)` |
 
 ### Literals
 

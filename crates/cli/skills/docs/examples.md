@@ -32,7 +32,7 @@ steps:
   - id: remediation
     type: loop
     max: 5
-    until: ${{ steps.judge.result.accepted_count == 0 }}
+    until: ${{ len(steps.review.result.findings) == 0 || steps.judge.result.accepted_count == 0 }}
     steps:
       - id: review
         type: codex
@@ -51,7 +51,7 @@ steps:
             Read the review below.
 
             Review:
-            ${{ steps.review.result }}
+            ${{ toJSON(steps.review.result) }}
 
             Accept only findings that are valid and actionable.
           output_schema:
@@ -109,7 +109,7 @@ steps:
             Read the review below.
 
             Review:
-            ${{ steps.review.result }}
+            ${{ toJSON(steps.review.result) }}
 
             Accept only findings that are valid and actionable.
           output_schema:
@@ -164,7 +164,7 @@ steps:
           markdown:
             type: string
 
-  - id: review
+  - id: critique
     type: claude
     with:
       action: prompt
@@ -195,7 +195,7 @@ steps:
   - id: finalize
     type: branch
     cases:
-      - if: ${{ steps.review.result.has_findings }}
+      - if: ${{ steps.critique.result.has_findings }}
         steps:
           - id: improve
             type: codex
@@ -205,7 +205,7 @@ steps:
               prompt: |
                 Apply review feedback to improve the plan.
                 Original: ${{ steps.draft.result.markdown }}
-                Findings: ${{ toJSON(steps.review.result.findings) }}
+                Findings: ${{ toJSON(steps.critique.result.findings) }}
               output_schema:
                 type: object
                 required: [markdown]
@@ -432,7 +432,7 @@ steps:
             Read the review below.
 
             Review:
-            ${{ steps.review.result }}
+            ${{ toJSON(steps.review.result) }}
 
             Accept only findings that are valid and actionable.
           output_schema:

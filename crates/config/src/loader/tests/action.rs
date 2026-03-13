@@ -268,5 +268,28 @@ steps:
         },
         other => panic!("unexpected action: {other:?}"),
     }
+    assert!(matches!(action.result_contract, rigg_core::ResultContract::Review { .. }));
+    Ok(())
+}
+
+#[test]
+fn review_result_fields_are_available_at_compile_time() -> Result<(), Box<dyn std::error::Error>> {
+    parse_and_validate(
+        "valid.yaml",
+        r#"
+id: valid
+steps:
+  - id: review
+    type: codex
+    with:
+      action: review
+      target: uncommitted
+  - id: summarize
+    type: shell
+    with:
+      command: echo ${{ steps.review.result.overall_explanation }} ${{ steps.review.result.findings.0.title }}
+"#,
+    )?;
+
     Ok(())
 }

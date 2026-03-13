@@ -192,7 +192,14 @@ fn validate_functions(source: &str, expr: &Expr) -> Result<(), ExprError> {
         Expr::Call { name, args } => {
             if !matches!(
                 name.as_str(),
-                "contains" | "startsWith" | "endsWith" | "format" | "join" | "toJSON" | "fromJSON"
+                "contains"
+                    | "startsWith"
+                    | "endsWith"
+                    | "format"
+                    | "join"
+                    | "toJSON"
+                    | "fromJSON"
+                    | "len"
             ) {
                 return Err(ExprError::UnsupportedFunction {
                     expression: source.to_owned(),
@@ -268,6 +275,7 @@ fn infer_call_shape(
 ) -> ResultShape {
     match name {
         "contains" | "startsWith" | "endsWith" => ResultShape::Boolean,
+        "len" => ResultShape::Integer,
         "format" | "join" | "toJSON" => ResultShape::String,
         "fromJSON" => infer_from_json_shape(args, resolve_path),
         _ => ResultShape::AnyJson,
@@ -520,6 +528,17 @@ fn eval_call(name: &str, args: &[Expr], context: &JsonValue) -> Result<JsonValue
             ensure_arity(name, args, 1)?;
             let text = stringify(&eval_expr(&args[0], context)?)?;
             serde_json::from_str(&text).map_err(|error| error.to_string())
+        }
+        "len" => {
+            ensure_arity(name, args, 1)?;
+            let value = eval_expr(&args[0], context)?;
+            let length = match value {
+                JsonValue::String(text) => text.chars().count(),
+                JsonValue::Array(items) => items.len(),
+                JsonValue::Object(fields) => fields.len(),
+                _ => return Err("len expects a string, array, or object".to_owned()),
+            };
+            Ok(JsonValue::Number(Number::from(length as u64)))
         }
         _ => Err(format!("unsupported function `{name}`")),
     }
@@ -907,4 +926,39 @@ fn is_ident_start(ch: char) -> bool {
 
 fn is_ident_continue(ch: char) -> bool {
     is_ident_start(ch) || ch.is_ascii_digit() || ch == '-'
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CompiledExpr, EvalOutcome, ResultShape};
+    use serde_json::json;
+
+    #[test]
+    fn len_returns_integer_shape() {
+        let expr = CompiledExpr::compile("len(steps.review.result.findings)", None).unwrap();
+
+        let shape = expr.infer_result_shape(|_| ResultShape::Array {
+            items: Some(Box::new(ResultShape::Object(Default::default()))),
+        });
+
+        assert_eq!(shape, ResultShape::Integer);
+    }
+
+    #[test]
+    fn len_evaluates_array_lengths() {
+        let expr = CompiledExpr::compile("len(steps.review.result.findings)", None).unwrap();
+        let value = expr
+            .evaluate(&json!({
+                "steps": {
+                    "review": {
+                        "result": {
+                            "findings": [{"title": "one"}, {"title": "two"}]
+                        }
+                    }
+                }
+            }))
+            .unwrap();
+
+        assert_eq!(value, EvalOutcome::Json(json!(2)));
+    }
 }

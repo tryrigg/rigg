@@ -88,26 +88,8 @@ resolve_target() {
 }
 
 choose_install_dir() {
-  local target="${1:-}"
-
   if [ -n "${RIGG_INSTALL_DIR}" ]; then
     printf '%s\n' "${RIGG_INSTALL_DIR}"
-    return
-  fi
-
-  if [ -z "${target}" ]; then
-    target="$(resolve_target)"
-  fi
-
-  if [ "${target}" = "aarch64-apple-darwin" ]; then
-    if [ -d "/opt/homebrew/bin" ] && [ -w "/opt/homebrew/bin" ]; then
-      printf '%s\n' "/opt/homebrew/bin"
-      return
-    fi
-  fi
-
-  if [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
-    printf '%s\n' "/usr/local/bin"
     return
   fi
 

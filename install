@@ -269,12 +269,12 @@ rollback_binary() {
 }
 
 print_next_steps() {
-  local rigg_bin="$1"
+  local rigg_cmd="$1"
   printf '\n'
   printf '%s\n' "Next steps:"
-  printf '%s\n' "  1. ${rigg_bin} init"
-  printf '%s\n' "  2. ${rigg_bin} validate"
-  printf '%s\n' "  3. ${rigg_bin} run <workflow_id> --input key=value"
+  printf '%s\n' "  1. ${rigg_cmd} init"
+  printf '%s\n' "  2. ${rigg_cmd} validate"
+  printf '%s\n' "  3. ${rigg_cmd} run <workflow_id> --input key=value"
 }
 
 main() {
@@ -297,6 +297,7 @@ main() {
   local check_error=""
   local status=0
   local rigg_bin
+  local rigg_cmd
   local installed_version
 
   parse_args "$@"
@@ -398,14 +399,19 @@ main() {
   rm -f "${backup_rigg}"
 
   rigg_bin="${final_rigg}"
+  rigg_cmd="${rigg_bin}"
   log "installed binary to ${install_dir}"
   ensure_path_hint "${install_dir}"
+
+  case ":${PATH}:" in
+    *":${install_dir}:"*) rigg_cmd="rigg" ;;
+  esac
 
   if installed_version="$("${rigg_bin}" --version 2>/dev/null)"; then
     log "installed ${installed_version}"
   fi
 
-  print_next_steps "${rigg_bin}"
+  print_next_steps "${rigg_cmd}"
 }
 
 main "$@"

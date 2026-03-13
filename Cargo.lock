@@ -1087,7 +1087,7 @@ checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 
 [[package]]
 name = "rigg-cli"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "clap",
  "libc",
@@ -1109,7 +1109,7 @@ dependencies = [
 
 [[package]]
 name = "rigg-config"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "expect-test",
  "rigg-core",
@@ -1121,7 +1121,7 @@ dependencies = [
 
 [[package]]
 name = "rigg-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "cel-interpreter",
  "regex",
@@ -1133,7 +1133,7 @@ dependencies = [
 
 [[package]]
 name = "rigg-engine"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "rigg-core",
  "serde_json",
@@ -1143,7 +1143,7 @@ dependencies = [
 
 [[package]]
 name = "rigg-runtime"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "libc",
  "rigg-core",
@@ -1156,7 +1156,7 @@ dependencies = [
 
 [[package]]
 name = "rigg-store"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "rigg-core",
  "rigg-engine",

@@ -81,6 +81,7 @@ steps:
     type: codex
     with:
       action: exec
+      model: gpt-5.4
       prompt: |
         You are a senior software architect. Draft a detailed implementation plan from the requirements below.
 
@@ -109,6 +110,7 @@ steps:
     type: claude
     with:
       action: prompt
+      model: claude-opus-4-6
       prompt: |
         You are a principal engineer reviewing the implementation plan below.
 
@@ -155,6 +157,7 @@ steps:
             type: codex
             with:
               action: exec
+              model: gpt-5.4
               prompt: |
                 You are a senior software architect. You wrote the original draft below, and a reviewer has provided findings.
 
@@ -208,6 +211,7 @@ steps:
         type: codex
         with:
           action: review
+          model: gpt-5.4
           target: uncommitted
           prompt: Review current uncommitted changes for bugs and missing tests.
 
@@ -215,6 +219,7 @@ steps:
         type: claude
         with:
           action: prompt
+          model: claude-opus-4-6
           prompt: |
             Read the review below.
             
@@ -237,6 +242,7 @@ steps:
         type: codex
         with:
           action: exec
+          model: gpt-5.4
           mode: full_auto
           prompt: ${{ steps.judge.result.fix_brief }}
     exports:
@@ -260,6 +266,7 @@ steps:
         type: codex
         with:
           action: review
+          model: gpt-5.4
           target: base
           base: ${{ inputs.base_branch }}
           prompt: Review the current branch diff for bugs and missing tests.
@@ -268,6 +275,7 @@ steps:
         type: claude
         with:
           action: prompt
+          model: claude-opus-4-6
           prompt: |
             Read the review below.
             
@@ -290,6 +298,7 @@ steps:
         type: codex
         with:
           action: exec
+          model: gpt-5.4
           mode: full_auto
           prompt: ${{ steps.judge.result.fix_brief }}
     exports:
@@ -313,6 +322,7 @@ steps:
         type: codex
         with:
           action: review
+          model: gpt-5.4
           target: commit
           commit: ${{ inputs.commit_sha }}
           title: Review commit
@@ -322,6 +332,7 @@ steps:
         type: claude
         with:
           action: prompt
+          model: claude-opus-4-6
           prompt: |
             Read the review below.
 
@@ -344,6 +355,7 @@ steps:
         type: codex
         with:
           action: exec
+          model: gpt-5.4
           mode: full_auto
           prompt: ${{ steps.judge.result.fix_brief }}
     exports:

@@ -1,11 +1,12 @@
 import { normalizeError } from "./error"
 
 export type JsonPrimitive = boolean | null | number | string
-export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue }
+export type JsonObject = { [key: string]: JsonValue }
+export type JsonValue = JsonPrimitive | JsonValue[] | JsonObject
 
 export function parseJson(text: string): unknown {
   try {
-    return JSON.parse(text) as unknown
+    return JSON.parse(text)
   } catch (error) {
     throw normalizeError(error)
   }
@@ -27,7 +28,7 @@ export function stringifyJsonCompact(value: unknown): string {
   }
 }
 
-export function isJsonObject(value: unknown): value is { [key: string]: JsonValue } {
+export function isJsonObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
@@ -49,17 +50,27 @@ export function asJsonValue(value: unknown): JsonValue | undefined {
   }
 
   if (Array.isArray(value)) {
-    const items = value.map((item) => asJsonValue(item))
-    return items.every((item) => item !== undefined) ? (items as JsonValue[]) : undefined
+    const items: JsonValue[] = []
+    for (const item of value) {
+      const jsonItem = asJsonValue(item)
+      if (jsonItem === undefined) {
+        return undefined
+      }
+      items.push(jsonItem)
+    }
+    return items
   }
 
   if (isJsonObject(value)) {
-    const entries = Object.entries(value).map(([key, item]) => [key, asJsonValue(item)] as const)
-    if (entries.some(([, item]) => item === undefined)) {
-      return undefined
+    const output: Record<string, JsonValue> = {}
+    for (const [key, item] of Object.entries(value)) {
+      const jsonItem = asJsonValue(item)
+      if (jsonItem === undefined) {
+        return undefined
+      }
+      output[key] = jsonItem
     }
-
-    return Object.fromEntries(entries) as { [key: string]: JsonValue }
+    return output
   }
 
   return undefined

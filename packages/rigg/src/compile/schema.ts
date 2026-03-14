@@ -23,6 +23,10 @@ const JsonSchemaTypeValues = ["string", "integer", "number", "boolean", "object"
 export type JsonSchemaType = (typeof JsonSchemaTypeValues)[number]
 export const JsonSchemaType = z.enum(JsonSchemaTypeValues)
 
+function isJsonSchemaType(value: unknown): value is JsonSchemaType {
+  return typeof value === "string" && JsonSchemaType.safeParse(value).success
+}
+
 export function isValidIdentifier(value: string): boolean {
   return IDENTIFIER_PATTERN.test(value)
 }
@@ -245,16 +249,16 @@ function parseJsonSchemaType(input: unknown): {
   type: JsonSchemaType
   nullable: boolean
 } {
-  if (typeof input === "string" && JsonSchemaTypeValues.includes(input as JsonSchemaType)) {
-    return { nullable: false, type: input as JsonSchemaType }
+  if (isJsonSchemaType(input)) {
+    return { nullable: false, type: input }
   }
 
   if (Array.isArray(input) && input.length === 2) {
     const values = new Set(input)
     if (values.has("null")) {
       for (const value of values) {
-        if (value !== "null" && JsonSchemaTypeValues.includes(value as JsonSchemaType)) {
-          return { nullable: true, type: value as JsonSchemaType }
+        if (value !== "null" && isJsonSchemaType(value)) {
+          return { nullable: true, type: value }
         }
       }
     }
@@ -469,13 +473,13 @@ export function validateInputValue(schema: InputDefinition, value: unknown, path
       }
       return errors
     case "integer":
-      if (!Number.isInteger(value)) {
+      if (!isIntegerValue(value)) {
         return [`${path} must be an integer`]
       }
-      if (schema.minimum !== undefined && (value as number) < schema.minimum) {
+      if (schema.minimum !== undefined && value < schema.minimum) {
         errors.push(`${path} must be >= ${schema.minimum}`)
       }
-      if (schema.maximum !== undefined && (value as number) > schema.maximum) {
+      if (schema.maximum !== undefined && value > schema.maximum) {
         errors.push(`${path} must be <= ${schema.maximum}`)
       }
       return errors
@@ -554,11 +558,12 @@ export function validateOutputValue(schema: OutputDefinition, value: unknown, pa
       if (!Array.isArray(value)) {
         return [`${path} must be an array`]
       }
-      return schema.items === undefined
-        ? []
-        : value.flatMap((item, index) =>
-            validateOutputValue(schema.items as OutputDefinition, item, `${path}.${index}`),
-          )
+      {
+        const items = schema.items
+        return items === undefined
+          ? []
+          : value.flatMap((item, index) => validateOutputValue(items, item, `${path}.${index}`))
+      }
     case "object":
       if (!isJsonObject(value)) {
         return [`${path} must be an object`]
@@ -794,13 +799,13 @@ export type WriteFileNode = BaseNode & {
 }
 
 export type GroupNode = BaseNode & {
-  exports?: Record<string, string>
+  exports?: Record<string, string> | undefined
   steps: WorkflowStep[]
   type: "group"
 }
 
 export type LoopNode = BaseNode & {
-  exports?: Record<string, string>
+  exports?: Record<string, string> | undefined
   max: number
   steps: WorkflowStep[]
   type: "loop"
@@ -869,45 +874,69 @@ const ParallelBranchSchema: z.ZodType<ParallelBranch> = z.lazy(() =>
     .strict(),
 )
 
+const ShellNodeSchema: z.ZodType<ShellNode> = BaseNodeSchema.extend({
+  type: z.literal("shell"),
+  with: ShellWithSchema,
+}).strict()
+
+const CodexNodeSchema: z.ZodType<CodexNode> = BaseNodeSchema.extend({
+  type: z.literal("codex"),
+  with: z.union([CodexReviewWithSchema, CodexExecWithSchema]),
+}).strict()
+
+const ClaudeNodeSchema: z.ZodType<ClaudeNode> = BaseNodeSchema.extend({
+  type: z.literal("claude"),
+  with: ClaudeWithSchema,
+}).strict()
+
+const WriteFileNodeSchema: z.ZodType<WriteFileNode> = BaseNodeSchema.extend({
+  type: z.literal("write_file"),
+  with: WriteFileWithSchema,
+}).strict()
+
+const GroupNodeSchema: z.ZodType<GroupNode> = z.lazy(() =>
+  ControlBaseSchema.extend({
+    exports: ExportsSchema.optional(),
+    steps: z.array(WorkflowStepSchema).min(1),
+    type: z.literal("group"),
+  }).strict(),
+)
+
+const LoopNodeSchema: z.ZodType<LoopNode> = z.lazy(() =>
+  ControlBaseSchema.extend({
+    exports: ExportsSchema.optional(),
+    max: z.number().int().positive(),
+    steps: z.array(WorkflowStepSchema).min(1),
+    type: z.literal("loop"),
+    until: z.string().min(1),
+  }).strict(),
+)
+
+const BranchNodeSchema: z.ZodType<BranchNode> = z.lazy(() =>
+  ControlBaseSchema.extend({
+    cases: z.array(BranchCaseSchema).min(1),
+    type: z.literal("branch"),
+  }).strict(),
+)
+
+const ParallelNodeSchema: z.ZodType<ParallelNode> = z.lazy(() =>
+  ControlBaseSchema.extend({
+    branches: z.array(ParallelBranchSchema).min(1),
+    exports: ExportsSchema.optional(),
+    type: z.literal("parallel"),
+  }).strict(),
+)
+
 export const WorkflowStepSchema: z.ZodType<WorkflowStep> = z.lazy(() =>
   z.union([
-    BaseNodeSchema.extend({
-      type: z.literal("shell"),
-      with: ShellWithSchema,
-    }).strict() as z.ZodType<ShellNode>,
-    BaseNodeSchema.extend({
-      type: z.literal("codex"),
-      with: z.union([CodexReviewWithSchema, CodexExecWithSchema]),
-    }).strict() as z.ZodType<CodexNode>,
-    BaseNodeSchema.extend({
-      type: z.literal("claude"),
-      with: ClaudeWithSchema,
-    }).strict() as z.ZodType<ClaudeNode>,
-    BaseNodeSchema.extend({
-      type: z.literal("write_file"),
-      with: WriteFileWithSchema,
-    }).strict() as z.ZodType<WriteFileNode>,
-    ControlBaseSchema.extend({
-      exports: ExportsSchema.optional(),
-      steps: z.array(WorkflowStepSchema).min(1),
-      type: z.literal("group"),
-    }).strict() as z.ZodType<GroupNode>,
-    ControlBaseSchema.extend({
-      exports: ExportsSchema.optional(),
-      max: z.number().int().positive(),
-      steps: z.array(WorkflowStepSchema).min(1),
-      type: z.literal("loop"),
-      until: z.string().min(1),
-    }).strict() as z.ZodType<LoopNode>,
-    ControlBaseSchema.extend({
-      cases: z.array(BranchCaseSchema).min(1),
-      type: z.literal("branch"),
-    }).strict() as z.ZodType<BranchNode>,
-    ControlBaseSchema.extend({
-      branches: z.array(ParallelBranchSchema).min(1),
-      exports: ExportsSchema.optional(),
-      type: z.literal("parallel"),
-    }).strict() as z.ZodType<ParallelNode>,
+    ShellNodeSchema,
+    CodexNodeSchema,
+    ClaudeNodeSchema,
+    WriteFileNodeSchema,
+    GroupNodeSchema,
+    LoopNodeSchema,
+    BranchNodeSchema,
+    ParallelNodeSchema,
   ]),
 )
 
@@ -951,4 +980,8 @@ function validatePattern(pattern: string): string | undefined {
 
 function compilePattern(pattern: string): RegExp | undefined {
   return validatePattern(pattern) === undefined ? new RegExp(pattern, "u") : undefined
+}
+
+function isIntegerValue(value: unknown): value is number {
+  return Number.isInteger(value)
 }

@@ -7,7 +7,7 @@ export type YamlParseResult = { kind: "parsed"; document: unknown } | { kind: "i
 
 export function parseYamlDocument(text: string, filePath: string): YamlParseResult {
   try {
-    return { kind: "parsed", document: parse(text) as unknown }
+    return { kind: "parsed", document: parse(text) }
   } catch (error) {
     return {
       kind: "invalid_yaml",

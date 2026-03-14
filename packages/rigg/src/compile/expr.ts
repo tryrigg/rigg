@@ -765,19 +765,19 @@ function compareValues(left: unknown, right: unknown): number {
     return left === right ? 0 : left < right ? -1 : 1
   }
   if (typeof left === "string" && typeof right === "string") {
-    return left.localeCompare(right)
+    return compareCanonicalStrings(left, right)
   }
   if (typeof left === "boolean" && typeof right === "boolean") {
     return left === right ? 0 : left ? 1 : -1
   }
-  return stableStringify(left).localeCompare(stableStringify(right))
+  return compareCanonicalStrings(stableStringify(left), stableStringify(right))
 }
 
 function evaluateCall(name: string, args: ExprNode[], context: JsonValue, source: string): unknown {
   if (name === "contains") {
     ensureArity(name, args, 2)
-    const haystack = evaluateNode(args[0] as ExprNode, context, source)
-    const needle = evaluateNode(args[1] as ExprNode, context, source)
+    const haystack = evaluateNode(requiredArg(args, 0, name), context, source)
+    const needle = evaluateNode(requiredArg(args, 1, name), context, source)
     if (typeof haystack === "string") {
       return haystack.includes(stringifyValue(needle))
     }
@@ -788,21 +788,21 @@ function evaluateCall(name: string, args: ExprNode[], context: JsonValue, source
   }
   if (name === "startsWith") {
     ensureArity(name, args, 2)
-    return stringifyValue(evaluateNode(args[0] as ExprNode, context, source)).startsWith(
-      stringifyValue(evaluateNode(args[1] as ExprNode, context, source)),
+    return stringifyValue(evaluateNode(requiredArg(args, 0, name), context, source)).startsWith(
+      stringifyValue(evaluateNode(requiredArg(args, 1, name), context, source)),
     )
   }
   if (name === "endsWith") {
     ensureArity(name, args, 2)
-    return stringifyValue(evaluateNode(args[0] as ExprNode, context, source)).endsWith(
-      stringifyValue(evaluateNode(args[1] as ExprNode, context, source)),
+    return stringifyValue(evaluateNode(requiredArg(args, 0, name), context, source)).endsWith(
+      stringifyValue(evaluateNode(requiredArg(args, 1, name), context, source)),
     )
   }
   if (name === "format") {
     if (args.length === 0) {
       throw new Error("format expects at least one argument")
     }
-    let rendered = stringifyValue(evaluateNode(args[0] as ExprNode, context, source))
+    let rendered = stringifyValue(evaluateNode(requiredArg(args, 0, name), context, source))
     for (const [index, arg] of args.slice(1).entries()) {
       rendered = rendered.replaceAll(`{${index}}`, stringifyValue(evaluateNode(arg, context, source)))
     }
@@ -810,8 +810,8 @@ function evaluateCall(name: string, args: ExprNode[], context: JsonValue, source
   }
   if (name === "join") {
     ensureArity(name, args, 2)
-    const values = evaluateNode(args[0] as ExprNode, context, source)
-    const separator = stringifyValue(evaluateNode(args[1] as ExprNode, context, source))
+    const values = evaluateNode(requiredArg(args, 0, name), context, source)
+    const separator = stringifyValue(evaluateNode(requiredArg(args, 1, name), context, source))
     if (!Array.isArray(values)) {
       throw new Error("join expects an array as the first argument")
     }
@@ -819,15 +819,15 @@ function evaluateCall(name: string, args: ExprNode[], context: JsonValue, source
   }
   if (name === "toJSON") {
     ensureArity(name, args, 1)
-    return stableStringify(evaluateNode(args[0] as ExprNode, context, source))
+    return stableStringify(evaluateNode(requiredArg(args, 0, name), context, source))
   }
   if (name === "fromJSON") {
     ensureArity(name, args, 1)
-    return parseJson(stringifyValue(evaluateNode(args[0] as ExprNode, context, source)))
+    return parseJson(stringifyValue(evaluateNode(requiredArg(args, 0, name), context, source)))
   }
   if (name === "len") {
     ensureArity(name, args, 1)
-    const value = evaluateNode(args[0] as ExprNode, context, source)
+    const value = evaluateNode(requiredArg(args, 0, name), context, source)
     if (typeof value === "string" || Array.isArray(value)) {
       return value.length
     }
@@ -844,6 +844,14 @@ function ensureArity(name: string, args: ExprNode[], expected: number): void {
   if (args.length !== expected) {
     throw new Error(`${name} expects ${expected} argument(s), got ${args.length}`)
   }
+}
+
+function requiredArg(args: ExprNode[], index: number, name: string): ExprNode {
+  const arg = args[index]
+  if (arg === undefined) {
+    throw new Error(`${name} expects argument ${index + 1}`)
+  }
+  return arg
 }
 
 function resolvePath(context: JsonValue, root: ExprRoot, segments: string[]): unknown {
@@ -903,15 +911,22 @@ function stableStringify(value: unknown): string {
   return JSON.stringify(sortJsonValue(jsonValue ?? null))
 }
 
+function compareCanonicalStrings(left: string, right: string): number {
+  if (left === right) {
+    return 0
+  }
+  return left < right ? -1 : 1
+}
+
 function sortJsonValue(value: JsonValue): JsonValue {
   if (Array.isArray(value)) {
     return value.map(sortJsonValue)
   }
   if (isJsonObject(value)) {
     return Object.fromEntries(
-      Object.keys(value)
-        .sort()
-        .map((key) => [key, sortJsonValue(value[key] as JsonValue)] as const),
+      Object.entries(value)
+        .sort(([left], [right]) => compareCanonicalStrings(left, right))
+        .map(([key, item]) => [key, sortJsonValue(item)] as const),
     )
   }
   return value
@@ -957,7 +972,7 @@ function inferCallShape(
       }
     }
     if (first?.kind === "call" && first.name === "toJSON" && first.args.length === 1) {
-      return inferNodeShape(first.args[0] as ExprNode, resolvePath)
+      return inferNodeShape(requiredArg(first.args, 0, first.name), resolvePath)
     }
     return AnyJsonShape
   }

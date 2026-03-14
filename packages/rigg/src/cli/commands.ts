@@ -42,8 +42,11 @@ async function exists(path: string): Promise<boolean> {
   try {
     await access(path, constants.F_OK)
     return true
-  } catch {
-    return false
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return false
+    }
+    throw error
   }
 }
 
@@ -117,7 +120,7 @@ function parseInputs(values: string[]): ParseInputsResult {
 
     const rawValue = rest.join("=")
     try {
-      output[key] = JSON.parse(rawValue) as unknown
+      output[key] = JSON.parse(rawValue)
     } catch {
       output[key] = rawValue
     }
@@ -293,4 +296,8 @@ export async function runLogsCommand(
   } catch (error) {
     return failure([normalizeError(error).message])
   }
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT"
 }

@@ -40,6 +40,29 @@ const context = {
   },
 } as const
 
+const composedAccent = "é"
+const decomposedAccent = "e\u0301"
+const unicodeObject = {
+  [composedAccent]: "composed",
+  [decomposedAccent]: "decomposed",
+}
+const unicodeObjectReordered = {
+  [decomposedAccent]: "decomposed",
+  [composedAccent]: "composed",
+}
+const unicodeContext = {
+  ...context,
+  inputs: {
+    ...context.inputs,
+    composedAccent,
+    decomposedAccent,
+    haystack: [unicodeObject],
+    needle: unicodeObjectReordered,
+    unicodeObject,
+    unicodeObjectReordered,
+  },
+}
+
 describe("compile/expr", () => {
   test("extracts template expressions in order", () => {
     expect(extractTemplateExpressions("Hello ${{ inputs.name }} from ${{ env.CI }}")).toEqual(["inputs.name", "env.CI"])
@@ -118,6 +141,11 @@ describe("compile/expr", () => {
     expect(renderTemplateString("Hello ${{ inputs.name }} #${{ run.iteration }}", context)).toBe("Hello Rigg #2")
   })
 
+  test("uses strict string equality for canonically distinct unicode strings", () => {
+    expect(evaluateExpression("inputs.composedAccent == inputs.decomposedAccent", unicodeContext)).toBe(false)
+    expect(evaluateExpression("inputs.composedAccent != inputs.decomposedAccent", unicodeContext)).toBe(true)
+  })
+
   test("returns structured values for whole-expression templates", () => {
     expect(renderTemplate("${{ steps.check.result }}", context)).toEqual(context.steps.check.result)
     expect(renderTemplateString("${{ steps.check.result }}", context)).toBe(
@@ -129,6 +157,19 @@ describe("compile/expr", () => {
     expect(() => renderTemplateString("Findings: ${{ steps.check.result.tags }}", context)).toThrow(
       "evaluated to non-scalar template value",
     )
+  })
+
+  test("canonicalizes JSON object keys independent of insertion order", () => {
+    expect(evaluateExpression("toJSON(inputs.unicodeObject)", unicodeContext)).toBe(
+      '{"e\u0301":"decomposed","é":"composed"}',
+    )
+    expect(evaluateExpression("toJSON(inputs.unicodeObject)", unicodeContext)).toBe(
+      evaluateExpression("toJSON(inputs.unicodeObjectReordered)", unicodeContext),
+    )
+  })
+
+  test("contains matches objects by canonical JSON shape", () => {
+    expect(evaluateExpression("contains(inputs.haystack, inputs.needle)", unicodeContext)).toBe(true)
   })
 
   test("captures expression metadata and infers result shapes", () => {

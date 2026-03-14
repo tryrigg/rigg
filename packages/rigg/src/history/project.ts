@@ -12,8 +12,10 @@ export async function discoverProjectRoot(startDir: string): Promise<ProjectRoot
       if (stat.isDirectory()) {
         return { kind: "found", rootDir: currentDir }
       }
-    } catch {
-      // keep walking
+    } catch (error) {
+      if (!isMissingPathError(error)) {
+        throw error
+      }
     }
 
     const parent = dirname(currentDir)
@@ -26,4 +28,8 @@ export async function discoverProjectRoot(startDir: string): Promise<ProjectRoot
 
     currentDir = parent
   }
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT"
 }

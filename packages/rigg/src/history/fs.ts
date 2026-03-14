@@ -98,13 +98,16 @@ export function parseLogFileName(fileName: string): ParsedLogFileName | undefine
   if (nodePath === undefined) {
     return undefined
   }
+  if (streamText !== "stdout" && streamText !== "stderr") {
+    return undefined
+  }
 
   return {
     attempt: Number.parseInt(attemptText, 10),
     fileName,
     frameId,
     nodePath,
-    stream: streamText as LogStream,
+    stream: streamText,
   }
 }
 

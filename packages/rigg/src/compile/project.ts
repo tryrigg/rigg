@@ -47,8 +47,10 @@ export async function discoverWorkspace(startDir: string): Promise<WorkspaceDisc
           },
         }
       }
-    } catch {
-      // Ignore missing directories while walking upward.
+    } catch (error) {
+      if (!isMissingPathError(error)) {
+        throw error
+      }
     }
 
     const parentDir = dirname(currentDir)
@@ -68,4 +70,8 @@ export async function discoverWorkspace(startDir: string): Promise<WorkspaceDisc
 
 export function workflowById(project: WorkflowProject, workflowId: string): WorkflowDocument | undefined {
   return project.files.find((file) => file.workflow.id === workflowId)?.workflow
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT"
 }

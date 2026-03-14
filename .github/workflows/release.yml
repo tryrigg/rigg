@@ -13,7 +13,50 @@ permissions:
   contents: read
 
 jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Type check
+        run: bun run check
+
+      - name: Run tests
+        run: bun run test
+
+      - name: Build website
+        run: bun run --cwd packages/www build
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Lint install script
+        run: shellcheck install
+
+      - name: Validate install script syntax
+        run: bash -n install
+
   build:
+    needs:
+      - quality
     name: build (${{ matrix.target }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
@@ -46,11 +89,14 @@ jobs:
       - name: Smoke test standalone CLI
         run: |
           tmpdir="$(mktemp -d)"
-          ./packages/rigg/dist/rigg --version
+          expected_version="rigg ${GITHUB_REF_NAME#v}"
+          actual_version="$(./packages/rigg/dist/rigg --version)"
+          [ "${actual_version}" = "${expected_version}" ]
           cp ./packages/rigg/dist/rigg "$tmpdir/rigg"
           (
             cd "$tmpdir"
             chmod 0755 ./rigg
+            [ "$(./rigg --version)" = "${expected_version}" ]
             ./rigg init
             ./rigg validate
           )
@@ -125,6 +171,7 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           TAG="${GITHUB_REF_NAME}"
+          EXPECTED_VERSION="rigg ${VERSION}"
           TMP_ROOT="$(mktemp -d)"
           mkdir -p "$TMP_ROOT/releases/download/$TAG"
           mkdir -p "$TMP_ROOT/project"
@@ -135,9 +182,9 @@ jobs:
             RIGG_RELEASE_BASE_URL="file://$TMP_ROOT/releases/download" \
             RIGG_INSTALL_DIR="$TMP_ROOT/bin" \
             RIGG_INSTALL_ALLOW_INSECURE_PROTOCOLS=1 \
-            bash ./install
+            bash -c "curl -fsSL file://$PWD/install | bash"
 
-          "$TMP_ROOT/bin/rigg" --version
+          [ "$("$TMP_ROOT/bin/rigg" --version)" = "${EXPECTED_VERSION}" ]
           (
             cd "$TMP_ROOT/project"
             "$TMP_ROOT/bin/rigg" init
@@ -168,3 +215,27 @@ jobs:
             release-artifacts/*.tar.gz
             release-artifacts/rigg-checksums.txt
           fail_on_unmatched_files: true
+
+  attest:
+    needs:
+      - publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      attestations: write
+      id-token: write
+
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@v5
+        with:
+          name: release-assets
+          path: release-artifacts
+
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            release-artifacts/*.tar.gz
+            release-artifacts/rigg-checksums.txt

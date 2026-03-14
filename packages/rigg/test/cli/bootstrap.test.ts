@@ -25,7 +25,7 @@ describe("cli/bootstrap", () => {
 
     expect(result.exitCode).toBe(0)
     expect(result.stderr).toBe("")
-    expect(result.stdout).toBe("rigg 0.0.0\n")
+    expect(result.stdout).toBe("rigg dev\n")
   })
 
   test("help output lists version as an option, not a command", async () => {
@@ -42,6 +42,6 @@ describe("cli/bootstrap", () => {
 
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain("rigg <command>\n")
-    expect(result.stdout).not.toContain("rigg 0.0.0\n")
+    expect(result.stdout).not.toContain("rigg dev\n")
   })
 })

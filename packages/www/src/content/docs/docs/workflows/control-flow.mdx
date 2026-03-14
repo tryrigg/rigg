@@ -114,13 +114,13 @@ Runs branches concurrently.
         - id: run_unit
           type: shell
           with:
-            command: cargo test --lib
+            command: npm test
     - id: lint
       steps:
         - id: run_lint
           type: shell
           with:
-            command: cargo clippy
+            command: npm run lint
   exports:
     unit: ${{ steps.run_unit.result }}
     lint: ${{ steps.run_lint.result }}

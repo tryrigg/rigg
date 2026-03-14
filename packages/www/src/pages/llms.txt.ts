@@ -27,7 +27,7 @@ export const GET: APIRoute = async () => {
 
   const content = `# Rigg
 
-> Rigg is an open-source, local-first workflow runner for agentic coding. Written in Rust, it lets you wire Codex, Claude Code, and shell commands into repeatable YAML pipelines that run locally and version in Git.
+> Rigg is an open-source, local-first workflow runner for agentic coding. It lets you wire Codex, Claude Code, and shell commands into repeatable YAML pipelines that run locally and version in Git.
 
 Rigg captures multi-step agent workflows as \`.rigg/*.yaml\` files in your repository. Instead of ad-hoc prompts and terminal sessions, teams define explicit pipelines for implementation planning, review loops, fix verification, and codebase checks. Every run is recorded under \`.rigg/runs/\`.
 
@@ -42,7 +42,7 @@ Key features:
 
 Install: \`curl -fsSL https://tryrigg.com/install | bash\`
 
-Requirements: macOS, Rust 1.94.0 (for building from source), \`codex\` and/or \`claude\` on PATH.
+Requirements: macOS, \`codex\` and/or \`claude\` on PATH.
 
 ## Docs
 

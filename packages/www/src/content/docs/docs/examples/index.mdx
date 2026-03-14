@@ -154,21 +154,21 @@ steps:
           - id: run_unit
             type: shell
             with:
-              command: cargo test --lib
+              command: npm test
               result: text
       - id: integration
         steps:
           - id: run_integration
             type: shell
             with:
-              command: cargo test --test '*'
+              command: npm run test:e2e
               result: text
       - id: lint
         steps:
           - id: run_lint
             type: shell
             with:
-              command: cargo clippy -- -D warnings
+              command: npm run lint
               result: text
     exports:
       unit: ${{ steps.run_unit.result }}

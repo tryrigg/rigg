@@ -21,7 +21,6 @@ function parseCommand(argv: string[]): ParsedCommand {
     case "--help":
     case "-h":
       return { kind: "help" }
-    case "version":
     case "--version":
     case "-V":
       return { kind: "version" }
@@ -123,12 +122,15 @@ function renderHelp(): string[] {
     "rigg <command>",
     "",
     "Commands:",
-    "  version",
     "  init",
     "  validate [--json]",
     "  run <workflow_id> [--json] [--quiet] [--input key=value]",
     "  status [run_id] [--json]",
     "  logs <run_id> [--node id] [--stderr]",
+    "",
+    "Options:",
+    "  -h, --help",
+    "  -V, --version",
   ]
 }
 

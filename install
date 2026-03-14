@@ -8,6 +8,7 @@ RIGG_INSTALL_SELF_CHECK_TIMEOUT="${RIGG_INSTALL_SELF_CHECK_TIMEOUT:-10}"
 RIGG_INSTALL_ALLOW_INSECURE_PROTOCOLS="${RIGG_INSTALL_ALLOW_INSECURE_PROTOCOLS:-0}"
 RIGG_RELEASE_BASE_URL="${RIGG_RELEASE_BASE_URL:-https://github.com/${REPO}/releases/download}"
 RIGG_LATEST_URL="${RIGG_LATEST_URL:-https://github.com/${REPO}/releases/latest}"
+RIGG_INSTALL_TMPDIR=""
 
 log() {
   printf '%s\n' "rigg-installer: $*"
@@ -20,6 +21,12 @@ warn() {
 die() {
   printf '%s\n' "rigg-installer: error: $*" >&2
   exit 1
+}
+
+cleanup() {
+  if [ -n "${RIGG_INSTALL_TMPDIR}" ]; then
+    rm -rf -- "${RIGG_INSTALL_TMPDIR}"
+  fi
 }
 
 usage() {
@@ -284,7 +291,6 @@ main() {
   local release_download_base
   local archive_name
   local checksums_name
-  local tmpdir
   local archive_path
   local checksums_path
 
@@ -329,11 +335,11 @@ main() {
   install_dir="$(choose_install_dir "${target}")"
   mkdir -p "${install_dir}"
 
-  tmpdir="$(mktemp -d)"
-  trap "rm -rf -- $(printf '%q' "${tmpdir}")" EXIT
+  RIGG_INSTALL_TMPDIR="$(mktemp -d)"
+  trap cleanup EXIT
 
-  archive_path="${tmpdir}/${archive_name}"
-  checksums_path="${tmpdir}/${checksums_name}"
+  archive_path="${RIGG_INSTALL_TMPDIR}/${archive_name}"
+  checksums_path="${RIGG_INSTALL_TMPDIR}/${checksums_name}"
 
   log "downloading ${archive_name}"
   download "${release_download_base}/${archive_name}" "${archive_path}"
@@ -343,9 +349,9 @@ main() {
   verify_checksum "${checksums_path}" "${archive_name}" "${archive_path}"
 
   log "extracting archive"
-  tar -xzf "${archive_path}" -C "${tmpdir}"
+  tar -xzf "${archive_path}" -C "${RIGG_INSTALL_TMPDIR}"
 
-  src_rigg="$(extract_binary_path "${tmpdir}" "rigg")" || die "binary missing from release archive: rigg"
+  src_rigg="$(extract_binary_path "${RIGG_INSTALL_TMPDIR}" "rigg")" || die "binary missing from release archive: rigg"
 
   final_rigg="${install_dir}/rigg"
   staged_rigg="$(mktemp "${install_dir}/.rigg.new.XXXXXX")"

@@ -1,0 +1,53 @@
+---
+title: Getting started
+description: Install Rigg, initialize a project, and run your first workflow.
+---
+
+## Install
+
+```bash
+curl -fsSL https://tryrigg.com/install | bash
+```
+
+Specific version:
+
+```bash
+curl -fsSL https://tryrigg.com/install | bash -s -- --version v0.1.0
+```
+
+macOS only (prebuilt binary). Or build from source:
+
+```bash
+cargo install --path crates/cli
+```
+
+**Requirements:** `codex` on `PATH` for codex steps, `claude` on `PATH` for claude steps.
+
+## Init and run
+
+```bash
+rigg init                              # creates .rigg/ with example workflows
+rigg validate                          # check YAML syntax
+rigg run hello --input name=Rigg       # run a workflow
+```
+
+`--input key=value` auto-parses JSON — `true`, `42`, `["a"]`, `{"x":1}` all work.
+
+## Inspect runs
+
+```bash
+rigg status                            # list recent runs
+rigg status <run_id> --json            # details as JSON
+rigg logs <run_id>                     # full output
+rigg logs <run_id> --node step_id      # specific step
+```
+
+Run data is stored under `.rigg/runs/<run_id>/`.
+
+## Output modes
+
+| Flag        | Behavior                        |
+| ----------- | ------------------------------- |
+| _(default)_ | Interactive progress (TTY only) |
+| `--json`    | JSON snapshot to stdout         |
+| `--quiet`   | Minimal output                  |

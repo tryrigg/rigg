@@ -10,7 +10,7 @@ The goal is to help teams use local coding agents in a safer and more repeatable
 
 ## Requirements
 
-- Rust `1.94.0`
+- Bun `1.3.10`
 - `codex` on `PATH` for `type: codex` steps
 - `claude` on `PATH` for `type: claude` steps
 
@@ -31,8 +31,9 @@ The installer currently supports macOS and installs a prebuilt `rigg` binary fro
 Or build from source:
 
 ```bash
-cargo install --path crates/cli
-cargo run -p rigg-cli -- --help
+bun install --frozen-lockfile
+bun run --cwd packages/rigg build:cli
+./packages/rigg/dist/rigg --help
 ```
 
 ## Quickstart
@@ -103,5 +104,7 @@ Supported step types:
 ## Development
 
 ```bash
-cargo test
+bun install --frozen-lockfile
+bun run check
+bun run test
 ```

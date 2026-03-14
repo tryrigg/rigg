@@ -1,0 +1,26 @@
+{
+  "name": "@tryrigg/rigg",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "bin": {
+    "rigg": "./src/cli/bootstrap.ts"
+  },
+  "scripts": {
+    "build:cli": "bun build --compile --env=RIGG_* --outfile dist/rigg ./src/cli/bootstrap.ts",
+    "check": "bunx tsc --noEmit",
+    "test": "bun test",
+    "test:randomize": "bun test --randomize",
+    "validate": "bun run ./src/cli/bootstrap.ts validate"
+  },
+  "dependencies": {
+    "uuid": "^13.0.0",
+    "yaml": "^2.8.2",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.4.0",
+    "bun-types": "^1.3.10",
+    "typescript": "^5.9.3"
+  }
+}

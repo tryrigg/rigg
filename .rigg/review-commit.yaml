@@ -26,10 +26,10 @@ steps:
           model: claude-opus-4-6
           prompt: |
             Read the review below.
-            
+
             Review:
             ${{ steps.review.result }}
-            
+
             Accept only findings that are valid and actionable.
           output_schema:
             type: object

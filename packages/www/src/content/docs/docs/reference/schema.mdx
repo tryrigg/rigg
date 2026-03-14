@@ -1,0 +1,152 @@
+---
+title: Schema reference
+description: Complete field-by-field reference for all Rigg workflow YAML types.
+sidebar:
+  order: 1
+---
+
+## Top-level
+
+| Field    | Type                          | Required | Description           |
+| -------- | ----------------------------- | -------- | --------------------- |
+| `id`     | string                        | Yes      | Workflow identifier   |
+| `inputs` | map&lt;string, JSONSchema&gt; | No       | Input definitions     |
+| `env`    | map&lt;string, template&gt;   | No       | Environment variables |
+| `steps`  | array&lt;Step&gt;             | Yes      | Non-empty step array  |
+
+## Common step fields
+
+| Field  | Type                        | Required | Description           |
+| ------ | --------------------------- | -------- | --------------------- |
+| `id`   | string                      | No       | Unique ID             |
+| `type` | string                      | Yes      | Step type             |
+| `if`   | expression                  | No       | Conditional execution |
+| `env`  | map&lt;string, template&gt; | No       | Step-level env vars   |
+
+## type: shell
+
+| Field          | Type                       | Required | Default |
+| -------------- | -------------------------- | -------- | ------- |
+| `with.command` | template                   | Yes      | —       |
+| `with.result`  | `none` \| `text` \| `json` | No       | `text`  |
+
+## type: codex (action: review)
+
+| Field           | Type                                | Required         | Default   |
+| --------------- | ----------------------------------- | ---------------- | --------- |
+| `with.action`   | `review`                            | Yes              | —         |
+| `with.prompt`   | template                            | No               | —         |
+| `with.target`   | `uncommitted` \| `base` \| `commit` | Yes\*            | —         |
+| `with.base`     | template                            | if target=base   | —         |
+| `with.commit`   | template                            | if target=commit | —         |
+| `with.title`    | template                            | No               | —         |
+| `with.model`    | string                              | No               | —         |
+| `with.mode`     | `default` \| `full_auto`            | No               | `default` |
+| `with.add_dirs` | array&lt;template&gt;               | No               | `[]`      |
+| `with.persist`  | bool                                | No               | `true`    |
+
+\*Omitting `target` with `base` present infers `target: base`.
+
+**Unsupported:** `conversation`, `output_schema`
+
+**Built-in result shape:**
+
+```yaml
+findings:
+  - title: string
+    body: string
+    confidence_score: number
+    priority: integer
+    code_location:
+      absolute_file_path: string
+      line_range:
+        start: integer
+        end: integer
+overall_correctness: string
+overall_explanation: string
+overall_confidence_score: number
+```
+
+## type: codex (action: exec)
+
+| Field                | Type                     | Required | Default   |
+| -------------------- | ------------------------ | -------- | --------- |
+| `with.action`        | `exec`                   | Yes      | —         |
+| `with.prompt`        | template                 | Yes      | —         |
+| `with.mode`          | `default` \| `full_auto` | No       | `default` |
+| `with.model`         | string                   | No       | —         |
+| `with.add_dirs`      | array&lt;template&gt;    | No       | `[]`      |
+| `with.persist`       | bool                     | No       | `true`    |
+| `with.conversation`  | Conversation             | No       | —         |
+| `with.output_schema` | JSONSchema               | No       | —         |
+
+**Unsupported:** `target`, `base`, `commit`, `title`
+
+## type: claude
+
+| Field                  | Type                                                                     | Required | Default   |
+| ---------------------- | ------------------------------------------------------------------------ | -------- | --------- |
+| `with.action`          | `prompt`                                                                 | Yes      | —         |
+| `with.prompt`          | template                                                                 | Yes      | —         |
+| `with.permission_mode` | `default` \| `plan` \| `acceptEdits` \| `dontAsk` \| `bypassPermissions` | No       | `default` |
+| `with.model`           | string                                                                   | No       | —         |
+| `with.add_dirs`        | array&lt;template&gt;                                                    | No       | `[]`      |
+| `with.persist`         | bool                                                                     | No       | `true`    |
+| `with.conversation`    | Conversation                                                             | No       | —         |
+| `with.output_schema`   | JSONSchema                                                               | No       | —         |
+
+## type: write_file
+
+| Field          | Type     | Required |
+| -------------- | -------- | -------- |
+| `with.path`    | template | Yes      |
+| `with.content` | template | Yes      |
+
+## type: group
+
+| Field     | Type                        | Required |
+| --------- | --------------------------- | -------- |
+| `steps`   | array&lt;Step&gt;           | Yes      |
+| `exports` | map&lt;string, template&gt; | No       |
+
+## type: loop
+
+| Field     | Type                        | Required |
+| --------- | --------------------------- | -------- |
+| `max`     | integer                     | Yes      |
+| `until`   | expression                  | Yes      |
+| `steps`   | array&lt;Step&gt;           | Yes      |
+| `exports` | map&lt;string, template&gt; | No       |
+
+## type: branch
+
+| Field   | Type              | Required |
+| ------- | ----------------- | -------- |
+| `cases` | array&lt;Case&gt; | Yes      |
+
+Each case: `if` or `else` + `steps` + optional `exports`. All cases must export the same shape or none.
+
+## type: parallel
+
+| Field      | Type                        | Required |
+| ---------- | --------------------------- | -------- |
+| `branches` | array&lt;Branch&gt;         | Yes      |
+| `exports`  | map&lt;string, template&gt; | No       |
+
+Each branch: `id` (required) + `steps`.
+
+## Conversation binding
+
+| Field   | Type                                | Required | Default                                  |
+| ------- | ----------------------------------- | -------- | ---------------------------------------- |
+| `name`  | string                              | Yes      | —                                        |
+| `scope` | `iteration` \| `loop` \| `workflow` | No       | `iteration` in loops, `workflow` outside |
+
+## Validation rules
+
+1. Step IDs unique across entire workflow
+2. `steps` arrays non-empty (except branch `else` cases)
+3. `steps.<id>.result` references previous steps only
+4. Branch exports must have matching shapes across cases
+5. `with` required for all action types
+6. Unknown YAML keys cause errors

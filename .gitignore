@@ -3,9 +3,10 @@
 /.claude
 /.agent/
 /.agents/
-.DS_Store
 /private/
-/www/node_modules/
-/www/dist/
-/www/.astro/
-/www/public/install
+/node_modules/
+/packages/*/node_modules/
+/packages/*/dist/
+/packages/www/.astro/
+/packages/www/public/install
+.DS_Store

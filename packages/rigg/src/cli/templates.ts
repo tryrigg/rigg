@@ -1,0 +1,295 @@
+export const planTemplate = `
+id: plan
+inputs:
+  requirements:
+    type: string
+    description: Requirements for the implementation plan
+  output_path:
+    type: string
+    description: Path to write the generated plan
+steps:
+  - id: draft
+    type: codex
+    with:
+      action: exec
+      model: gpt-5.4
+      prompt: |
+        You are a senior software architect. Draft a detailed implementation plan from the requirements below.
+
+        Your output must be a specification document that the next implementer can follow WITHOUT any ambiguity. Include:
+        - Clear problem statement and goals
+        - Step-by-step implementation instructions with exact file paths, function signatures, and data structures
+        - Decision rationale for every non-obvious choice (why this approach over alternatives)
+        - Concrete examples, expected inputs/outputs, and edge cases
+        - Dependencies and prerequisite setup
+        - Acceptance criteria that are testable and unambiguous
+        - Potential risks, pitfalls, and how to mitigate them
+
+        Do NOT leave any room for interpretation. If a future developer reads this document, they should be able to implement it without asking a single clarifying question.
+
+        Requirements:
+        \${{ inputs.requirements }}
+      output_schema:
+        type: object
+        required: [markdown]
+        additionalProperties: false
+        properties:
+          markdown:
+            type: string
+
+  - id: critique
+    type: claude
+    with:
+      action: prompt
+      model: claude-opus-4-6
+      prompt: |
+        You are a principal engineer reviewing the implementation plan below.
+
+        Review it critically and identify:
+        1. Ambiguities or gaps that would confuse an implementer
+        2. Technical inaccuracies or flawed assumptions
+        3. Missing edge cases or error handling considerations
+        4. Architectural concerns or better alternatives
+        5. Unclear or incomplete acceptance criteria
+
+        For each finding, provide a structured entry. If the plan is already solid and you have no findings, return has_findings: false and an empty findings array.
+
+        Draft:
+        \${{ steps.draft.result.markdown }}
+      output_schema:
+        type: object
+        required: [has_findings, findings]
+        additionalProperties: false
+        properties:
+          has_findings:
+            type: boolean
+          findings:
+            type: array
+            items:
+              type: object
+              required: [severity, category, description, suggestion]
+              additionalProperties: false
+              properties:
+                severity:
+                  type: string
+                category:
+                  type: string
+                description:
+                  type: string
+                suggestion:
+                  type: string
+
+  - id: finalize
+    type: branch
+    cases:
+      - if: \${{ steps.critique.result.has_findings }}
+        steps:
+          - id: evaluate_and_apply
+            type: codex
+            with:
+              action: exec
+              model: gpt-5.4
+              prompt: |
+                You are a senior software architect. You wrote the original draft below, and a reviewer has provided findings.
+
+                Your task:
+                1. Evaluate each finding for validity. Accept findings that are genuinely correct and improve the plan. Reject findings that are nitpicks, subjective preferences, or based on incorrect assumptions.
+                2. For each accepted finding, apply the improvement directly into the plan.
+                3. Produce the final, polished implementation plan incorporating all accepted changes.
+
+                The final document must be complete, self-contained, and unambiguous - a developer should be able to implement it without asking any clarifying questions.
+
+                Original draft:
+                \${{ steps.draft.result.markdown }}
+
+                Review findings:
+                \${{ toJSON(steps.critique.result.findings) }}
+              output_schema:
+                type: object
+                required: [markdown]
+                additionalProperties: false
+                properties:
+                  markdown:
+                    type: string
+        exports:
+          markdown: \${{ steps.evaluate_and_apply.result.markdown }}
+      - else:
+        steps:
+          - id: passthrough
+            type: shell
+            with:
+              command: "true"
+              result: none
+        exports:
+          markdown: \${{ steps.draft.result.markdown }}
+
+  - id: write
+    type: write_file
+    with:
+      path: \${{ inputs.output_path }}
+      content: \${{ steps.finalize.result.markdown }}
+`.trimStart()
+
+export const reviewUncommittedTemplate = `
+id: review-uncommitted
+steps:
+  - id: remediation
+    type: loop
+    max: 5
+    until: \${{ len(steps.review.result.findings) == 0 || steps.judge.result.accepted_count == 0 }}
+    steps:
+      - id: review
+        type: codex
+        with:
+          action: review
+          model: gpt-5.4
+          target: uncommitted
+          prompt: Review current uncommitted changes for bugs and missing tests.
+
+      - id: judge
+        type: claude
+        with:
+          action: prompt
+          model: claude-opus-4-6
+          prompt: |
+            Read the review below.
+
+            Review:
+            \${{ toJSON(steps.review.result) }}
+
+            Accept only findings that are valid and actionable.
+          output_schema:
+            type: object
+            required: [accepted_count, fix_brief]
+            additionalProperties: false
+            properties:
+              accepted_count:
+                type: integer
+              fix_brief:
+                type: string
+
+      - id: fix
+        if: \${{ steps.judge.result.accepted_count > 0 }}
+        type: codex
+        with:
+          action: exec
+          model: gpt-5.4
+          mode: full_auto
+          prompt: \${{ steps.judge.result.fix_brief }}
+    exports:
+      accepted_count: \${{ steps.judge.result.accepted_count }}
+      fix_brief: \${{ steps.judge.result.fix_brief }}
+`.trimStart()
+
+export const reviewBranchTemplate = `
+id: review-branch
+inputs:
+  base_branch:
+    type: string
+    description: Base branch to diff against
+steps:
+  - id: remediation
+    type: loop
+    max: 5
+    until: \${{ len(steps.review.result.findings) == 0 || steps.judge.result.accepted_count == 0 }}
+    steps:
+      - id: review
+        type: codex
+        with:
+          action: review
+          model: gpt-5.4
+          target: base
+          base: \${{ inputs.base_branch }}
+          prompt: Review the current branch diff for bugs and missing tests.
+
+      - id: judge
+        type: claude
+        with:
+          action: prompt
+          model: claude-opus-4-6
+          prompt: |
+            Read the review below.
+
+            Review:
+            \${{ toJSON(steps.review.result) }}
+
+            Accept only findings that are valid and actionable.
+          output_schema:
+            type: object
+            required: [accepted_count, fix_brief]
+            additionalProperties: false
+            properties:
+              accepted_count:
+                type: integer
+              fix_brief:
+                type: string
+
+      - id: fix
+        if: \${{ steps.judge.result.accepted_count > 0 }}
+        type: codex
+        with:
+          action: exec
+          model: gpt-5.4
+          mode: full_auto
+          prompt: \${{ steps.judge.result.fix_brief }}
+    exports:
+      accepted_count: \${{ steps.judge.result.accepted_count }}
+      fix_brief: \${{ steps.judge.result.fix_brief }}
+`.trimStart()
+
+export const reviewCommitTemplate = `
+id: review-commit
+inputs:
+  commit_sha:
+    type: string
+    description: Commit to review
+steps:
+  - id: remediation
+    type: loop
+    max: 5
+    until: \${{ len(steps.review.result.findings) == 0 || steps.judge.result.accepted_count == 0 }}
+    steps:
+      - id: review
+        type: codex
+        with:
+          action: review
+          model: gpt-5.4
+          target: commit
+          commit: \${{ inputs.commit_sha }}
+          title: Review commit
+          prompt: Review the selected commit for bugs and missing tests.
+
+      - id: judge
+        type: claude
+        with:
+          action: prompt
+          model: claude-opus-4-6
+          prompt: |
+            Read the review below.
+
+            Review:
+            \${{ toJSON(steps.review.result) }}
+
+            Accept only findings that are valid and actionable.
+          output_schema:
+            type: object
+            required: [accepted_count, fix_brief]
+            additionalProperties: false
+            properties:
+              accepted_count:
+                type: integer
+              fix_brief:
+                type: string
+
+      - id: fix
+        if: \${{ steps.judge.result.accepted_count > 0 }}
+        type: codex
+        with:
+          action: exec
+          model: gpt-5.4
+          mode: full_auto
+          prompt: \${{ steps.judge.result.fix_brief }}
+    exports:
+      accepted_count: \${{ steps.judge.result.accepted_count }}
+      fix_brief: \${{ steps.judge.result.fix_brief }}
+`.trimStart()

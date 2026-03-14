@@ -1,0 +1,5 @@
+node_modules
+target
+packages/*/dist
+packages/www/.astro
+packages/www/public/install

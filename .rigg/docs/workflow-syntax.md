@@ -27,43 +27,45 @@ steps:                      # Required: non-empty array of steps
 ## Step Types (Actions)
 
 ### shell — Run shell commands
+
 ```yaml
 - id: check
   type: shell
   with:
-    command: echo "hello ${{ inputs.name }}"  # Template string
-    result: text                               # none | text | json (default: text)
+    command: echo "hello ${{ inputs.name }}" # Template string
+    result: text # none | text | json (default: text)
 ```
 
 ### codex — AI code review or execution
+
 ```yaml
 # Review mode (pick exactly one target)
 - id: review
   type: codex
   with:
     action: review
-    target: uncommitted          # uncommitted | base | commit
+    target: uncommitted # uncommitted | base | commit
     prompt: Review for bugs.
     # target: base requires base:
     # base: ${{ inputs.branch }}
     # target: commit requires commit:
     # commit: ${{ inputs.sha }}
-    title: Optional title        # Optional, review only
-    model: model_name            # Optional
+    title: Optional title # Optional, review only
+    model: model_name # Optional
 
 # Exec mode
 - id: implement
   type: codex
   with:
     action: exec
-    prompt: Implement the feature.  # Required
-    mode: full_auto                 # default | full_auto
-    model: model_name               # Optional
-    persist: true                   # Session persistence (default: true)
-    conversation:                   # Optional: maintain context across iterations
+    prompt: Implement the feature. # Required
+    mode: full_auto # default | full_auto
+    model: model_name # Optional
+    persist: true # Session persistence (default: true)
+    conversation: # Optional: maintain context across iterations
       name: planner
-      scope: workflow               # iteration | loop | workflow (iteration/loop only inside loops)
-    output_schema:                  # Optional: validate structured JSON output
+      scope: workflow # iteration | loop | workflow (iteration/loop only inside loops)
+    output_schema: # Optional: validate structured JSON output
       type: object
       required: [field]
       additionalProperties: false
@@ -75,6 +77,7 @@ steps:                      # Required: non-empty array of steps
 **Note:** `conversation` and `output_schema` cannot be used together when the conversation will be resumed (e.g., in a loop or when another step shares the same conversation name). Resumed Codex exec turns reject `output_schema` and `add_dirs`.
 
 ### claude — Interactive AI with permission control
+
 ```yaml
 - id: judge
   type: claude
@@ -97,6 +100,7 @@ steps:                      # Required: non-empty array of steps
 ```
 
 ### write_file — Write content to a file
+
 ```yaml
 - id: save
   type: write_file
@@ -108,6 +112,7 @@ steps:                      # Required: non-empty array of steps
 ## Step Types (Control Flow)
 
 ### group — Encapsulate steps with exports
+
 ```yaml
 - id: analysis
   type: group
@@ -121,11 +126,12 @@ steps:                      # Required: non-empty array of steps
 ```
 
 ### loop — Iterate until condition or max
+
 ```yaml
 - id: remediation
   type: loop
-  max: 5                                                    # Required
-  until: ${{ steps.judge.result.accepted_count == 0 }}      # Required
+  max: 5 # Required
+  until: ${{ steps.judge.result.accepted_count == 0 }} # Required
   steps:
     - id: review
       type: codex
@@ -152,6 +158,7 @@ steps:                      # Required: non-empty array of steps
 Inside loops: `${{ run.iteration }}` (1-based), `${{ run.max_iterations }}`, `${{ run.node_path }}` are available.
 
 ### branch — Conditional execution
+
 ```yaml
 - id: decide
   type: branch
@@ -174,6 +181,7 @@ Inside loops: `${{ run.iteration }}` (1-based), `${{ run.max_iterations }}`, `${
 All cases must export the same shape or none at all.
 
 ### parallel — Concurrent execution
+
 ```yaml
 - id: tests
   type: parallel
@@ -199,12 +207,12 @@ All cases must export the same shape or none at all.
 
 Templates use `${{ expression }}` syntax. Available roots:
 
-| Root | Description | Example |
-|------|-------------|---------|
-| `inputs.*` | Workflow inputs | `${{ inputs.name }}` |
-| `steps.*` | Previous step results | `${{ steps.review.result.count }}` |
-| `env.*` | Environment variables | `${{ env.CI }}` |
-| `run.*` | Loop context (inside loops only) | `${{ run.iteration }}` |
+| Root       | Description                      | Example                            |
+| ---------- | -------------------------------- | ---------------------------------- |
+| `inputs.*` | Workflow inputs                  | `${{ inputs.name }}`               |
+| `steps.*`  | Previous step results            | `${{ steps.review.result.count }}` |
+| `env.*`    | Environment variables            | `${{ env.CI }}`                    |
+| `run.*`    | Loop context (inside loops only) | `${{ run.iteration }}`             |
 
 Operators: `==`, `!=`, `>`, `>=`, `<`, `<=`, `&&`, `||`, `!`
 Functions: `format('{0}:{1}', a, b)`, `toJSON(value)`, `join(array, ',')`
@@ -212,10 +220,10 @@ Functions: `format('{0}:{1}', a, b)`, `toJSON(value)`, `join(array, ',')`
 ## Common Attributes (All Steps)
 
 ```yaml
-- id: optional_unique_id     # Alphanumeric + underscore + hyphen
-  type: ...                   # Required
-  if: ${{ boolean_expr }}     # Optional: conditional execution
-  env:                        # Optional: step-level env vars
+- id: optional_unique_id # Alphanumeric + underscore + hyphen
+  type: ... # Required
+  if: ${{ boolean_expr }} # Optional: conditional execution
+  env: # Optional: step-level env vars
     KEY: value
 ```
 

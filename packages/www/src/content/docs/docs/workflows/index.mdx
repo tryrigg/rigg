@@ -1,0 +1,75 @@
+---
+title: Overview
+description: Top-level structure of a Rigg workflow file — id, inputs, env, steps, and scoping rules.
+sidebar:
+  order: 1
+---
+
+A workflow is a YAML file in `.rigg/`. Its filename doesn't matter — the `id` field is the identifier.
+
+## Top-level fields
+
+```yaml
+id: my-workflow # Required: unique identifier
+inputs: # Optional: typed parameters
+  name:
+    type: string
+    default: world
+env: # Optional: environment variables (supports templates)
+  API_KEY: ${{ inputs.key }}
+steps: # Required: non-empty step array
+  - id: greet
+    type: shell
+    with:
+      command: echo "hello ${{ inputs.name }}"
+```
+
+## Inputs
+
+JSON Schema objects. Supported types: `string`, `number`, `integer`, `boolean`, `object`, `array`.
+
+```yaml
+inputs:
+  name:
+    type: string
+    default: world
+    enum: ["Alice", "Bob"]
+    minLength: 1
+  count:
+    type: integer
+    minimum: 0
+  config:
+    type: object # requires 'properties'
+    required: [name]
+    properties:
+      name:
+        type: string
+  tags:
+    type: array # requires 'items'
+    items:
+      type: string
+    minItems: 1
+```
+
+Only top-level inputs support `default`. Nested properties cannot.
+
+## Common step fields
+
+Every step type supports these:
+
+```yaml
+- id: my_step # Optional: unique across the workflow
+  type: ... # Required
+  if: ${{ condition }} # Optional: skip when false
+  env: # Optional: step-scoped env vars
+    KEY: value
+```
+
+ID rules: starts with ASCII letter or `_`, then alphanumeric, `_`, or `-`.
+
+## Scoping rules
+
+- **Step results** are visible only to subsequent steps in the same scope
+- **Exports** promote results through container boundaries (group, loop, branch, parallel)
+- Access exports via `steps.<container_id>.result.<export_name>`
+- Step IDs must be unique across the **entire** workflow, not just within a scope

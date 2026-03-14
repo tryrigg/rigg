@@ -1,0 +1,61 @@
+---
+title: Expressions
+description: Template syntax, expression roots, operators, and built-in functions.
+sidebar:
+  order: 4
+---
+
+## Template syntax
+
+Expressions are embedded in `${{ }}` within any template string:
+
+```yaml
+prompt: "Hello ${{ inputs.name }}, iteration ${{ run.iteration }}"
+```
+
+Strings without `${{ }}` are literal values.
+
+## Expression roots
+
+| Root     | Scope        | Description                          |
+| -------- | ------------ | ------------------------------------ |
+| `inputs` | Always       | Workflow input parameters            |
+| `steps`  | Always       | Results from previous steps in scope |
+| `env`    | Always       | Environment variables                |
+| `run`    | Inside loops | Loop iteration context               |
+
+## Path access
+
+Dot notation traverses objects and arrays:
+
+```
+inputs.name                    → input value
+inputs.config.timeout          → nested field
+steps.review.result            → full step result
+steps.judge.result.count       → field in structured output
+steps.list.result.0.name       → array index access
+env.CI                         → environment variable
+run.iteration                  → loop counter (1-based)
+```
+
+## Operators
+
+| Operator          | Example                    |
+| ----------------- | -------------------------- |
+| `==` `!=`         | `steps.x.result == 'ok'`   |
+| `>` `>=` `<` `<=` | `steps.x.result.count > 0` |
+| `&&` `\|\|`       | `a && b`                   |
+| `!`               | `!steps.x.result.passed`   |
+
+## Functions
+
+| Function             | Description                                     | Example                             |
+| -------------------- | ----------------------------------------------- | ----------------------------------- |
+| `format(fmt, ...)`   | String formatting                               | `format('{0}:{1}', a, b)`           |
+| `toJSON(value)`      | JSON stringification                            | `toJSON(steps.data.result)`         |
+| `join(array, delim)` | Join array                                      | `join(steps.x.result.tags, ', ')`   |
+| `len(value)`         | Count string chars, array items, or object keys | `len(steps.review.result.findings)` |
+
+## Literals
+
+`null`, `true`, `false`, numbers (`42`, `3.14`), strings (`'single quoted'`)

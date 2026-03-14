@@ -1,0 +1,346 @@
+import { describe, expect, test } from "bun:test"
+
+import {
+  canonicalizeOutputSchema,
+  codexReviewOutputDefinition,
+  InputSchema,
+  OutputSchema,
+  childLoopScope,
+  childNodePath,
+  compareFrameId,
+  compareNodePath,
+  defaultsForInputs,
+  loopIterationFrameId,
+  nodePathFileComponent,
+  nodePathFromFileComponent,
+  shapeFromSchema,
+  parallelBranchFrameId,
+  resolveInputPathShape,
+  rootFrameId,
+  rootNodePath,
+  validateIdentifier,
+  validateInputDefinitions,
+  validateOutputDefinition,
+  validateInputValue,
+  validateOutputValue,
+} from "../../src/compile/schema"
+import { AnyJsonShape, BooleanShape, IntegerShape, StringShape } from "../../src/compile/expr"
+
+describe("compile/schema", () => {
+  test("validates identifiers", () => {
+    expect(validateIdentifier("valid_name-1", "workflow id", "/tmp/workflow.yaml")).toBeUndefined()
+    expect(validateIdentifier("1invalid", "workflow id", "/tmp/workflow.yaml")).toMatchObject({
+      code: "invalid_workflow",
+      filePath: "/tmp/workflow.yaml",
+      message:
+        "Invalid workflow id `1invalid`. Identifiers must start with a letter or `_` and only contain ASCII letters, digits, `_`, or `-`.",
+    })
+  })
+
+  test("round-trips node path file components", () => {
+    const nodePath = childNodePath(rootNodePath(12), 3)
+    const component = nodePathFileComponent(nodePath)
+
+    expect(component).toBe("s00000002_12s00000001_3")
+    expect(nodePathFromFileComponent(component)).toBe("/12/3")
+    expect(nodePathFromFileComponent("invalid")).toBeUndefined()
+  })
+
+  test("sorts node paths and frame ids numerically", () => {
+    expect(["/10", "/2", "/1/1", "/1"].sort(compareNodePath)).toEqual(["/1", "/1/1", "/2", "/10"])
+
+    const loopScope = childLoopScope(rootFrameId(), "/0")
+    expect(
+      [parallelBranchFrameId("root", "/0", 10), parallelBranchFrameId("root", "/0", 2)].sort(compareFrameId),
+    ).toEqual([parallelBranchFrameId("root", "/0", 2), parallelBranchFrameId("root", "/0", 10)])
+    expect(loopIterationFrameId(loopScope, 3)).toBe(`${loopScope}.iter.3`)
+  })
+
+  test("decodes nullable input and output schemas", () => {
+    expect(
+      InputSchema.parse({
+        default: "draft",
+        type: ["string", "null"],
+      }),
+    ).toEqual({
+      default: "draft",
+      nullable: true,
+      type: "string",
+    })
+
+    expect(
+      OutputSchema.parse({
+        properties: {
+          accepted: { type: "boolean" },
+        },
+        required: ["accepted"],
+        type: "object",
+      }),
+    ).toEqual({
+      properties: {
+        accepted: { type: "boolean" },
+      },
+      required: ["accepted"],
+      type: "object",
+    })
+  })
+
+  test("rejects invalid schema structure", () => {
+    const objectResult = InputSchema.safeParse({ type: "object" })
+    const arrayResult = OutputSchema.safeParse({ type: "array" })
+
+    expect(objectResult.success).toBe(false)
+    expect(arrayResult.success).toBe(false)
+    if (!objectResult.success) {
+      expect(objectResult.error.issues[0]?.message).toContain("object inputs require `properties`")
+    }
+    if (!arrayResult.success) {
+      expect(arrayResult.error.issues[0]?.message).toContain("array outputs require `items`")
+    }
+  })
+
+  test("validates input definition constraints", () => {
+    expect(
+      validateInputDefinitions({
+        options: {
+          properties: {
+            format: {
+              default: "text",
+              type: "string",
+            },
+          },
+          type: "object",
+        },
+      }),
+    ).toEqual(["inputs.options.properties.format cannot define nested defaults"])
+
+    expect(
+      validateInputDefinitions({
+        text: {
+          maxLength: 1,
+          minLength: 2,
+          type: "string",
+        },
+      }),
+    ).toEqual(["inputs.text has minLength greater than maxLength"])
+
+    expect(
+      validateInputDefinitions({
+        review: {
+          default: "oops",
+          properties: {
+            accepted: { type: "boolean" },
+          },
+          required: ["accepted", "missing"],
+          type: "object",
+        },
+      }),
+    ).toEqual([
+      "inputs.review has invalid `default`: must be an object",
+      "inputs.review.required references unknown property `missing`",
+    ])
+
+    expect(
+      validateInputDefinitions({
+        slug: {
+          pattern: "[",
+          type: "string",
+        },
+      }),
+    ).toEqual([expect.stringContaining("inputs.slug.pattern is not a valid regular expression:")])
+  })
+
+  test("validates output schema semantics and canonicalizes provider schemas", () => {
+    expect(
+      validateOutputDefinition(
+        {
+          properties: {
+            accepted: { type: "boolean" },
+          },
+          required: ["accepted", "missing"],
+          type: "object",
+        },
+        "with.output_schema",
+      ),
+    ).toEqual(["with.output_schema.required references unknown property `missing`"])
+
+    expect(
+      validateOutputDefinition(
+        {
+          maxLength: 5,
+          type: "string",
+        } as never,
+        "with.output_schema",
+      ),
+    ).toEqual(["with.output_schema.maxLength uses an unsupported keyword"])
+
+    expect(
+      canonicalizeOutputSchema({
+        properties: {
+          zeta: { type: "string" },
+          alpha: {
+            properties: {
+              ok: { type: "boolean" },
+            },
+            required: ["ok"],
+            type: "object",
+          },
+        },
+        required: ["zeta", "alpha"],
+        type: "object",
+      }),
+    ).toEqual({
+      additionalProperties: false,
+      properties: {
+        alpha: {
+          additionalProperties: false,
+          properties: {
+            ok: { type: "boolean" },
+          },
+          required: ["ok"],
+          type: "object",
+        },
+        zeta: { type: "string" },
+      },
+      required: ["alpha", "zeta"],
+      type: "object",
+    })
+
+    expect(validateOutputValue(codexReviewOutputDefinition(), { findings: [] })).toEqual([
+      "result.overall_correctness is required",
+      "result.overall_explanation is required",
+      "result.overall_confidence_score is required",
+    ])
+  })
+
+  test("validates input values", () => {
+    const schema = InputSchema.parse({
+      additionalProperties: false,
+      properties: {
+        retries: {
+          minimum: 1,
+          type: "integer",
+        },
+        tags: {
+          items: {
+            minLength: 2,
+            type: "string",
+          },
+          minItems: 1,
+          type: "array",
+        },
+      },
+      required: ["retries", "tags"],
+      type: "object",
+    })
+
+    expect(validateInputValue(schema, { extra: true }, "inputs.config")).toEqual([
+      "inputs.config.retries is required",
+      "inputs.config.tags is required",
+      "inputs.config.extra is not allowed",
+    ])
+
+    expect(validateInputValue(schema, { retries: 0, tags: ["x"] }, "inputs.config")).toEqual([
+      "inputs.config.retries must be >= 1",
+      "inputs.config.tags.0 must be at least 2 characters",
+    ])
+  })
+
+  test("validates output values", () => {
+    const schema = OutputSchema.parse({
+      additionalProperties: false,
+      properties: {
+        findings: {
+          items: {
+            properties: {
+              title: { type: "string" },
+            },
+            required: ["title"],
+            type: "object",
+          },
+          type: "array",
+        },
+      },
+      required: ["findings"],
+      type: "object",
+    })
+
+    expect(validateOutputValue(schema, { findings: [{}], extra: true })).toEqual([
+      "result.findings.0.title is required",
+      "result.extra is not allowed",
+    ])
+  })
+
+  test("collects input defaults using current JSON coercion behavior", () => {
+    expect(
+      defaultsForInputs({
+        mode: {
+          default: "safe",
+          type: "string",
+        },
+        metadata: {
+          default: new Date("2026-03-14T00:00:00.000Z"),
+          type: "string",
+        },
+      }),
+    ).toEqual({
+      metadata: {},
+      mode: "safe",
+    })
+  })
+
+  test("derives output shapes from output schemas", () => {
+    expect(
+      shapeFromSchema({
+        properties: {
+          accepted: { type: "boolean" },
+          summary: { nullable: true, type: "string" },
+        },
+        type: "object",
+      }),
+    ).toEqual({
+      fields: {
+        accepted: BooleanShape,
+        summary: AnyJsonShape,
+      },
+      kind: "object",
+    })
+
+    expect(
+      shapeFromSchema({
+        items: { type: "integer" },
+        type: "array",
+      }),
+    ).toEqual({
+      items: IntegerShape,
+      kind: "array",
+    })
+
+    expect(shapeFromSchema({ type: "string" })).toEqual(StringShape)
+  })
+
+  test("resolves nested input path shapes", () => {
+    expect(
+      resolveInputPathShape(
+        {
+          properties: {
+            items: {
+              items: {
+                properties: {
+                  title: { type: "string" },
+                },
+                required: ["title"],
+                type: "object",
+              },
+              type: "array",
+            },
+          },
+          required: ["items"],
+          type: "object",
+        },
+        "inputs.config",
+        ["items", "0", "title"],
+      ),
+    ).toEqual({ kind: "ok", shape: StringShape })
+  })
+})

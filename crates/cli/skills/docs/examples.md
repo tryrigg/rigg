@@ -461,7 +461,9 @@ steps:
 ## Common Patterns
 
 ### Pattern: Structured output with validation
+
 Always use `additionalProperties: false` and `required` to get strict validation:
+
 ```yaml
 output_schema:
   type: object
@@ -475,7 +477,9 @@ output_schema:
 ```
 
 ### Pattern: Passthrough in branch else
+
 When one branch does work and the other passes through:
+
 ```yaml
 - else:
   steps:
@@ -489,11 +493,13 @@ When one branch does work and the other passes through:
 ```
 
 ### Pattern: Loop with conversation context
+
 Use `scope: loop` to maintain conversation across all iterations:
+
 ```yaml
 conversation:
   name: my_context
-  scope: loop        # Persists across iterations
+  scope: loop # Persists across iterations
 ```
 
 Use `scope: iteration` (default in loops) for fresh context each iteration.

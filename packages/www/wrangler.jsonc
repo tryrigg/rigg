@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "rigg-www",
+  "compatibility_date": "2026-03-12",
+  "workers_dev": false,
+  "preview_urls": true,
+  "observability": {
+    "enabled": true,
+  },
+  "assets": {
+    "directory": "./dist",
+  },
+}

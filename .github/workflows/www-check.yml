@@ -4,14 +4,18 @@ on:
   pull_request:
     paths:
       - install
-      - www/**
+      - package.json
+      - bun.lock
+      - packages/www/**
       - .github/workflows/www-check.yml
   push:
     branches:
       - main
     paths:
       - install
-      - www/**
+      - package.json
+      - bun.lock
+      - packages/www/**
       - .github/workflows/www-check.yml
   workflow_dispatch:
 
@@ -26,9 +30,6 @@ jobs:
   www-check:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: www
 
     steps:
       - name: Checkout
@@ -48,7 +49,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Astro type/content checks
-        run: bun run check
+        run: bun run --cwd packages/www check
 
       - name: Build website
-        run: bun run build
+        run: bun run --cwd packages/www build

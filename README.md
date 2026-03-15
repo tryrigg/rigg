@@ -10,6 +10,7 @@ Rigg lets you capture those workflows as `.rigg/*.yaml`, run them locally with C
 
 - Bun `1.3.10`
 - `codex` on `PATH` for `type: codex` steps
+- `codex-cli 0.114.0` or newer
 
 ## Install
 
@@ -87,7 +88,7 @@ Supported step types:
 
 - Workflows are discovered from the nearest `.rigg/` directory.
 - `rigg run` opens a stateful terminal UI on TTYs with a run header, active pane, interaction pane, and barrier pane.
-- Barrier steps can be advanced with `continue`, stopped with `abort`, and inspected with `inspect-output`.
+- Barrier steps can be advanced with `continue` or stopped with `abort`.
 - Provider interactions are answered in place from the terminal UI; `Ctrl-C` interrupts the active step.
 - Run state is in-memory only; Rigg does not persist run history.
 

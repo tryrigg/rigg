@@ -1,4 +1,5 @@
 import type { WorkflowProject } from "../compile/index"
+import type { CodexInteractionHandler } from "../codex/types"
 import { workflowById } from "../compile/project"
 import type { RunProgressEvent } from "./progress"
 import type { RunSnapshot } from "./schema"
@@ -11,6 +12,7 @@ export type RunWorkflowResult =
   | { kind: "invalid_input"; errors: string[] }
 
 export async function runWorkflowCommand(options: {
+  interactionHandler?: CodexInteractionHandler | undefined
   invocationInputs: Record<string, unknown>
   onProgress?: ((event: RunProgressEvent) => void) | undefined
   parentEnv: Record<string, string | undefined>
@@ -33,6 +35,7 @@ export async function runWorkflowCommand(options: {
   return {
     kind: "completed",
     snapshot: await executeWorkflow({
+      interactionHandler: options.interactionHandler,
       invocationInputs: inputs.inputs,
       onProgress: options.onProgress,
       parentEnv: options.parentEnv,

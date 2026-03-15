@@ -1,37 +1,20 @@
-import { mkdir, rm } from "node:fs/promises"
+import { mkdir } from "node:fs/promises"
 import { dirname, isAbsolute, join } from "node:path"
-import { tmpdir } from "node:os"
 
 import { renderTemplateString } from "../compile/expr"
-import { codexReviewOutputDefinition, validateOutputValue } from "../compile/schema"
-import type { ActionNode, CodexNode, OutputDefinition } from "../compile/schema"
-import { isMissingPathError } from "../util/error"
-import { isJsonObject, parseJson, stringifyJson, tryParseJson } from "../util/json"
+import type { ActionNode, CodexNode } from "../compile/schema"
+import { createCodexRuntimeSession, type CodexRuntimeSession } from "../codex/runtime"
+import type { CodexInteractionHandler, CodexProviderEvent } from "../codex/types"
+import { filterEnv } from "../util/env"
+import { parseJson } from "../util/json"
 import { createStepFailedError, createTimedOutError as createRunTimedOutError } from "./error"
 import type { RenderContext } from "./render"
 
-const PROVIDER_TIMEOUT_MS = 60 * 60 * 1000
 const PROVIDER_TERMINATE_GRACE_MS = 5 * 1000
 
 type StreamName = "stderr" | "stdout"
 
-export type ProviderEvent =
-  | {
-      detail?: string | undefined
-      kind: "tool_use"
-      provider: "codex"
-      tool: string
-    }
-  | {
-      kind: "status"
-      message: string
-      provider: "codex"
-    }
-  | {
-      kind: "error"
-      message: string
-      provider: "codex"
-    }
+export type ProviderEvent = CodexProviderEvent
 
 export type ActionStepOutput = {
   exitCode: number
@@ -42,8 +25,10 @@ export type ActionStepOutput = {
 }
 
 export type ActionExecutionOptions = {
+  codexSession?: CodexRuntimeSession | undefined
   cwd: string
   env: Record<string, string | undefined>
+  interactionHandler?: CodexInteractionHandler | undefined
   onOutput?: ((stream: StreamName, chunk: string) => Promise<void> | void) | undefined
   onProviderEvent?: ((event: ProviderEvent) => Promise<void> | void) | undefined
 }
@@ -151,63 +136,21 @@ async function runCodexRunStep(
   context: RenderContext,
   options: ActionExecutionOptions,
 ): Promise<ActionStepOutput> {
-  if (step.with.action !== "run") {
+  const runConfig = step.with
+  if (runConfig.action !== "run") {
     throw new Error("expected codex run step")
   }
 
-  const providerEvents = createProviderEventCollector(options.onProviderEvent)
-  const outputSchema = step.with.output?.schema
-  const prompt = buildCodexRunPrompt(renderString(step.with.prompt, context), outputSchema)
-  const outputPath = join(tmpdir(), `rigg-codex-output-${crypto.randomUUID()}.txt`)
-
-  try {
-    const output = await runProcess("codex", buildCodexExecArgs({ model: step.with.model, outputPath, prompt }), {
+  return await withCodexSession(options, async (session) => {
+    const result = await session.run({
       cwd: options.cwd,
-      env: options.env,
-      onOutput: options.onOutput,
-      onStdoutEvent: providerEvents.onEvent,
-      stdoutEventParser: createCodexProviderEventParser(),
-      timeoutMs: PROVIDER_TIMEOUT_MS,
+      model: runConfig.model,
+      outputSchema: runConfig.output?.schema,
+      prompt: renderString(runConfig.prompt, context),
     })
-
-    const parsed = parseCodexStdout(output.stdout)
-    const resultText = await readOptionalText(outputPath)
-
-    if (output.exitCode !== 0) {
-      return {
-        exitCode: output.exitCode,
-        providerEvents: providerEvents.events,
-        result: null,
-        stderr: output.stderr,
-        stdout: parsed.messageText.length > 0 ? parsed.messageText : output.stdout,
-      }
-    }
-
-    if (outputSchema !== undefined) {
-      const parsedResult = parseJsonOutput(resultText ?? parsed.messageText, "Codex")
-      const validationErrors = validateOutputValue(outputSchema, parsedResult)
-      if (validationErrors.length > 0) {
-        throw createStepFailedError(new Error(validationErrors.join("; ")))
-      }
-      return {
-        exitCode: output.exitCode,
-        providerEvents: providerEvents.events,
-        result: parsedResult,
-        stderr: output.stderr,
-        stdout: resultText ?? stringifyJson(parsedResult),
-      }
-    }
-
-    return {
-      exitCode: output.exitCode,
-      providerEvents: providerEvents.events,
-      result: resultText ?? parsed.messageText,
-      stderr: output.stderr,
-      stdout: resultText ?? (parsed.messageText.length > 0 ? parsed.messageText : output.stdout),
-    }
-  } finally {
-    await rm(outputPath, { force: true })
-  }
+    await flushProviderEvents(result.providerEvents, options.onProviderEvent)
+    return result
+  })
 }
 
 async function runCodexReviewStep(
@@ -215,99 +158,20 @@ async function runCodexReviewStep(
   context: RenderContext,
   options: ActionExecutionOptions,
 ): Promise<ActionStepOutput> {
-  if (step.with.action !== "review") {
+  const reviewConfig = step.with
+  if (reviewConfig.action !== "review") {
     throw new Error("expected codex review step")
   }
 
-  const providerEvents = createProviderEventCollector(options.onProviderEvent)
-  const title = step.with.review.title === undefined ? undefined : renderString(step.with.review.title, context)
-  const output = await runProcess(
-    "codex",
-    buildCodexReviewArgs({
-      model: step.with.model,
-      scope: inferReviewScope(step.with.review.target, context),
-      title,
-    }),
-    {
+  return await withCodexSession(options, async (session) => {
+    const result = await session.review({
       cwd: options.cwd,
-      env: options.env,
-      onOutput: options.onOutput,
-      onStdoutEvent: providerEvents.onEvent,
-      stdoutEventParser: createCodexProviderEventParser(),
-      timeoutMs: PROVIDER_TIMEOUT_MS,
-    },
-  )
-
-  const parsed = parseCodexStdout(output.stdout)
-  const stdout = parsed.reviewOutputText ?? (parsed.messageText.length > 0 ? parsed.messageText : output.stdout)
-
-  if (output.exitCode === 0 && parsed.reviewOutput === undefined) {
-    throw createStepFailedError(new Error("Codex review returned invalid JSON: missing review output"))
-  }
-
-  if (output.exitCode === 0 && parsed.reviewOutput !== undefined) {
-    const validationErrors = validateOutputValue(codexReviewOutputDefinition(), parsed.reviewOutput)
-    if (validationErrors.length > 0) {
-      throw createStepFailedError(new Error(validationErrors.join("; ")))
-    }
-  }
-
-  return {
-    exitCode: output.exitCode,
-    providerEvents: providerEvents.events,
-    result: output.exitCode === 0 ? (parsed.reviewOutput ?? null) : null,
-    stderr: output.stderr,
-    stdout,
-  }
-}
-
-function createProviderEventCollector(onProviderEvent: ActionExecutionOptions["onProviderEvent"]): {
-  events: ProviderEvent[]
-  onEvent: (event: ProviderEvent) => Promise<void>
-} {
-  const events: ProviderEvent[] = []
-
-  return {
-    events,
-    async onEvent(event): Promise<void> {
-      events.push(event)
-      await onProviderEvent?.(event)
-    },
-  }
-}
-
-function buildCodexExecArgs(config: { model?: string | undefined; outputPath: string; prompt: string }): string[] {
-  const args = ["exec"]
-  pushCommonCodexArgs(args, config.model)
-  args.push("-o", config.outputPath, config.prompt)
-  return args
-}
-
-function buildCodexReviewArgs(config: {
-  model?: string | undefined
-  scope: { kind: "base"; value: string } | { kind: "commit"; value: string } | { kind: "uncommitted" }
-  title?: string | undefined
-}): string[] {
-  const args = ["exec", "review"]
-  pushCommonCodexArgs(args, config.model)
-  if (config.scope.kind === "uncommitted") {
-    args.push("--uncommitted")
-  } else if (config.scope.kind === "base") {
-    args.push("--base", config.scope.value)
-  } else {
-    args.push("--commit", config.scope.value)
-  }
-  if (config.title !== undefined) {
-    args.push("--title", config.title)
-  }
-  return args
-}
-
-function pushCommonCodexArgs(args: string[], model: string | undefined): void {
-  if (model !== undefined) {
-    args.push("-m", model)
-  }
-  args.push("--json")
+      model: reviewConfig.model,
+      target: inferReviewScope(reviewConfig.review.target, context),
+    })
+    await flushProviderEvents(result.providerEvents, options.onProviderEvent)
+    return result
+  })
 }
 
 function inferReviewScope(
@@ -317,196 +181,14 @@ function inferReviewScope(
       : never
     : never,
   context: RenderContext,
-): { kind: "base"; value: string } | { kind: "commit"; value: string } | { kind: "uncommitted" } {
+): { type: "base"; value: string } | { type: "commit"; value: string } | { type: "uncommitted" } {
   if (target.type === "base") {
-    return { kind: "base", value: renderString(target.branch, context) }
+    return { type: "base", value: renderString(target.branch, context) }
   }
   if (target.type === "commit") {
-    return { kind: "commit", value: renderString(target.sha, context) }
+    return { type: "commit", value: renderString(target.sha, context) }
   }
-  return { kind: "uncommitted" }
-}
-
-function buildCodexRunPrompt(prompt: string, outputSchema: OutputDefinition | undefined): string {
-  if (outputSchema === undefined) {
-    return prompt
-  }
-
-  return [prompt, "", "Return only a JSON object that matches this schema exactly.", stringifyJson(outputSchema)].join(
-    "\n",
-  )
-}
-
-function createCodexProviderEventParser(): StreamEventParser<ProviderEvent> {
-  let buffer = ""
-
-  function processLine(line: string): ProviderEvent[] {
-    const trimmed = line.trim()
-    if (trimmed.length === 0) {
-      return []
-    }
-    const object = asRecord(tryParseJson(trimmed))
-    if (object === undefined) {
-      return []
-    }
-    return parseCodexProviderEvents(object)
-  }
-
-  return {
-    push(chunk: string): ProviderEvent[] {
-      buffer += chunk
-      const events: ProviderEvent[] = []
-      while (true) {
-        const newlineIndex = buffer.search(/\r?\n/)
-        if (newlineIndex < 0) {
-          break
-        }
-        const line = buffer.slice(0, newlineIndex)
-        const nextIndex =
-          buffer[newlineIndex] === "\r" && buffer[newlineIndex + 1] === "\n" ? newlineIndex + 2 : newlineIndex + 1
-        buffer = buffer.slice(nextIndex)
-        events.push(...processLine(line))
-      }
-      return events
-    },
-    flush(): ProviderEvent[] {
-      const events = buffer.trim().length === 0 ? [] : processLine(buffer)
-      buffer = ""
-      return events
-    },
-  }
-}
-
-function parseCodexProviderEvents(object: Record<string, unknown>): ProviderEvent[] {
-  const toolEvent = parseCodexToolEvent(object)
-  if (toolEvent !== undefined) {
-    return [toolEvent]
-  }
-
-  if (object["type"] === "thread.started" && typeof object["thread_id"] === "string") {
-    return [{ kind: "status", message: `thread started ${object["thread_id"]}`, provider: "codex" }]
-  }
-
-  if (object["type"] === "agent_message_delta") {
-    const delta = asRecord(object["delta"])
-    if (delta !== undefined && typeof delta["text"] === "string" && delta["text"].trim().length > 0) {
-      return [{ kind: "status", message: delta["text"], provider: "codex" }]
-    }
-  }
-
-  if (object["type"] === "error" && typeof object["message"] === "string") {
-    return [{ kind: "error", message: object["message"], provider: "codex" }]
-  }
-
-  return []
-}
-
-function parseCodexToolEvent(object: Record<string, unknown>): ProviderEvent | undefined {
-  const item = asRecord(object["item"])
-  if (item !== undefined) {
-    const namedTool =
-      typeof item["name"] === "string" ? item["name"] : typeof item["tool"] === "string" ? item["tool"] : undefined
-    if (namedTool !== undefined) {
-      return {
-        detail: summarizeProviderDetail(item),
-        kind: "tool_use",
-        provider: "codex",
-        tool: namedTool,
-      }
-    }
-  }
-
-  const tool =
-    typeof object["tool"] === "string"
-      ? object["tool"]
-      : typeof object["tool_name"] === "string"
-        ? object["tool_name"]
-        : undefined
-  if (tool === undefined) {
-    return undefined
-  }
-
-  return {
-    detail: summarizeProviderDetail(asRecord(object["payload"]) ?? object),
-    kind: "tool_use",
-    provider: "codex",
-    tool,
-  }
-}
-
-function summarizeProviderDetail(value: Record<string, unknown> | string): string | undefined {
-  if (typeof value === "string") {
-    return value.trim().length === 0 ? undefined : value
-  }
-
-  const pairs = ["path", "query", "url", "command"]
-    .map((key) => {
-      const candidate = value[key]
-      return typeof candidate === "string" && candidate.length > 0 ? `${key}=${candidate}` : undefined
-    })
-    .filter((candidate): candidate is string => candidate !== undefined)
-  return pairs.length > 0 ? pairs.join(" ") : undefined
-}
-
-function parseCodexStdout(stdout: string): {
-  messageText: string
-  reviewOutput?: unknown
-  reviewOutputText?: string
-} {
-  const messages: string[] = []
-  let reviewOutput: unknown
-  let reviewOutputText: string | undefined
-  let pendingMessage = ""
-
-  for (const line of stdout.split(/\r?\n/)) {
-    const trimmed = line.trim()
-    if (trimmed.length === 0) {
-      continue
-    }
-
-    const object = asRecord(tryParseJson(trimmed))
-    if (object === undefined) {
-      messages.push(trimmed)
-      continue
-    }
-
-    if (object["type"] === "agent_message_delta") {
-      const delta = asRecord(object["delta"])
-      if (delta !== undefined && typeof delta["text"] === "string") {
-        pendingMessage += delta["text"]
-      }
-      continue
-    }
-
-    if (object["type"] === "item.completed") {
-      const item = asRecord(object["item"])
-      if (item !== undefined && item["type"] === "agent_message" && typeof item["text"] === "string") {
-        messages.push(item["text"])
-        pendingMessage = ""
-        continue
-      }
-    }
-
-    if (object["type"] === "exited_review_mode" && "review_output" in object) {
-      reviewOutput = object["review_output"]
-      reviewOutputText = JSON.stringify(object["review_output"])
-      continue
-    }
-
-    if (object["type"] === "error" && typeof object["message"] === "string") {
-      messages.push(object["message"])
-    }
-  }
-
-  if (pendingMessage.length > 0) {
-    messages.push(pendingMessage)
-  }
-
-  return {
-    messageText: messages.join("\n"),
-    ...(reviewOutput === undefined ? {} : { reviewOutput }),
-    ...(reviewOutputText === undefined ? {} : { reviewOutputText }),
-  }
+  return { type: "uncommitted" }
 }
 
 export async function runProcess<TEvent>(
@@ -558,17 +240,11 @@ function spawnBufferedProcess(
   return Bun.spawn({
     cmd,
     cwd: options.cwd,
-    env: filterProcessEnv(options.env),
+    env: filterEnv(options.env),
     stderr: "pipe",
     stdin: "ignore",
     stdout: "pipe",
   })
-}
-
-function filterProcessEnv(env: Record<string, string | undefined>): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
-  )
 }
 
 async function runSpawnedProcess<TEvent>(
@@ -694,23 +370,12 @@ async function forwardProcessChunk<TEvent>(
   }
 }
 
-function parseJsonOutput(text: string | undefined, source: "Codex" | "Shell"): unknown {
+function parseJsonOutput(text: string | undefined, source: "Shell"): unknown {
   try {
     return parseJson((text ?? "").trim())
   } catch (error) {
     const cause = error instanceof Error ? error : new Error(String(error))
     throw createStepFailedError(new Error(`${source} step returned invalid JSON: ${cause.message}`, { cause }))
-  }
-}
-
-async function readOptionalText(path: string): Promise<string | undefined> {
-  try {
-    return await Bun.file(path).text()
-  } catch (error) {
-    if (isMissingPathError(error)) {
-      return undefined
-    }
-    throw error
   }
 }
 
@@ -749,6 +414,31 @@ function createProviderTimedOutError(timeoutMs: number): Error {
   return createRunTimedOutError(new Error(`step exceeded hard timeout of ${timeoutMs}ms`))
 }
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return isJsonObject(value) ? value : undefined
+async function withCodexSession(
+  options: ActionExecutionOptions,
+  action: (session: CodexRuntimeSession) => Promise<ActionStepOutput>,
+): Promise<ActionStepOutput> {
+  if (options.codexSession !== undefined) {
+    return await action(options.codexSession)
+  }
+
+  const session = await createCodexRuntimeSession({
+    cwd: options.cwd,
+    env: options.env,
+    interactionHandler: options.interactionHandler,
+  })
+  try {
+    return await action(session)
+  } finally {
+    await session.close()
+  }
+}
+
+async function flushProviderEvents(
+  events: ProviderEvent[],
+  onProviderEvent: ActionExecutionOptions["onProviderEvent"],
+): Promise<void> {
+  for (const event of events) {
+    await onProviderEvent?.(event)
+  }
 }

@@ -1,4 +1,5 @@
 import { renderTemplate, renderTemplateString } from "../compile/expr"
+import { createCodexRuntimeSession, type CodexRuntimeSession } from "../codex/runtime"
 import {
   childLoopScope,
   childNodePath,
@@ -17,6 +18,7 @@ import {
   type WorkflowDocument,
   type WorkflowStep,
 } from "../compile/schema"
+import type { CodexInteractionHandler } from "../codex/types"
 import { v7 as uuidv7 } from "uuid"
 import { runActionStep, type ActionStepOutput, type ProviderEvent as ActionProviderEvent } from "./adapters"
 import { LoopExhaustedError, createEvaluationError, createStepFailedError, normalizeExecutionError } from "./error"
@@ -46,7 +48,9 @@ type NodeLifecycle = {
 }
 
 type ExecutionEnvironment = {
+  codexSession?: CodexRuntimeSession | undefined
   cwd: string
+  interactionHandler?: CodexInteractionHandler | undefined
   onProgress?: ((event: RunProgressEvent) => void) | undefined
   runActionStep: ActionStepRunner
   runState: RunSnapshot
@@ -63,6 +67,7 @@ type ExecutionScope = {
 }
 
 export async function executeWorkflow(options: {
+  interactionHandler?: CodexInteractionHandler | undefined
   internals?: { runActionStep?: ActionStepRunner } | undefined
   invocationInputs: Record<string, unknown>
   onProgress?: ((event: RunProgressEvent) => void) | undefined
@@ -75,10 +80,21 @@ export async function executeWorkflow(options: {
 
   const runState = createInitialRunState(runId, options.workflow.id, startedAt)
   const nodeCount = countNodes(options.workflow.steps)
+  const resolvedRunActionStep = options.internals?.runActionStep ?? runActionStep
+  const codexSession =
+    resolvedRunActionStep === runActionStep && workflowContainsCodexStep(options.workflow.steps)
+      ? await createCodexRuntimeSession({
+          cwd: options.projectRoot,
+          env: options.parentEnv,
+          interactionHandler: options.interactionHandler,
+        })
+      : undefined
   const environment: ExecutionEnvironment = {
+    codexSession,
     cwd: options.projectRoot,
+    interactionHandler: options.interactionHandler,
     onProgress: options.onProgress,
-    runActionStep: options.internals?.runActionStep ?? runActionStep,
+    runActionStep: resolvedRunActionStep,
     runState,
   }
 
@@ -131,6 +147,8 @@ export async function executeWorkflow(options: {
       status: "failed",
     })
     throw cause
+  } finally {
+    await codexSession?.close()
   }
 }
 
@@ -243,8 +261,10 @@ async function executeAction(
       step,
       { env, inputs: scope.inputs, run: scope.run, steps: scope.steps },
       {
+        codexSession: environment.codexSession,
         cwd: environment.cwd,
         env,
+        interactionHandler: environment.interactionHandler,
         onOutput: async (stream, chunk) => {
           emitProgress(environment.onProgress, { chunk, kind: "step_output", stream })
         },
@@ -706,6 +726,25 @@ function countNodes(steps: WorkflowStep[]): number {
         return count + 1 + step.branches.reduce((sum, branch) => sum + countNodes(branch.steps), 0)
     }
   }, 0)
+}
+
+function workflowContainsCodexStep(steps: WorkflowStep[]): boolean {
+  return steps.some((step) => {
+    switch (step.type) {
+      case "codex":
+        return true
+      case "group":
+      case "loop":
+        return workflowContainsCodexStep(step.steps)
+      case "branch":
+        return step.cases.some((branchCase) => workflowContainsCodexStep(branchCase.steps))
+      case "parallel":
+        return step.branches.some((branch) => workflowContainsCodexStep(branch.steps))
+      case "shell":
+      case "write_file":
+        return false
+    }
+  })
 }
 
 function recordSkippedStep(

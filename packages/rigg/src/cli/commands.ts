@@ -8,6 +8,7 @@ import { stringifyJson } from "../util/json"
 import { isMissingPathError, normalizeError } from "../util/error"
 import { runWorkflow } from "../run/index"
 import { examplesDoc, schemaReferenceDoc, skillDoc, workflowSyntaxDoc } from "./docs"
+import { createTerminalInteractionSession } from "./interaction"
 import { planTemplate, reviewBranchTemplate, reviewCommitTemplate, reviewUncommittedTemplate } from "./templates"
 import { TerminalProgressSink } from "./progress"
 import { renderCompileErrors } from "./output"
@@ -172,13 +173,23 @@ export async function runRunCommand(
     }
 
     const progressSink = !process.stderr.isTTY ? undefined : new TerminalProgressSink(process.stderr)
-    const runResult = await runWorkflow({
-      invocationInputs: inputs.inputs,
-      onProgress: progressSink?.emit.bind(progressSink),
-      parentEnv: process.env,
-      project: projectResult.project,
-      workflowId,
-    })
+    const interactionSession = process.stdin.isTTY
+      ? createTerminalInteractionSession(process.stdin, process.stderr)
+      : undefined
+    const runResult = await (async () => {
+      try {
+        return await runWorkflow({
+          interactionHandler: interactionSession?.handle,
+          invocationInputs: inputs.inputs,
+          onProgress: progressSink?.emit.bind(progressSink),
+          parentEnv: process.env,
+          project: projectResult.project,
+          workflowId,
+        })
+      } finally {
+        interactionSession?.close()
+      }
+    })()
 
     if (runResult.kind === "workflow_not_found") {
       return failure([runResult.message])

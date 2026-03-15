@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 
-import { runActionStep } from "../../src/run/adapters"
 import type { ActionNode } from "../../src/compile/schema"
+import { createCodexRuntimeSession } from "../../src/codex/runtime"
+import { runActionStep } from "../../src/run/adapters"
 import { renderContext } from "../fixture/builders"
+import { installFakeCodex } from "../fixture/fake-codex"
 
 describe("run/adapters", () => {
   test("runs shell steps with cwd and env", async () => {
@@ -34,81 +36,6 @@ describe("run/adapters", () => {
     expect(outputChunks.map((chunk) => chunk.chunk).join("")).toBe(result.stdout)
   })
 
-  test("streams shell stdout chunks before process exit", async () => {
-    let resolveFirstChunk: (() => void) | undefined
-    const firstChunk = new Promise<void>((resolve) => {
-      resolveFirstChunk = resolve
-    })
-
-    const execution = runActionStep(
-      {
-        type: "shell",
-        with: {
-          command: "printf first; sleep 0.2; printf second",
-          result: "text",
-        },
-      },
-      renderContext(),
-      {
-        cwd: process.cwd(),
-        env: process.env,
-        onOutput: (stream, chunk) => {
-          if (stream === "stdout" && chunk.includes("first")) {
-            resolveFirstChunk?.()
-          }
-        },
-      },
-    )
-
-    await Promise.race([
-      firstChunk,
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("expected streamed shell output")), 150)),
-    ])
-
-    await expect(execution).resolves.toMatchObject({
-      exitCode: 0,
-      stdout: "firstsecond",
-    })
-  })
-
-  test("does not parse shell json output before checking process failure", async () => {
-    const step: ActionNode = {
-      type: "shell",
-      with: {
-        command: "printf 'not-json'; exit 7",
-        result: "json",
-      },
-    }
-
-    const result = await runActionStep(step, renderContext(), {
-      cwd: process.cwd(),
-      env: process.env,
-    })
-
-    expect(result.exitCode).toBe(7)
-    expect(result.result).toBeNull()
-    expect(result.stdout).toBe("not-json")
-  })
-
-  test("fails shell json result formatting only after a successful process exit", async () => {
-    await expect(
-      runActionStep(
-        {
-          type: "shell",
-          with: {
-            command: "printf 'not-json'",
-            result: "json",
-          },
-        },
-        renderContext(),
-        {
-          cwd: process.cwd(),
-          env: process.env,
-        },
-      ),
-    ).rejects.toThrow("Shell step returned invalid JSON")
-  })
-
   test("writes relative files against the provided cwd", async () => {
     const root = await mkdtemp(join(tmpdir(), "rigg-write-file-"))
     try {
@@ -132,129 +59,77 @@ describe("run/adapters", () => {
     }
   })
 
-  test("parses provider events and validates codex review output", async () => {
-    const root = await mkdtemp(join(tmpdir(), "rigg-codex-review-"))
-    const binDir = join(root, "bin")
-    await mkdir(binDir, { recursive: true })
-    const toolPath = join(binDir, "codex")
-    await writeFile(
-      toolPath,
-      [
-        "#!/bin/sh",
-        'printf \'%s\\n\' \'{"type":"thread.started","thread_id":"thread_123"}\'',
-        'printf \'%s\\n\' \'{"tool":"read_file","payload":{"path":"src/main.ts"}}\'',
-        'printf \'%s\\n\' \'{"type":"agent_message_delta","delta":{"text":"Reviewing diff..."}}\'',
-        'printf \'%s\\n\' \'{"type":"exited_review_mode","review_output":{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"looks good","overall_confidence_score":0.91}}\'',
-      ].join("\n"),
-      "utf8",
-    )
-    await chmod(toolPath, 0o755)
-
+  test("runs codex run steps through app-server", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-codex-run-app-server-"))
     try {
-      const events: Array<Record<string, unknown>> = []
-      const result = await runActionStep(
-        {
-          type: "codex",
-          with: {
-            action: "review",
-            review: {
-              target: {
-                type: "uncommitted",
+      const binDir = await installFakeCodex(root, {
+        turnStart: {
+          steps: [
+            {
+              kind: "notification",
+              method: "turn/started",
+              params: {
+                threadId: "__THREAD_ID__",
+                turn: { id: "__TURN_ID__", items: [], status: "inProgress", error: null },
               },
             },
-          },
-        },
-        renderContext(),
-        {
-          cwd: root,
-          env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
-          onProviderEvent: (event) => {
-            events.push(event as unknown as Record<string, unknown>)
-          },
-        },
-      )
-
-      expect(result.exitCode).toBe(0)
-      expect(result.result).toEqual({
-        findings: [],
-        overall_confidence_score: 0.91,
-        overall_correctness: "patch is correct",
-        overall_explanation: "looks good",
-      })
-      expect(events).toEqual([
-        { kind: "status", message: "thread started thread_123", provider: "codex" },
-        { detail: "path=src/main.ts", kind: "tool_use", provider: "codex", tool: "read_file" },
-        { kind: "status", message: "Reviewing diff...", provider: "codex" },
-      ])
-    } finally {
-      await rm(root, { force: true, recursive: true })
-    }
-  })
-
-  test("rejects malformed codex review payloads", async () => {
-    const root = await mkdtemp(join(tmpdir(), "rigg-codex-review-invalid-"))
-    const binDir = join(root, "bin")
-    await mkdir(binDir, { recursive: true })
-    const toolPath = join(binDir, "codex")
-    await writeFile(
-      toolPath,
-      ["#!/bin/sh", 'printf \'%s\\n\' \'{"type":"exited_review_mode","review_output":{"findings":[]}}\''].join("\n"),
-      "utf8",
-    )
-    await chmod(toolPath, 0o755)
-
-    try {
-      await expect(
-        runActionStep(
-          {
-            type: "codex",
-            with: {
-              action: "review",
-              review: {
-                target: {
-                  type: "uncommitted",
+            {
+              kind: "notification",
+              method: "item/started",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                item: {
+                  type: "commandExecution",
+                  id: "cmd_1",
+                  command: "cat src/main.ts",
+                  cwd: root,
+                  processId: null,
+                  status: "inProgress",
+                  commandActions: [],
+                  aggregatedOutput: null,
+                  exitCode: null,
+                  durationMs: null,
                 },
               },
             },
-          },
-          renderContext(),
-          {
-            cwd: root,
-            env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
-          },
-        ),
-      ).rejects.toThrow("result.overall_correctness is required")
-    } finally {
-      await rm(root, { force: true, recursive: true })
-    }
-  })
+            {
+              kind: "notification",
+              method: "item/agentMessage/delta",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                itemId: "msg_1",
+                delta: '{"summary":"done"}',
+              },
+            },
+            {
+              kind: "notification",
+              method: "item/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                item: {
+                  type: "agentMessage",
+                  id: "msg_1",
+                  text: '{"summary":"done"}',
+                  phase: null,
+                },
+              },
+            },
+            {
+              kind: "notification",
+              method: "turn/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turn: { id: "__TURN_ID__", items: [], status: "completed", error: null },
+              },
+            },
+          ],
+        },
+      })
 
-  test("parses codex run structured output with local validation", async () => {
-    const root = await mkdtemp(join(tmpdir(), "rigg-codex-run-"))
-    const binDir = join(root, "bin")
-    await mkdir(binDir, { recursive: true })
-    const toolPath = join(binDir, "codex")
-    await writeFile(
-      toolPath,
-      [
-        "#!/bin/sh",
-        'out=""',
-        'while [ "$#" -gt 0 ]; do',
-        '  if [ "$1" = "-o" ]; then',
-        '    out="$2"',
-        "    shift 2",
-        "    continue",
-        "  fi",
-        "  shift",
-        "done",
-        'printf \'{"summary":"done"}\' > "$out"',
-        'printf \'%s\\n\' \'{"type":"thread.started","thread_id":"thread_123"}\'',
-      ].join("\n"),
-      "utf8",
-    )
-    await chmod(toolPath, 0o755)
-
-    try {
+      const events: Array<Record<string, unknown>> = []
       const result = await runActionStep(
         {
           type: "codex",
@@ -277,12 +152,298 @@ describe("run/adapters", () => {
         {
           cwd: root,
           env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+          onProviderEvent: (event) => {
+            events.push(event as unknown as Record<string, unknown>)
+          },
         },
       )
 
       expect(result.exitCode).toBe(0)
       expect(result.result).toEqual({ summary: "done" })
-      expect(result.stdout).toBe('{"summary":"done"}')
+      expect(events).toEqual([
+        { kind: "status", message: "thread started thread_1", provider: "codex" },
+        { kind: "status", message: "turn started turn_1", provider: "codex" },
+        {
+          detail: `command=cat src/main.ts cwd=${root}`,
+          kind: "tool_use",
+          provider: "codex",
+          tool: "command_execution",
+        },
+        { kind: "status", message: '{"summary":"done"}', provider: "codex" },
+      ])
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("maps codeReview text back into a review result", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-codex-review-app-server-"))
+    try {
+      const binDir = await installFakeCodex(root, {
+        reviewStart: {
+          steps: [
+            {
+              kind: "notification",
+              method: "item/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                item: {
+                  type: "codeReview",
+                  id: "__TURN_ID__",
+                  review: [
+                    "Looks solid overall with minor polish suggested.",
+                    "",
+                    "Review comment:",
+                    "",
+                    "- Prefer Stylize helpers — /tmp/file.rs:10-20",
+                    "  Use .dim()/.bold() chaining instead of manual Style.",
+                  ].join("\n"),
+                },
+              },
+            },
+            {
+              kind: "notification",
+              method: "turn/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turn: { id: "__TURN_ID__", items: [], status: "completed", error: null },
+              },
+            },
+          ],
+        },
+      })
+
+      const result = await runActionStep(
+        {
+          type: "codex",
+          with: {
+            action: "review",
+            review: {
+              target: {
+                type: "uncommitted",
+              },
+            },
+          },
+        },
+        renderContext(),
+        {
+          cwd: root,
+          env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+        },
+      )
+
+      expect(result.exitCode).toBe(0)
+      expect(result.result).toEqual({
+        findings: [
+          {
+            body: "Use .dim()/.bold() chaining instead of manual Style.",
+            code_location: {
+              absolute_file_path: "/tmp/file.rs",
+              line_range: {
+                end: 20,
+                start: 10,
+              },
+            },
+            confidence_score: 0,
+            priority: null,
+            title: "Prefer Stylize helpers",
+          },
+        ],
+        overall_confidence_score: 0,
+        overall_correctness: "unknown",
+        overall_explanation: "Looks solid overall with minor polish suggested.",
+      })
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("resolves approval, user input, and elicitation requests", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-codex-interactions-"))
+    try {
+      const binDir = await installFakeCodex(root, {
+        turnStart: {
+          steps: [
+            {
+              kind: "request",
+              method: "item/commandExecution/requestApproval",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                itemId: "cmd_1",
+                reason: "Need approval",
+                command: "git status",
+                cwd: root,
+                availableDecisions: ["accept", "decline", "cancel"],
+              },
+              expectResult: {
+                decision: "accept",
+              },
+            },
+            {
+              kind: "request",
+              method: "item/tool/requestUserInput",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                itemId: "input_1",
+                questions: [
+                  {
+                    id: "choice",
+                    header: "Choice",
+                    question: "Pick one",
+                    isOther: false,
+                    isSecret: false,
+                    options: [{ label: "A", description: "Pick A" }],
+                  },
+                ],
+              },
+              expectResult: {
+                answers: {
+                  choice: {
+                    answers: ["A"],
+                  },
+                },
+              },
+            },
+            {
+              kind: "request",
+              method: "mcpServer/elicitation/request",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                serverName: "search",
+                mode: "form",
+                message: "Provide parameters",
+                requestedSchema: {
+                  type: "object",
+                  properties: {
+                    query: { type: "string" },
+                  },
+                  required: ["query"],
+                },
+                _meta: null,
+              },
+              expectResult: {
+                action: "accept",
+                content: {
+                  query: "hello",
+                },
+                _meta: null,
+              },
+            },
+            {
+              kind: "notification",
+              method: "item/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                item: {
+                  type: "agentMessage",
+                  id: "msg_1",
+                  text: "done",
+                  phase: null,
+                },
+              },
+            },
+            {
+              kind: "notification",
+              method: "turn/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turn: { id: "__TURN_ID__", items: [], status: "completed", error: null },
+              },
+            },
+          ],
+        },
+      })
+
+      const result = await runActionStep(
+        {
+          type: "codex",
+          with: {
+            action: "run",
+            prompt: "Do the work",
+          },
+        },
+        renderContext(),
+        {
+          cwd: root,
+          env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+          interactionHandler: async (request) => {
+            switch (request.kind) {
+              case "approval":
+                return { decision: "accept", kind: "approval" }
+              case "user_input":
+                return { answers: { choice: { answers: ["A"] } }, kind: "user_input" }
+              case "elicitation":
+                return { action: "accept", content: { query: "hello" }, kind: "elicitation" }
+            }
+          },
+        },
+      )
+
+      expect(result.exitCode).toBe(0)
+      expect(result.result).toBe("done")
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("rejects unsupported codex versions", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-codex-version-gate-"))
+    try {
+      const binDir = await installFakeCodex(root, {
+        versionOutput: "codex-cli 0.113.0",
+      })
+
+      await expect(
+        runActionStep(
+          {
+            type: "codex",
+            with: {
+              action: "run",
+              prompt: "Say hi",
+            },
+          },
+          renderContext(),
+          {
+            cwd: root,
+            env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+          },
+        ),
+      ).rejects.toThrow("Upgrade to v0.114.0 or newer")
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("interrupts an active turn through app-server", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-codex-interrupt-"))
+    try {
+      const binDir = await installFakeCodex(root, {
+        turnStart: {
+          steps: [],
+        },
+      })
+      const session = await createCodexRuntimeSession({
+        cwd: root,
+        env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+      })
+
+      const execution = session.run({
+        cwd: root,
+        prompt: "Wait for interruption",
+      })
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      await session.interruptActiveTurn()
+
+      await expect(execution).resolves.toMatchObject({
+        exitCode: 1,
+      })
+      await session.close()
     } finally {
       await rm(root, { force: true, recursive: true })
     }

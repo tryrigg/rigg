@@ -1,6 +1,6 @@
 ---
 title: Steps
-description: Action step types — shell, codex, claude, and write_file.
+description: Action step types — shell, codex, and write_file.
 sidebar:
   order: 2
 ---
@@ -21,7 +21,30 @@ Runs a shell command.
 
 ## codex
 
-Two actions: `review` and `exec`.
+Two actions are supported: `run` and `review`.
+
+### run
+
+Generates or modifies code.
+
+```yaml
+- id: implement
+  type: codex
+  with:
+    action: run
+    prompt: Add input validation.
+    model: gpt-5.4
+    output:
+      schema:
+        type: object
+        required: [summary]
+        additionalProperties: false
+        properties:
+          summary:
+            type: string
+```
+
+`output.schema` is optional. When present, Rigg validates the final Codex response locally as structured JSON.
 
 ### review
 
@@ -32,18 +55,20 @@ Scans diffs and returns review findings.
   type: codex
   with:
     action: review
-    target: uncommitted # uncommitted | base | commit
-    prompt: Review for bugs.
-    # target: base → requires base: <branch>
-    # target: commit → requires commit: <sha>
-    title: Optional title # review-only
-    model: model_name # optional
-    mode: full_auto # default | full_auto
+    model: gpt-5.4
+    review:
+      target:
+        type: uncommitted # uncommitted | base | commit
+      title: Review current changes
 ```
 
-If `target` is omitted, presence of `base` infers `target: base`. `commit` alone does **not** infer target — you must set `target: commit` explicitly.
+Target variants:
 
-Review does **not** support `conversation` or `output_schema`. It always returns the built-in structured result below:
+- `type: uncommitted`
+- `type: base` with `branch`
+- `type: commit` with `sha`
+
+Review always returns the built-in structured result below:
 
 ```yaml
 result:
@@ -62,61 +87,6 @@ result:
   overall_confidence_score: number
 ```
 
-### exec
-
-Generates or modifies code.
-
-```yaml
-- id: implement
-  type: codex
-  with:
-    action: exec
-    prompt: Add input validation. # required
-    mode: full_auto # default | full_auto
-    model: model_name # optional
-    add_dirs: # optional: additional directories
-      - ../shared
-    persist: true # session persistence (default: true)
-    conversation: # optional: see Conversations
-      name: planner
-      scope: workflow
-    output_schema: # optional: see below
-      type: object
-      required: [result]
-      additionalProperties: false
-      properties:
-        result:
-          type: string
-```
-
-Exec does **not** support `target`, `base`, `commit`, or `title`.
-
-## claude
-
-Prompts Claude Code. Only action is `prompt`.
-
-```yaml
-- id: judge
-  type: claude
-  with:
-    action: prompt
-    prompt: Evaluate this code.
-    permission_mode: default # default | plan | acceptEdits | dontAsk | bypassPermissions
-    model: model_name # optional
-    add_dirs: [] # optional
-    persist: true # default: true
-    conversation: # optional
-      name: reviewer
-      scope: workflow
-    output_schema: # optional
-      type: object
-      required: [accepted]
-      additionalProperties: false
-      properties:
-        accepted:
-          type: boolean
-```
-
 ## write_file
 
 Writes content to a file.
@@ -129,29 +99,27 @@ Writes content to a file.
     content: ${{ steps.draft.result.markdown }}
 ```
 
-## Structured output (output_schema)
+## Structured output
 
-Available on `codex` (exec) and `claude` steps. Must be `type: object` at the root.
+Use `with.output.schema` on `codex` `run` steps. The root must be `type: object`.
 
 ```yaml
-output_schema:
-  type: object
-  required: [status, findings]
-  additionalProperties: false
-  properties:
-    status:
-      type: string
-      enum: ["pass", "fail"]
-    findings:
-      type: array
-      items:
-        type: object
-        required: [description]
-        properties:
-          description:
-            type: string
+output:
+  schema:
+    type: object
+    required: [status, findings]
+    additionalProperties: false
+    properties:
+      status:
+        type: string
+      findings:
+        type: array
+        items:
+          type: object
+          required: [description]
+          properties:
+            description:
+              type: string
 ```
 
 Result fields are accessed via `steps.<id>.result.<field>`.
-
-Supported types: `string`, `number`, `integer`, `boolean`, `object`, `array`.

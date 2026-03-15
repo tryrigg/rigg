@@ -1,4 +1,4 @@
-import type { ConversationSnapshot, NodeSnapshot, RunReason, RunSnapshot, RunStatus } from "../history/index"
+import type { NodeSnapshot, RunReason, RunSnapshot, RunStatus } from "./schema"
 import type { NodePath } from "../compile/schema"
 
 export type MutableRunState = RunSnapshot
@@ -6,7 +6,6 @@ export type MutableNodeSnapshot = NodeSnapshot
 
 export function createInitialRunState(runId: string, workflowId: string, startedAt: string): MutableRunState {
   return {
-    conversations: {},
     finished_at: null,
     nodes: [],
     reason: null,
@@ -36,13 +35,6 @@ export function upsertNodeSnapshot(state: MutableRunState, snapshot: MutableNode
     state.nodes.push(snapshot)
     state.nodes.sort((left, right) => left.node_path.localeCompare(right.node_path, undefined, { numeric: true }))
   }
-}
-
-export function replaceConversations(
-  state: MutableRunState,
-  conversations: Record<string, ConversationSnapshot>,
-): void {
-  state.conversations = { ...conversations }
 }
 
 export function nextNodeAttempt(state: MutableRunState, nodePath: NodePath): number {

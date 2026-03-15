@@ -1,7 +1,7 @@
 import type { WorkflowProject } from "../compile/index"
 import { workflowById } from "../compile/project"
-import type { RunSnapshot } from "../history/index"
 import type { RunProgressEvent } from "./progress"
+import type { RunSnapshot } from "./schema"
 import { executeWorkflow } from "./execute"
 import { normalizeInvocationInputs } from "./plan"
 
@@ -11,13 +11,10 @@ export type RunWorkflowResult =
   | { kind: "invalid_input"; errors: string[] }
 
 export async function runWorkflowCommand(options: {
-  configFiles: string[]
-  cwd: string
   invocationInputs: Record<string, unknown>
   onProgress?: ((event: RunProgressEvent) => void) | undefined
   parentEnv: Record<string, string | undefined>
   project: WorkflowProject
-  toolVersion: string
   workflowId: string
 }): Promise<RunWorkflowResult> {
   const workflow = workflowById(options.project, options.workflowId)
@@ -36,13 +33,10 @@ export async function runWorkflowCommand(options: {
   return {
     kind: "completed",
     snapshot: await executeWorkflow({
-      configFiles: options.configFiles,
-      cwd: options.cwd,
       invocationInputs: inputs.inputs,
       onProgress: options.onProgress,
       parentEnv: options.parentEnv,
       projectRoot: options.project.workspace.rootDir,
-      toolVersion: options.toolVersion,
       workflow,
     }),
   }

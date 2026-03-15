@@ -9,7 +9,7 @@ steps:
   - id: codex_probe
     type: codex
     with:
-      action: exec
+      action: run
       model: gpt-5.1-codex-mini
       prompt: |
         Inspect this repository and produce a short debug note for a workflow progress UI check.
@@ -19,15 +19,14 @@ steps:
         - Read only a few files.
         - Mention at least one file path you inspected.
         - Keep the answer concise.
-
-        Return JSON matching the provided schema.
-      output_schema:
-        type: object
-        required: [markdown]
-        additionalProperties: false
-        properties:
-          markdown:
-            type: string
+      output:
+        schema:
+          type: object
+          required: [markdown]
+          additionalProperties: false
+          properties:
+            markdown:
+              type: string
 
   - id: midrun_wait
     type: shell
@@ -35,15 +34,13 @@ steps:
       command: sleep 2
       result: none
 
-  - id: claude_probe
-    type: claude
+  - id: summarize
+    type: codex
     with:
-      action: prompt
-      model: haiku
+      action: run
+      model: gpt-5.1-codex-mini
       prompt: |
-        You are validating a CLI progress display.
-
-        Read the note below and turn it into a compact final summary for a human operator.
+        Turn the note below into a compact final summary for a human operator.
 
         Requirements:
         - Keep it to 3 short bullet points.
@@ -52,13 +49,14 @@ steps:
 
         Note:
         ${{ steps.codex_probe.result.markdown }}
-      output_schema:
-        type: object
-        required: [markdown]
-        additionalProperties: false
-        properties:
-          markdown:
-            type: string
+      output:
+        schema:
+          type: object
+          required: [markdown]
+          additionalProperties: false
+          properties:
+            markdown:
+              type: string
 
   - id: write
     type: write_file
@@ -67,8 +65,8 @@ steps:
       content: |
         # Debug Progress Run
 
-        ## Codex
+        ## Probe
         ${{ steps.codex_probe.result.markdown }}
 
-        ## Claude
-        ${{ steps.claude_probe.result.markdown }}
+        ## Summary
+        ${{ steps.summarize.result.markdown }}

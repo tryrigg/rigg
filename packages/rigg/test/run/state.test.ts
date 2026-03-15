@@ -1,12 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import {
-  createInitialRunState,
-  nextNodeAttempt,
-  replaceConversations,
-  setRunFinished,
-  upsertNodeSnapshot,
-} from "../../src/run/state"
+import { createInitialRunState, nextNodeAttempt, setRunFinished, upsertNodeSnapshot } from "../../src/run/state"
 import { runSnapshot } from "../fixture/builders"
 
 describe("run/state", () => {
@@ -45,10 +39,8 @@ describe("run/state", () => {
       started_at: null,
       status: "pending",
       stderr: null,
-      stderr_path: null,
       stderr_preview: "",
       stdout: null,
-      stdout_path: null,
       stdout_preview: "",
       user_id: null,
     })
@@ -62,10 +54,8 @@ describe("run/state", () => {
       started_at: null,
       status: "pending",
       stderr: null,
-      stderr_path: null,
       stderr_preview: "",
       stdout: null,
-      stdout_path: null,
       stdout_preview: "",
       user_id: null,
     })
@@ -79,10 +69,8 @@ describe("run/state", () => {
       started_at: "2026-03-14T00:00:30.000Z",
       status: "succeeded",
       stderr: null,
-      stderr_path: null,
       stderr_preview: "",
       stdout: "done",
-      stdout_path: null,
       stdout_preview: "done",
       user_id: null,
     })
@@ -94,14 +82,8 @@ describe("run/state", () => {
     })
   })
 
-  test("replaces conversations by value and computes next attempts", () => {
+  test("computes next attempts from the latest snapshot", () => {
     const state = createInitialRunState("run-1", "workflow", "2026-03-14T00:00:00.000Z")
-    const conversations = { draft: { id: "claude-1", provider: "claude" as const } }
-
-    replaceConversations(state, conversations)
-    conversations.draft = { id: "claude-2", provider: "claude" }
-
-    expect(state.conversations).toEqual({ draft: { id: "claude-1", provider: "claude" } })
     expect(nextNodeAttempt(state, "/0")).toBe(1)
 
     upsertNodeSnapshot(state, {
@@ -114,10 +96,8 @@ describe("run/state", () => {
       started_at: null,
       status: "pending",
       stderr: null,
-      stderr_path: null,
       stderr_preview: "",
       stdout: null,
-      stdout_path: null,
       stdout_preview: "",
       user_id: null,
     })

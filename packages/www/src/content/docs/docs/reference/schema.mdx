@@ -1,6 +1,6 @@
 ---
 title: Schema reference
-description: Complete field-by-field reference for all Rigg workflow YAML types.
+description: Complete field-by-field reference for the current Rigg workflow YAML surface.
 sidebar:
   order: 1
 ---
@@ -30,24 +30,27 @@ sidebar:
 | `with.command` | template                   | Yes      | —       |
 | `with.result`  | `none` \| `text` \| `json` | No       | `text`  |
 
+## type: codex (action: run)
+
+| Field                | Type       | Required |
+| -------------------- | ---------- | -------- |
+| `with.action`        | `run`      | Yes      |
+| `with.prompt`        | template   | Yes      |
+| `with.model`         | string     | No       |
+| `with.output.schema` | JSONSchema | No       |
+
+`with.output.schema` must use `type: object` at the root.
+
 ## type: codex (action: review)
 
-| Field           | Type                                | Required         | Default   |
-| --------------- | ----------------------------------- | ---------------- | --------- |
-| `with.action`   | `review`                            | Yes              | —         |
-| `with.prompt`   | template                            | No               | —         |
-| `with.target`   | `uncommitted` \| `base` \| `commit` | Yes\*            | —         |
-| `with.base`     | template                            | if target=base   | —         |
-| `with.commit`   | template                            | if target=commit | —         |
-| `with.title`    | template                            | No               | —         |
-| `with.model`    | string                              | No               | —         |
-| `with.mode`     | `default` \| `full_auto`            | No               | `default` |
-| `with.add_dirs` | array&lt;template&gt;               | No               | `[]`      |
-| `with.persist`  | bool                                | No               | `true`    |
-
-\*Omitting `target` with `base` present infers `target: base`.
-
-**Unsupported:** `conversation`, `output_schema`
+| Field                       | Type                                | Required    |
+| --------------------------- | ----------------------------------- | ----------- |
+| `with.action`               | `review`                            | Yes         |
+| `with.model`                | string                              | No          |
+| `with.review.target.type`   | `uncommitted` \| `base` \| `commit` | Yes         |
+| `with.review.target.branch` | template                            | if `base`   |
+| `with.review.target.sha`    | template                            | if `commit` |
+| `with.review.title`         | template                            | No          |
 
 **Built-in result shape:**
 
@@ -66,34 +69,6 @@ overall_correctness: string
 overall_explanation: string
 overall_confidence_score: number
 ```
-
-## type: codex (action: exec)
-
-| Field                | Type                     | Required | Default   |
-| -------------------- | ------------------------ | -------- | --------- |
-| `with.action`        | `exec`                   | Yes      | —         |
-| `with.prompt`        | template                 | Yes      | —         |
-| `with.mode`          | `default` \| `full_auto` | No       | `default` |
-| `with.model`         | string                   | No       | —         |
-| `with.add_dirs`      | array&lt;template&gt;    | No       | `[]`      |
-| `with.persist`       | bool                     | No       | `true`    |
-| `with.conversation`  | Conversation             | No       | —         |
-| `with.output_schema` | JSONSchema               | No       | —         |
-
-**Unsupported:** `target`, `base`, `commit`, `title`
-
-## type: claude
-
-| Field                  | Type                                                                     | Required | Default   |
-| ---------------------- | ------------------------------------------------------------------------ | -------- | --------- |
-| `with.action`          | `prompt`                                                                 | Yes      | —         |
-| `with.prompt`          | template                                                                 | Yes      | —         |
-| `with.permission_mode` | `default` \| `plan` \| `acceptEdits` \| `dontAsk` \| `bypassPermissions` | No       | `default` |
-| `with.model`           | string                                                                   | No       | —         |
-| `with.add_dirs`        | array&lt;template&gt;                                                    | No       | `[]`      |
-| `with.persist`         | bool                                                                     | No       | `true`    |
-| `with.conversation`    | Conversation                                                             | No       | —         |
-| `with.output_schema`   | JSONSchema                                                               | No       | —         |
 
 ## type: write_file
 
@@ -135,18 +110,11 @@ Each case: `if` or `else` + `steps` + optional `exports`. All cases must export 
 
 Each branch: `id` (required) + `steps`.
 
-## Conversation binding
-
-| Field   | Type                                | Required | Default                                  |
-| ------- | ----------------------------------- | -------- | ---------------------------------------- |
-| `name`  | string                              | Yes      | —                                        |
-| `scope` | `iteration` \| `loop` \| `workflow` | No       | `iteration` in loops, `workflow` outside |
-
 ## Validation rules
 
-1. Step IDs unique across entire workflow
-2. `steps` arrays non-empty (except branch `else` cases)
-3. `steps.<id>.result` references previous steps only
-4. Branch exports must have matching shapes across cases
-5. `with` required for all action types
-6. Unknown YAML keys cause errors
+1. Step IDs are unique across the entire workflow.
+2. `steps` arrays are non-empty except branch `else` cases.
+3. `steps.<id>.result` references previous steps only.
+4. Branch exports must have matching shapes across cases.
+5. `with` is required for all action types.
+6. Unknown YAML keys cause errors.

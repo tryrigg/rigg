@@ -6,7 +6,6 @@ import { asJsonValue, deepEqual, isJsonObject, type JsonValue } from "../util/js
 
 export const StepKind = {
   Branch: "branch",
-  Claude: "claude",
   Codex: "codex",
   Group: "group",
   Loop: "loop",
@@ -705,13 +704,6 @@ export function codexReviewOutputDefinition(): OutputDefinition {
 
 const EnvSchema = z.record(z.string(), z.string())
 const ExportsSchema = z.record(z.string(), z.string())
-const ConversationSchema = z
-  .object({
-    name: z.string().min(1),
-    scope: z.enum(["iteration", "loop", "workflow"]).optional(),
-  })
-  .strict()
-
 const ShellWithSchema = z
   .object({
     command: z.string().min(1),
@@ -719,43 +711,52 @@ const ShellWithSchema = z
   })
   .strict()
 
-const CodexReviewWithSchema = z
+const CodexReviewTargetSchema = z.union([
+  z
+    .object({
+      type: z.literal("uncommitted"),
+    })
+    .strict(),
+  z
+    .object({
+      branch: z.string().min(1),
+      type: z.literal("base"),
+    })
+    .strict(),
+  z
+    .object({
+      sha: z.string().min(1),
+      type: z.literal("commit"),
+    })
+    .strict(),
+])
+
+const CodexReviewSchema = z
   .object({
-    action: z.literal("review"),
-    add_dirs: z.array(z.string().min(1)).optional(),
-    base: z.string().min(1).optional(),
-    commit: z.string().min(1).optional(),
-    mode: z.enum(["default", "full_auto"]).optional(),
-    model: z.string().min(1).optional(),
-    persist: z.boolean().optional(),
-    prompt: z.string().min(1).optional(),
-    target: z.enum(["base", "commit", "uncommitted"]).optional(),
+    target: CodexReviewTargetSchema,
     title: z.string().min(1).optional(),
   })
   .strict()
 
-const CodexExecWithSchema = z
+const CodexOutputSchema = z
   .object({
-    action: z.literal("exec"),
-    add_dirs: z.array(z.string().min(1)).optional(),
-    conversation: ConversationSchema.optional(),
-    mode: z.enum(["default", "full_auto"]).optional(),
-    model: z.string().min(1).optional(),
-    output_schema: OutputSchema.optional(),
-    persist: z.boolean().optional(),
-    prompt: z.string().min(1),
+    schema: OutputSchema,
   })
   .strict()
 
-const ClaudeWithSchema = z
+const CodexReviewWithSchema = z
   .object({
-    action: z.literal("prompt"),
-    add_dirs: z.array(z.string().min(1)).optional(),
-    conversation: ConversationSchema.optional(),
+    action: z.literal("review"),
     model: z.string().min(1).optional(),
-    output_schema: OutputSchema.optional(),
-    permission_mode: z.enum(["acceptEdits", "bypassPermissions", "default", "dontAsk", "plan"]).optional(),
-    persist: z.boolean().optional(),
+    review: CodexReviewSchema,
+  })
+  .strict()
+
+const CodexRunWithSchema = z
+  .object({
+    action: z.literal("run"),
+    model: z.string().min(1).optional(),
+    output: CodexOutputSchema.optional(),
     prompt: z.string().min(1),
   })
   .strict()
@@ -785,12 +786,7 @@ export type ShellNode = BaseNode & {
 
 export type CodexNode = BaseNode & {
   type: "codex"
-  with: z.infer<typeof CodexReviewWithSchema> | z.infer<typeof CodexExecWithSchema>
-}
-
-export type ClaudeNode = BaseNode & {
-  type: "claude"
-  with: z.infer<typeof ClaudeWithSchema>
+  with: z.infer<typeof CodexReviewWithSchema> | z.infer<typeof CodexRunWithSchema>
 }
 
 export type WriteFileNode = BaseNode & {
@@ -835,15 +831,7 @@ export type ParallelNode = BaseNode & {
   type: "parallel"
 }
 
-export type WorkflowStep =
-  | BranchNode
-  | ClaudeNode
-  | CodexNode
-  | GroupNode
-  | LoopNode
-  | ParallelNode
-  | ShellNode
-  | WriteFileNode
+export type WorkflowStep = BranchNode | CodexNode | GroupNode | LoopNode | ParallelNode | ShellNode | WriteFileNode
 
 export type WorkflowDocument = {
   env?: Record<string, string> | undefined
@@ -881,12 +869,7 @@ const ShellNodeSchema: z.ZodType<ShellNode> = BaseNodeSchema.extend({
 
 const CodexNodeSchema: z.ZodType<CodexNode> = BaseNodeSchema.extend({
   type: z.literal("codex"),
-  with: z.union([CodexReviewWithSchema, CodexExecWithSchema]),
-}).strict()
-
-const ClaudeNodeSchema: z.ZodType<ClaudeNode> = BaseNodeSchema.extend({
-  type: z.literal("claude"),
-  with: ClaudeWithSchema,
+  with: z.union([CodexReviewWithSchema, CodexRunWithSchema]),
 }).strict()
 
 const WriteFileNodeSchema: z.ZodType<WriteFileNode> = BaseNodeSchema.extend({
@@ -931,7 +914,6 @@ export const WorkflowStepSchema: z.ZodType<WorkflowStep> = z.lazy(() =>
   z.union([
     ShellNodeSchema,
     CodexNodeSchema,
-    ClaudeNodeSchema,
     WriteFileNodeSchema,
     GroupNodeSchema,
     LoopNodeSchema,
@@ -949,7 +931,7 @@ export const WorkflowDocumentSchema: z.ZodType<WorkflowDocument> = z
   })
   .strict()
 
-export type ActionNode = ClaudeNode | CodexNode | ShellNode | WriteFileNode
+export type ActionNode = CodexNode | ShellNode | WriteFileNode
 export type StructuredOutput = OutputDefinition
 
 function validateAllowedSchemaFields<T extends object>(

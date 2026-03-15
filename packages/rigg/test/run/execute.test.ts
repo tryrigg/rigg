@@ -1,43 +1,14 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtemp, mkdir, readFile, readdir, rm } from "node:fs/promises"
+import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 
 import type { WorkflowDocument } from "../../src/compile/schema"
 import { executeWorkflow } from "../../src/run/execute"
 
-async function readPersistedState(projectRoot: string): Promise<{
-  nodes: Array<{
-    result: unknown
-    status: string
-    stdout_path: string | null
-    user_id: string | null
-  }>
-  status: string
-}> {
-  const runIds = (await readdir(join(projectRoot, ".rigg", "runs"))).filter((entry) => !entry.startsWith(".tmp-"))
-  const runId = runIds[0]
-  if (runId === undefined) {
-    throw new Error("expected a persisted run directory")
-  }
-
-  const state = await readFile(join(projectRoot, ".rigg", "runs", runId, "state.json"), "utf8")
-  return JSON.parse(state) as {
-    nodes: Array<{
-      result: unknown
-      status: string
-      stdout_path: string | null
-      user_id: string | null
-    }>
-    status: string
-  }
-}
-
 describe("run/execute", () => {
   test("uses project root as the execution cwd and write_file base path", async () => {
     const root = await mkdtemp(join(tmpdir(), "rigg-execute-"))
-    const nested = join(root, "nested")
-    await mkdir(nested, { recursive: true })
 
     try {
       const workflow: WorkflowDocument = {
@@ -63,12 +34,9 @@ describe("run/execute", () => {
       }
 
       const snapshot = await executeWorkflow({
-        configFiles: [],
-        cwd: nested,
         invocationInputs: {},
         parentEnv: process.env,
         projectRoot: root,
-        toolVersion: "0.0.0",
         workflow,
       })
 
@@ -87,12 +55,9 @@ describe("run/execute", () => {
 
     try {
       const snapshot = await executeWorkflow({
-        configFiles: [],
-        cwd: root,
         invocationInputs: {},
         parentEnv: process.env,
         projectRoot: root,
-        toolVersion: "0.0.0",
         workflow: {
           id: "failed-action-result",
           steps: [
@@ -125,12 +90,9 @@ describe("run/execute", () => {
 
     async function run(workflow: WorkflowDocument) {
       return executeWorkflow({
-        configFiles: [],
-        cwd: root,
         invocationInputs: {},
         parentEnv: process.env,
         projectRoot: root,
-        toolVersion: "0.0.0",
         workflow,
       })
     }
@@ -234,12 +196,11 @@ describe("run/execute", () => {
 
   test("waits for sibling parallel branches before surfacing a thrown branch error", async () => {
     const root = await mkdtemp(join(tmpdir(), "rigg-execute-parallel-"))
+    const nodeStatuses = new Map<string, string>()
 
     try {
       await expect(
         executeWorkflow({
-          configFiles: [],
-          cwd: root,
           internals: {
             runActionStep: async (step) => {
               if (step.id === "slow") {
@@ -262,9 +223,13 @@ describe("run/execute", () => {
             },
           },
           invocationInputs: {},
+          onProgress: (event) => {
+            if (event.kind === "node_finished" && event.user_id !== null) {
+              nodeStatuses.set(event.user_id, event.status)
+            }
+          },
           parentEnv: process.env,
           projectRoot: root,
-          toolVersion: "0.0.0",
           workflow: {
             id: "parallel-join",
             steps: [
@@ -305,13 +270,8 @@ describe("run/execute", () => {
         }),
       ).rejects.toThrow("branch exploded")
 
-      const persisted = await readPersistedState(root)
-      expect(persisted.status).toBe("failed")
-      expect(persisted.nodes.find((node) => node.user_id === "slow")).toMatchObject({
-        result: "finished",
-        status: "succeeded",
-      })
-      expect(persisted.nodes.find((node) => node.user_id === "boom")?.status).toBe("failed")
+      expect(nodeStatuses.get("slow")).toBe("succeeded")
+      expect(nodeStatuses.get("boom")).toBe("failed")
     } finally {
       await rm(root, { force: true, recursive: true })
     }
@@ -322,8 +282,6 @@ describe("run/execute", () => {
 
     try {
       const snapshot = await executeWorkflow({
-        configFiles: [],
-        cwd: root,
         internals: {
           runActionStep: async () => ({
             exitCode: 0,
@@ -336,7 +294,6 @@ describe("run/execute", () => {
         invocationInputs: {},
         parentEnv: process.env,
         projectRoot: root,
-        toolVersion: "0.0.0",
         workflow: {
           id: "loop-exports",
           steps: [
@@ -382,8 +339,6 @@ describe("run/execute", () => {
     try {
       await expect(
         executeWorkflow({
-          configFiles: [],
-          cwd: root,
           internals: {
             runActionStep: async () => ({
               exitCode: 0,
@@ -401,7 +356,6 @@ describe("run/execute", () => {
           },
           parentEnv: process.env,
           projectRoot: root,
-          toolVersion: "0.0.0",
           workflow: {
             id: "loop-export-failure",
             steps: [
@@ -435,26 +389,36 @@ describe("run/execute", () => {
     }
   })
 
-  test("records provider-only logs in node metadata", async () => {
+  test("emits provider events through progress updates", async () => {
     const root = await mkdtemp(join(tmpdir(), "rigg-execute-provider-logs-"))
+    const events: string[] = []
 
     try {
-      const snapshot = await executeWorkflow({
-        configFiles: [],
-        cwd: root,
+      await executeWorkflow({
         internals: {
-          runActionStep: async () => ({
-            exitCode: 0,
-            providerEvents: [{ kind: "status", message: "thread started thread_123", provider: "codex" as const }],
-            result: "ok",
-            stderr: "",
-            stdout: "",
-          }),
+          runActionStep: async (_step, _context, options) => {
+            await options.onProviderEvent?.({
+              kind: "status",
+              message: "thread started thread_123",
+              provider: "codex",
+            })
+            return {
+              exitCode: 0,
+              providerEvents: [],
+              result: "ok",
+              stderr: "",
+              stdout: "",
+            }
+          },
         },
         invocationInputs: {},
+        onProgress: (event) => {
+          if (event.kind === "provider_status") {
+            events.push(event.message)
+          }
+        },
         parentEnv: process.env,
         projectRoot: root,
-        toolVersion: "0.0.0",
         workflow: {
           id: "provider-logs",
           steps: [
@@ -462,20 +426,14 @@ describe("run/execute", () => {
               id: "agent",
               type: "codex",
               with: {
-                action: "exec",
+                action: "run",
                 prompt: "Say hi",
               },
             },
           ],
         },
       })
-
-      const node = snapshot.nodes.find((entry) => entry.user_id === "agent")
-      expect(node?.stdout_path).toBeString()
-      expect(node?.stdout_path).not.toBeNull()
-      expect(await readFile(join(root, ".rigg", "runs", snapshot.run_id, node?.stdout_path ?? ""), "utf8")).toContain(
-        "thread started thread_123",
-      )
+      expect(events).toContain("thread started thread_123")
     } finally {
       await rm(root, { force: true, recursive: true })
     }

@@ -55,7 +55,7 @@ export class TerminalProgressSink {
         return
       case "node_finished":
         this.#stream.write(
-          `[done] node=${event.user_id ?? event.node_path} status=${event.status} exit=${String(event.exit_code)} duration=${formatDuration(event.duration_ms)} stdout=${event.stdout_path ?? "-"} stderr=${event.stderr_path ?? "-"}\n`,
+          `[done] node=${event.user_id ?? event.node_path} status=${event.status} exit=${String(event.exit_code)} duration=${formatDuration(event.duration_ms)}\n`,
         )
         return
       case "run_finished":

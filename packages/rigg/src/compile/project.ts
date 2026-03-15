@@ -1,6 +1,7 @@
 import { lstat } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
 
+import { isMissingPathError } from "../util/error"
 import { createCompileError, CompileErrorCode, type CompileError } from "./diagnostics"
 import type { WorkflowDocument } from "./schema"
 
@@ -70,8 +71,4 @@ export async function discoverWorkspace(startDir: string): Promise<WorkspaceDisc
 
 export function workflowById(project: WorkflowProject, workflowId: string): WorkflowDocument | undefined {
   return project.files.find((file) => file.workflow.id === workflowId)?.workflow
-}
-
-function isMissingPathError(error: unknown): boolean {
-  return error instanceof Error && "code" in error && error.code === "ENOENT"
 }

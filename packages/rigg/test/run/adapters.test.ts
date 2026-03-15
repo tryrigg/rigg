@@ -19,7 +19,6 @@ describe("run/adapters", () => {
     }
 
     const result = await runActionStep(step, renderContext(), {
-      artifactsDir: process.cwd(),
       cwd: process.cwd(),
       env: { ...process.env, RIGG_TEST_VALUE: "hello" },
       onOutput: (stream, chunk) => {
@@ -51,7 +50,6 @@ describe("run/adapters", () => {
       },
       renderContext(),
       {
-        artifactsDir: process.cwd(),
         cwd: process.cwd(),
         env: process.env,
         onOutput: (stream, chunk) => {
@@ -83,7 +81,6 @@ describe("run/adapters", () => {
     }
 
     const result = await runActionStep(step, renderContext(), {
-      artifactsDir: process.cwd(),
       cwd: process.cwd(),
       env: process.env,
     })
@@ -105,7 +102,6 @@ describe("run/adapters", () => {
         },
         renderContext(),
         {
-          artifactsDir: process.cwd(),
           cwd: process.cwd(),
           env: process.env,
         },
@@ -125,7 +121,6 @@ describe("run/adapters", () => {
       }
 
       const result = await runActionStep(step, renderContext(), {
-        artifactsDir: root,
         cwd: root,
         env: process.env,
       })
@@ -162,12 +157,15 @@ describe("run/adapters", () => {
           type: "codex",
           with: {
             action: "review",
-            target: "uncommitted",
+            review: {
+              target: {
+                type: "uncommitted",
+              },
+            },
           },
         },
         renderContext(),
         {
-          artifactsDir: root,
           cwd: root,
           env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
           onProviderEvent: (event) => {
@@ -212,17 +210,79 @@ describe("run/adapters", () => {
             type: "codex",
             with: {
               action: "review",
-              target: "uncommitted",
+              review: {
+                target: {
+                  type: "uncommitted",
+                },
+              },
             },
           },
           renderContext(),
           {
-            artifactsDir: root,
             cwd: root,
             env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
           },
         ),
       ).rejects.toThrow("result.overall_correctness is required")
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("parses codex run structured output with local validation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-codex-run-"))
+    const binDir = join(root, "bin")
+    await mkdir(binDir, { recursive: true })
+    const toolPath = join(binDir, "codex")
+    await writeFile(
+      toolPath,
+      [
+        "#!/bin/sh",
+        'out=""',
+        'while [ "$#" -gt 0 ]; do',
+        '  if [ "$1" = "-o" ]; then',
+        '    out="$2"',
+        "    shift 2",
+        "    continue",
+        "  fi",
+        "  shift",
+        "done",
+        'printf \'{"summary":"done"}\' > "$out"',
+        'printf \'%s\\n\' \'{"type":"thread.started","thread_id":"thread_123"}\'',
+      ].join("\n"),
+      "utf8",
+    )
+    await chmod(toolPath, 0o755)
+
+    try {
+      const result = await runActionStep(
+        {
+          type: "codex",
+          with: {
+            action: "run",
+            output: {
+              schema: {
+                additionalProperties: false,
+                properties: {
+                  summary: { type: "string" },
+                },
+                required: ["summary"],
+                type: "object",
+              },
+            },
+            prompt: "Summarize the change.",
+          },
+        },
+        renderContext(),
+        {
+          cwd: root,
+          env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+        },
+      )
+
+      expect(result.exitCode).toBe(0)
+      expect(result.result).toEqual({ summary: "done" })
+      expect(result.stdout).toBe('{"summary":"done"}')
     } finally {
       await rm(root, { force: true, recursive: true })
     }

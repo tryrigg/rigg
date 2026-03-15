@@ -17,7 +17,7 @@ curl -fsSL https://tryrigg.com/install | bash -s -- --version v0.1.0
 
 macOS only (prebuilt binary).
 
-**Requirements:** `codex` on `PATH` for codex steps, `claude` on `PATH` for claude steps.
+**Requirements:** `codex` on `PATH` for codex steps.
 
 ## Init and run
 
@@ -29,21 +29,8 @@ rigg run hello --input name=Rigg       # run a workflow
 
 `--input key=value` auto-parses JSON — `true`, `42`, `["a"]`, `{"x":1}` all work.
 
-## Inspect runs
+## Output
 
-```bash
-rigg status                            # list recent runs
-rigg status <run_id> --json            # details as JSON
-rigg logs <run_id>                     # full output
-rigg logs <run_id> --node step_id      # specific step
-```
+Interactive progress is shown on TTY. Non-TTY execution suppresses it automatically.
 
-Run data is stored under `.rigg/runs/<run_id>/`.
-
-## Output modes
-
-| Flag        | Behavior                        |
-| ----------- | ------------------------------- |
-| _(default)_ | Interactive progress (TTY only) |
-| `--json`    | JSON snapshot to stdout         |
-| `--quiet`   | Minimal output                  |
+Run state is in-memory only; Rigg does not persist run history.

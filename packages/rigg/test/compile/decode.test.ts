@@ -95,6 +95,50 @@ steps:
     }
   })
 
+  test("rejects unsupported codex fields and invalid actions", () => {
+    const invalidField = decodeWorkflowFile(
+      {
+        id: "check",
+        steps: [
+          {
+            type: "codex",
+            with: {
+              action: "run",
+              invalid_field: "draft",
+              prompt: "hello",
+            },
+          },
+        ],
+      },
+      "/workspace/.rigg/check.yaml",
+    )
+    const invalidAction = decodeWorkflowFile(
+      {
+        id: "check",
+        steps: [
+          {
+            type: "codex",
+            with: {
+              action: "launch",
+              prompt: "hello",
+            },
+          },
+        ],
+      },
+      "/workspace/.rigg/check.yaml",
+    )
+
+    expect(invalidField.kind).toBe("invalid_workflow")
+    expect(invalidAction.kind).toBe("invalid_workflow")
+
+    if (invalidField.kind === "invalid_workflow") {
+      expect(invalidField.error.message).toContain("Workflow schema validation failed.")
+    }
+    if (invalidAction.kind === "invalid_workflow") {
+      expect(invalidAction.error.message).toContain("Workflow schema validation failed.")
+    }
+  })
+
   test("rejects invalid workflow identifiers", () => {
     const result = decodeWorkflowFile(
       {

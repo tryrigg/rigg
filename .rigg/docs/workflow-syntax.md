@@ -1,6 +1,6 @@
 # Rigg Workflow YAML Guide
 
-Rigg is a local-first workflow builder for coding. It orchestrates multi-step automation workflows involving AI coding agents (Codex, Claude), shell commands, and structured control flow.
+Rigg is a local-first workflow builder for coding. It orchestrates Codex and shell steps with structured control flow.
 
 Workflow files live in `.rigg/` and are run with `rigg run <workflow_id>`.
 
@@ -10,96 +10,69 @@ For complete workflow examples, see [examples.md](examples.md).
 ## Workflow Structure
 
 ```yaml
-id: workflow_name           # Required: unique identifier
-inputs:                     # Optional: JSON Schema input definitions
+id: workflow_name
+inputs:
   param_name:
     type: string
-    description: ...
-    default: default_value  # Only top-level inputs support defaults
-env:                        # Optional: environment variables
+    description: Optional description
+env:
   VAR_NAME: ${{ expr }}
-steps:                      # Required: non-empty array of steps
+steps:
   - id: step_name
-    type: shell|codex|claude|write_file|group|loop|branch|parallel
+    type: shell|codex|write_file|group|loop|branch|parallel
     ...
 ```
 
-## Step Types (Actions)
+## Action Steps
 
-### shell — Run shell commands
+### shell
 
 ```yaml
 - id: check
   type: shell
   with:
-    command: echo "hello ${{ inputs.name }}" # Template string
+    command: echo "hello ${{ inputs.name }}"
     result: text # none | text | json (default: text)
 ```
 
-### codex — AI code review or execution
+### codex
 
 ```yaml
-# Review mode (pick exactly one target)
+# Run mode
+- id: implement
+  type: codex
+  with:
+    action: run
+    prompt: Implement the feature.
+    model: gpt-5.4
+    output:
+      schema:
+        type: object
+        required: [summary]
+        additionalProperties: false
+        properties:
+          summary:
+            type: string
+
+# Review mode
 - id: review
   type: codex
   with:
     action: review
-    target: uncommitted # uncommitted | base | commit
-    prompt: Review for bugs.
-    # target: base requires base:
-    # base: ${{ inputs.branch }}
-    # target: commit requires commit:
-    # commit: ${{ inputs.sha }}
-    title: Optional title # Optional, review only
-    model: model_name # Optional
-
-# Exec mode
-- id: implement
-  type: codex
-  with:
-    action: exec
-    prompt: Implement the feature. # Required
-    mode: full_auto # default | full_auto
-    model: model_name # Optional
-    persist: true # Session persistence (default: true)
-    conversation: # Optional: maintain context across iterations
-      name: planner
-      scope: workflow # iteration | loop | workflow (iteration/loop only inside loops)
-    output_schema: # Optional: validate structured JSON output
-      type: object
-      required: [field]
-      additionalProperties: false
-      properties:
-        field:
-          type: string
+    model: gpt-5.4
+    review:
+      target:
+        type: uncommitted # uncommitted | base | commit
+      title: Optional title
 ```
 
-**Note:** `conversation` and `output_schema` cannot be used together when the conversation will be resumed (e.g., in a loop or when another step shares the same conversation name). Resumed Codex exec turns reject `output_schema` and `add_dirs`.
+For `review.target`:
 
-### claude — Interactive AI with permission control
+- `type: uncommitted` needs no extra fields
+- `type: base` requires `branch`
+- `type: commit` requires `sha`
 
-```yaml
-- id: judge
-  type: claude
-  with:
-    action: prompt                                        # Only action type
-    prompt: Evaluate this: ${{ steps.review.result }}      # Required
-    permission_mode: default                               # default|plan|acceptEdits|dontAsk|bypassPermissions
-    model: model_name                                      # Optional
-    persist: true                                          # Default: true
-    conversation:                                          # Optional
-      name: reviewer
-      scope: workflow
-    output_schema:                                         # Optional
-      type: object
-      required: [accepted]
-      additionalProperties: false
-      properties:
-        accepted:
-          type: boolean
-```
-
-### write_file — Write content to a file
+### write_file
 
 ```yaml
 - id: save
@@ -109,81 +82,54 @@ steps:                      # Required: non-empty array of steps
     content: ${{ steps.draft.result.markdown }}
 ```
 
-## Step Types (Control Flow)
+## Control Flow
 
-### group — Encapsulate steps with exports
+### group
 
 ```yaml
 - id: analysis
   type: group
   steps:
-    - id: internal_step
+    - id: inner
       type: shell
       with:
-        command: echo "hidden"
+        command: echo hi
   exports:
-    summary: ${{ steps.internal_step.result }}
+    summary: ${{ steps.inner.result }}
 ```
 
-### loop — Iterate until condition or max
+### loop
 
 ```yaml
 - id: remediation
   type: loop
-  max: 5 # Required
-  until: ${{ steps.judge.result.accepted_count == 0 }} # Required
-  steps:
-    - id: review
-      type: codex
-      with:
-        action: review
-        target: uncommitted
-        prompt: Review changes.
-    - id: judge
-      type: claude
-      with:
-        action: prompt
-        prompt: Accept valid findings from ${{ steps.review.result }}
-        output_schema:
-          type: object
-          required: [accepted_count]
-          additionalProperties: false
-          properties:
-            accepted_count:
-              type: integer
-  exports:
-    count: ${{ steps.judge.result.accepted_count }}
+  max: 5
+  until: ${{ steps.review.result.findings == [] }}
+  steps: []
 ```
 
-Inside loops: `${{ run.iteration }}` (1-based), `${{ run.max_iterations }}`, `${{ run.node_path }}` are available.
+Inside loops: `${{ run.iteration }}`, `${{ run.max_iterations }}`, and `${{ run.node_path }}` are available.
 
-### branch — Conditional execution
+### branch
 
 ```yaml
 - id: decide
   type: branch
   cases:
-    - if: ${{ steps.check.result.has_issues }}
-      steps:
-        - id: fix
-          type: codex
-          with:
-            action: exec
-            prompt: Fix the issues.
+    - if: ${{ steps.check.result.ok }}
+      steps: []
       exports:
-        outcome: ${{ steps.fix.result }}
+        status: ${{ "ok" }}
     - else:
       steps: []
       exports:
-        outcome: "no issues"
+        status: ${{ "needs_work" }}
 ```
 
-All cases must export the same shape or none at all.
-
-### parallel — Concurrent execution
+### parallel
 
 ```yaml
-- id: tests
+- id: checks
   type: parallel
   branches:
     - id: unit
@@ -191,60 +137,42 @@ All cases must export the same shape or none at all.
         - id: run_unit
           type: shell
           with:
-            command: cargo test --lib
-    - id: integration
+            command: npm test
+    - id: lint
       steps:
-        - id: run_integration
+        - id: run_lint
           type: shell
           with:
-            command: cargo test --tests
+            command: npm run lint
   exports:
-    unit_result: ${{ steps.run_unit.result }}
-    integration_result: ${{ steps.run_integration.result }}
+    unit: ${{ steps.run_unit.result }}
+    lint: ${{ steps.run_lint.result }}
 ```
 
-## Expression Syntax
+## Expressions
 
 Templates use `${{ expression }}` syntax. Available roots:
 
-| Root       | Description                      | Example                            |
-| ---------- | -------------------------------- | ---------------------------------- |
-| `inputs.*` | Workflow inputs                  | `${{ inputs.name }}`               |
-| `steps.*`  | Previous step results            | `${{ steps.review.result.count }}` |
-| `env.*`    | Environment variables            | `${{ env.CI }}`                    |
-| `run.*`    | Loop context (inside loops only) | `${{ run.iteration }}`             |
+- `inputs.*`
+- `steps.*`
+- `env.*`
+- `run.*` inside loops only
 
-Operators: `==`, `!=`, `>`, `>=`, `<`, `<=`, `&&`, `||`, `!`
-Functions: `format('{0}:{1}', a, b)`, `toJSON(value)`, `join(array, ',')`
-
-## Common Attributes (All Steps)
-
-```yaml
-- id: optional_unique_id # Alphanumeric + underscore + hyphen
-  type: ... # Required
-  if: ${{ boolean_expr }} # Optional: conditional execution
-  env: # Optional: step-level env vars
-    KEY: value
-```
+Built-in functions: `format`, `toJSON`, `join`, `len`
 
 ## CLI Commands
 
 ```bash
-rigg init                                    # Generate .rigg/ with example workflows
-rigg validate                                # Validate all .rigg/*.yaml files
-rigg run <workflow_id> --input key=value     # Execute a workflow
-rigg run <workflow_id> --json                # JSON output mode
-rigg run <workflow_id> --quiet               # Minimal output
-rigg status [run_id]                         # Check execution status
-rigg logs <run_id> [--node id] [--stderr]    # View execution logs
+rigg init
+rigg validate
+rigg run <workflow_id> --input key=value
+rigg run <workflow_id> --json
+rigg run <workflow_id> --quiet
 ```
 
 ## Key Rules
 
-1. **Step results**: Access via `steps.<id>.result` — only visible to subsequent steps in the same scope
-2. **Exports**: Make inner results visible outside group/loop/branch/parallel
-3. **output_schema**: Must use `type: object` at the top level
-4. **conversation**: Requires `persist: true` (default); `scope: iteration|loop` only inside loops
-5. **codex review**: Does NOT support `conversation` or `output_schema`
-6. **branch cases**: First matching `if` wins; `else` is the fallback
-7. **Inputs**: Must be JSON Schema objects with `type` field, not shorthand strings
+1. Access step outputs via `steps.<id>.result`
+2. `with.output.schema` must use `type: object` at the root
+3. `codex` supports `action: run` and `action: review`
+4. Unknown YAML keys cause validation errors

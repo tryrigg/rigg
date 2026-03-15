@@ -160,9 +160,9 @@ describe("compile/schema", () => {
           required: ["accepted", "missing"],
           type: "object",
         },
-        "with.output_schema",
+        "with.output.schema",
       ),
-    ).toEqual(["with.output_schema.required references unknown property `missing`"])
+    ).toEqual(["with.output.schema.required references unknown property `missing`"])
 
     expect(
       validateOutputDefinition(
@@ -170,9 +170,9 @@ describe("compile/schema", () => {
           maxLength: 5,
           type: "string",
         } as never,
-        "with.output_schema",
+        "with.output.schema",
       ),
-    ).toEqual(["with.output_schema.maxLength uses an unsupported keyword"])
+    ).toEqual(["with.output.schema.maxLength uses an unsupported keyword"])
 
     expect(
       canonicalizeOutputSchema({

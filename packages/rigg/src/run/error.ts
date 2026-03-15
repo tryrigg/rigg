@@ -1,21 +1,18 @@
-import type { RunReason } from "../history/index"
+import type { RunReason } from "./schema"
 import { normalizeError } from "../util/error"
 
 export class RunExecutionError extends Error {
-  readonly emitRunFailed: boolean
   readonly runReason: RunReason
 
   constructor(
     message: string,
     options: {
       cause?: unknown
-      emitRunFailed?: boolean | undefined
       runReason: RunReason
     },
   ) {
     super(message, options.cause === undefined ? undefined : { cause: options.cause })
     this.name = "RunExecutionError"
-    this.emitRunFailed = options.emitRunFailed ?? true
     this.runReason = options.runReason
   }
 }
@@ -26,15 +23,6 @@ export class LoopExhaustedError extends RunExecutionError {
       runReason: "step_failed",
     })
     this.name = "LoopExhaustedError"
-  }
-}
-
-export class ParallelConversationConflictError extends RunExecutionError {
-  constructor(name: string, scope: string) {
-    super(`parallel branches updated conversation \`${name}\` in \`${scope}\` scope with conflicting handles`, {
-      runReason: "step_failed",
-    })
-    this.name = "ParallelConversationConflictError"
   }
 }
 
@@ -51,14 +39,6 @@ export function createStepFailedError(error: unknown): RunExecutionError {
   return new RunExecutionError(cause.message, {
     cause,
     runReason: "step_failed",
-  })
-}
-
-export function createEngineError(error: unknown): RunExecutionError {
-  const cause = normalizeError(error)
-  return new RunExecutionError(cause.message, {
-    cause,
-    runReason: "engine_error",
   })
 }
 

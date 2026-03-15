@@ -1,7 +1,7 @@
 import type { WorkflowProject } from "../../src/compile/project"
 import type { WorkflowDocument } from "../../src/compile/schema"
 import type { RenderContext, StepBinding } from "../../src/run/render"
-import type { RunSnapshot } from "../../src/history/schema"
+import type { RunSnapshot } from "../../src/run/schema"
 
 export function workflowProject(
   files: Array<{
@@ -25,7 +25,6 @@ export function workflowProject(
 
 export function runSnapshot(overrides: Partial<RunSnapshot> = {}): RunSnapshot {
   return {
-    conversations: overrides.conversations ?? {},
     finished_at: overrides.finished_at ?? null,
     nodes: overrides.nodes ?? [],
     reason: overrides.reason ?? null,

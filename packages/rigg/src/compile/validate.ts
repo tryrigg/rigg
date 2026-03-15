@@ -16,7 +16,6 @@ import type {
   ActionNode,
   BranchCase,
   BranchNode,
-  ClaudeNode,
   CodexNode,
   GroupNode,
   InputDefinition,
@@ -39,18 +38,13 @@ import { deepEqual } from "../util/json"
 
 type VisibleScope = {
   availableStepShapes: Map<string, ResultShape>
-  conversationProviders: Map<string, "claude" | "codex">
-  currentLoopPath?: string | undefined
   inputDefinitions: Record<string, InputDefinition>
   insideLoop: boolean
-  possibleCodexConversations: Set<string>
 }
 
 type ValidationSummary = {
-  allConversationBindings: Set<string>
   availableStepShapes: Map<string, ResultShape>
   guaranteedResultShape?: ResultShape | undefined
-  possibleCodexConversations: Set<string>
 }
 
 export function validateWorkspace(project: WorkflowProject): CompileError[] {
@@ -79,10 +73,8 @@ function validateWorkflow(workflow: WorkflowDocument, filePath: string): Compile
   const seenStepIds = new Set<string>()
   const rootScope: VisibleScope = {
     availableStepShapes: new Map(),
-    conversationProviders: new Map(),
     inputDefinitions: workflow.inputs ?? {},
     insideLoop: false,
-    possibleCodexConversations: new Set(),
   }
 
   for (const key of Object.keys(workflow.inputs ?? {})) {
@@ -115,8 +107,6 @@ function validateStepList(
   errors: CompileError[],
 ): ValidationSummary {
   const availableStepShapes = new Map(scope.availableStepShapes)
-  const possibleCodexConversations = new Set(scope.possibleCodexConversations)
-  const allConversationBindings = new Set<string>()
 
   for (const step of steps) {
     const result = validateStep(
@@ -125,32 +115,19 @@ function validateStepList(
       seenStepIds,
       {
         availableStepShapes,
-        conversationProviders: scope.conversationProviders,
-        currentLoopPath: scope.currentLoopPath,
         inputDefinitions: scope.inputDefinitions,
         insideLoop: scope.insideLoop,
-        possibleCodexConversations,
       },
       errors,
     )
 
-    for (const binding of result.allConversationBindings) {
-      allConversationBindings.add(binding)
-    }
-
     if (step.id !== undefined) {
       availableStepShapes.set(step.id, result.guaranteedResultShape ?? result.resultShape)
-    }
-
-    for (const key of result.possibleCodexConversations) {
-      possibleCodexConversations.add(key)
     }
   }
 
   return {
-    allConversationBindings,
     availableStepShapes,
-    possibleCodexConversations,
   }
 }
 
@@ -182,7 +159,6 @@ function validateStep(
     switch (step.type) {
       case "shell":
       case "write_file":
-      case "claude":
       case "codex":
         return validateActionStep(step, filePath, scope, errors)
       case "group":
@@ -212,11 +188,9 @@ function validateActionStep(
     case "shell":
       validateTemplate(step.with.command, filePath, scope, errors)
       return {
-        allConversationBindings: new Set(),
         availableStepShapes: new Map(scope.availableStepShapes),
         guaranteedResultShape:
           step.with.result === "none" ? { kind: "none" } : step.with.result === "json" ? AnyJsonShape : StringShape,
-        possibleCodexConversations: new Set(scope.possibleCodexConversations),
         resultShape:
           step.with.result === "none" ? { kind: "none" } : step.with.result === "json" ? AnyJsonShape : StringShape,
       }
@@ -224,14 +198,10 @@ function validateActionStep(
       validateTemplate(step.with.path, filePath, scope, errors)
       validateTemplate(step.with.content, filePath, scope, errors)
       return {
-        allConversationBindings: new Set(),
         availableStepShapes: new Map(scope.availableStepShapes),
         guaranteedResultShape: { kind: "object", fields: { path: StringShape } },
-        possibleCodexConversations: new Set(scope.possibleCodexConversations),
         resultShape: { kind: "object", fields: { path: StringShape } },
       }
-    case "claude":
-      return validateClaude(step, filePath, scope, errors)
     case "codex":
       return validateCodex(step, filePath, scope, errors)
   }
@@ -251,16 +221,13 @@ function validateGroupStep(
     {
       ...scope,
       availableStepShapes: inner.availableStepShapes,
-      possibleCodexConversations: inner.possibleCodexConversations,
     },
     errors,
   )
 
   return {
-    allConversationBindings: inner.allConversationBindings,
     availableStepShapes: inner.availableStepShapes,
     guaranteedResultShape: resultShape,
-    possibleCodexConversations: inner.possibleCodexConversations,
     resultShape,
   }
 }
@@ -274,7 +241,6 @@ function validateLoopStep(
 ): ValidationSummary & { guaranteedResultShape: ResultShape; resultShape: ResultShape } {
   const loopScope = {
     ...scope,
-    currentLoopPath: step.id ?? `loop@${seenStepIds.size}`,
     insideLoop: true,
   }
   const inner = validateStepList(step.steps, filePath, seenStepIds, loopScope, errors)
@@ -284,7 +250,6 @@ function validateLoopStep(
     {
       ...loopScope,
       availableStepShapes: inner.availableStepShapes,
-      possibleCodexConversations: inner.possibleCodexConversations,
     },
     errors,
     "bool",
@@ -296,19 +261,13 @@ function validateLoopStep(
     {
       ...loopScope,
       availableStepShapes: inner.availableStepShapes,
-      possibleCodexConversations: inner.possibleCodexConversations,
     },
     errors,
   )
 
   return {
-    allConversationBindings: inner.allConversationBindings,
     availableStepShapes: inner.availableStepShapes,
     guaranteedResultShape: resultShape,
-    possibleCodexConversations: filterConversationsAfterLoop(
-      inner.possibleCodexConversations,
-      loopScope.currentLoopPath,
-    ),
     resultShape,
   }
 }
@@ -406,13 +365,8 @@ function validateBranchStep(
   }
 
   return {
-    allConversationBindings: unionSets(branchSummaries.map((summary) => summary.allConversationBindings)),
     availableStepShapes: new Map(scope.availableStepShapes),
     guaranteedResultShape: branchResultShape,
-    possibleCodexConversations: unionSets(
-      branchSummaries.map((summary) => summary.possibleCodexConversations),
-      scope.possibleCodexConversations,
-    ),
     resultShape: branchResultShape,
   }
 }
@@ -427,7 +381,6 @@ function validateParallelStep(
   const branchIds = new Set<string>()
   const branchSummaries: ValidationSummary[] = []
   const mergedStepShapes = new Map(scope.availableStepShapes)
-  const seenBranchConversations = new Set<string>()
 
   for (const [index, branch] of step.branches.entries()) {
     const identifierError = validateIdentifier(branch.id, "parallel branch id", filePath)
@@ -446,19 +399,6 @@ function validateParallelStep(
     }
 
     const summary = validateStepList(branch.steps, filePath, seenStepIds, scope, errors)
-    for (const binding of summary.allConversationBindings) {
-      if (seenBranchConversations.has(binding)) {
-        errors.push(
-          createCompileError(
-            CompileErrorCode.InvalidWorkflow,
-            `\`branches[${index}]\` (\`${branch.id}\`) cannot reuse a conversation binding already used by a sibling parallel branch`,
-            { filePath },
-          ),
-        )
-      }
-      seenBranchConversations.add(binding)
-    }
-
     for (const [stepId, shape] of summary.availableStepShapes.entries()) {
       if (!scope.availableStepShapes.has(stepId)) {
         mergedStepShapes.set(stepId, shape)
@@ -473,22 +413,13 @@ function validateParallelStep(
     {
       ...scope,
       availableStepShapes: mergedStepShapes,
-      possibleCodexConversations: unionSets(
-        branchSummaries.map((summary) => summary.possibleCodexConversations),
-        scope.possibleCodexConversations,
-      ),
     },
     errors,
   )
 
   return {
-    allConversationBindings: unionSets(branchSummaries.map((summary) => summary.allConversationBindings)),
     availableStepShapes: mergedStepShapes,
     guaranteedResultShape: resultShape,
-    possibleCodexConversations: unionSets(
-      branchSummaries.map((summary) => summary.possibleCodexConversations),
-      scope.possibleCodexConversations,
-    ),
     resultShape,
   }
 }
@@ -511,53 +442,11 @@ function validateBranchCase(
     {
       ...scope,
       availableStepShapes: summary.availableStepShapes,
-      possibleCodexConversations: summary.possibleCodexConversations,
     },
     errors,
   )
 
   return { ...summary, exportShape }
-}
-
-function validateClaude(
-  step: ClaudeNode,
-  filePath: string,
-  scope: VisibleScope,
-  errors: CompileError[],
-): ValidationSummary & { guaranteedResultShape: ResultShape; resultShape: ResultShape } {
-  validateTemplate(step.with.prompt, filePath, scope, errors)
-  for (const addDir of step.with.add_dirs ?? []) {
-    validateTemplate(addDir, filePath, scope, errors)
-  }
-  const conversationKey = validateConversation(
-    "claude",
-    step.with.conversation,
-    step.with.persist,
-    filePath,
-    scope,
-    errors,
-  )
-  if (step.with.output_schema !== undefined && step.with.output_schema.type !== "object") {
-    errors.push(
-      createCompileError(CompileErrorCode.InvalidWorkflow, "Claude `output_schema` must use `type: object`.", {
-        filePath,
-      }),
-    )
-  }
-  if (step.with.output_schema !== undefined) {
-    for (const message of validateOutputDefinition(step.with.output_schema, "with.output_schema")) {
-      errors.push(createCompileError(CompileErrorCode.InvalidWorkflow, message, { filePath }))
-    }
-  }
-
-  return {
-    allConversationBindings: conversationKey === undefined ? new Set() : new Set([conversationKey]),
-    availableStepShapes: new Map(scope.availableStepShapes),
-    guaranteedResultShape:
-      step.with.output_schema === undefined ? StringShape : shapeFromSchema(step.with.output_schema),
-    possibleCodexConversations: new Set(scope.possibleCodexConversations),
-    resultShape: step.with.output_schema === undefined ? StringShape : shapeFromSchema(step.with.output_schema),
-  }
 }
 
 function validateCodex(
@@ -567,192 +456,44 @@ function validateCodex(
   errors: CompileError[],
 ): ValidationSummary & { guaranteedResultShape: ResultShape; resultShape: ResultShape } {
   if (step.with.action === "review") {
-    if (step.with.base !== undefined) {
-      validateTemplate(step.with.base, filePath, scope, errors)
+    if (step.with.review.target.type === "base") {
+      validateTemplate(step.with.review.target.branch, filePath, scope, errors)
     }
-    if (step.with.commit !== undefined) {
-      validateTemplate(step.with.commit, filePath, scope, errors)
+    if (step.with.review.target.type === "commit") {
+      validateTemplate(step.with.review.target.sha, filePath, scope, errors)
     }
-    if (step.with.prompt !== undefined) {
-      validateTemplate(step.with.prompt, filePath, scope, errors)
-    }
-    if (step.with.title !== undefined) {
-      validateTemplate(step.with.title, filePath, scope, errors)
-    }
-    for (const addDir of step.with.add_dirs ?? []) {
-      validateTemplate(addDir, filePath, scope, errors)
+    if (step.with.review.title !== undefined) {
+      validateTemplate(step.with.review.title, filePath, scope, errors)
     }
 
-    const target = inferCodexReviewTarget(step.with.base, step.with.commit, step.with.target)
-    if (target.kind === "invalid") {
-      errors.push(createCompileError(CompileErrorCode.InvalidWorkflow, target.message, { filePath }))
-    }
-
+    const reviewShape = shapeFromSchema(codexReviewOutputDefinition())
     return {
-      allConversationBindings: new Set(),
       availableStepShapes: new Map(scope.availableStepShapes),
-      guaranteedResultShape: shapeFromSchema(codexReviewOutputDefinition()),
-      possibleCodexConversations: new Set(scope.possibleCodexConversations),
-      resultShape: shapeFromSchema(codexReviewOutputDefinition()),
+      guaranteedResultShape: reviewShape,
+      resultShape: reviewShape,
     }
   }
 
   validateTemplate(step.with.prompt, filePath, scope, errors)
-  for (const addDir of step.with.add_dirs ?? []) {
-    validateTemplate(addDir, filePath, scope, errors)
-  }
-  const conversationKey = validateConversation(
-    "codex",
-    step.with.conversation,
-    step.with.persist,
-    filePath,
-    scope,
-    errors,
-  )
-  if (step.with.output_schema !== undefined && step.with.output_schema.type !== "object") {
+  const outputSchema = step.with.output?.schema
+  if (outputSchema !== undefined && outputSchema.type !== "object") {
     errors.push(
-      createCompileError(CompileErrorCode.InvalidWorkflow, "Codex exec `output_schema` must use `type: object`.", {
+      createCompileError(CompileErrorCode.InvalidWorkflow, "Codex run `output.schema` must use `type: object`.", {
         filePath,
       }),
     )
   }
-  if (step.with.output_schema !== undefined) {
-    for (const message of validateOutputDefinition(step.with.output_schema, "with.output_schema")) {
+  if (outputSchema !== undefined) {
+    for (const message of validateOutputDefinition(outputSchema, "with.output.schema")) {
       errors.push(createCompileError(CompileErrorCode.InvalidWorkflow, message, { filePath }))
     }
   }
 
-  const possibleCodexConversations = new Set(scope.possibleCodexConversations)
-  if (conversationKey !== undefined) {
-    if (scope.possibleCodexConversations.has(conversationKey)) {
-      if ((step.with.add_dirs?.length ?? 0) > 0) {
-        errors.push(
-          createCompileError(
-            CompileErrorCode.InvalidWorkflow,
-            "`conversation` may resume a previous Codex session, but `codex exec resume` does not support `with.add_dirs`",
-            { filePath },
-          ),
-        )
-      }
-      if (step.with.output_schema !== undefined) {
-        errors.push(
-          createCompileError(
-            CompileErrorCode.InvalidWorkflow,
-            "`conversation` may resume a previous Codex session, but `codex exec resume` does not support `with.output_schema`",
-            { filePath },
-          ),
-        )
-      }
-    }
-    possibleCodexConversations.add(conversationKey)
-  }
-
+  const resultShape = outputSchema === undefined ? StringShape : shapeFromSchema(outputSchema)
   return {
-    allConversationBindings: conversationKey === undefined ? new Set() : new Set([conversationKey]),
     availableStepShapes: new Map(scope.availableStepShapes),
-    guaranteedResultShape:
-      step.with.output_schema === undefined ? StringShape : shapeFromSchema(step.with.output_schema),
-    possibleCodexConversations,
-    resultShape: step.with.output_schema === undefined ? StringShape : shapeFromSchema(step.with.output_schema),
-  }
-}
-
-function validateConversation(
-  provider: "claude" | "codex",
-  conversation: { name: string; scope?: "iteration" | "loop" | "workflow" | undefined } | undefined,
-  persist: boolean | undefined,
-  filePath: string,
-  scope: VisibleScope,
-  errors: CompileError[],
-): string | undefined {
-  if (conversation === undefined) {
-    return undefined
-  }
-
-  if (persist === false) {
-    errors.push(
-      createCompileError(
-        CompileErrorCode.InvalidWorkflow,
-        "`conversation` requires session persistence; remove `persist: false`",
-        { filePath },
-      ),
-    )
-  }
-
-  const scopedKey = scopedConversationKey(conversation, scope)
-  if (scopedKey === undefined) {
-    errors.push(
-      createCompileError(
-        CompileErrorCode.InvalidWorkflow,
-        `Conversation scope \`${conversation.scope}\` can only be used inside loops.`,
-        { filePath },
-      ),
-    )
-    return undefined
-  }
-
-  const existingProvider = scope.conversationProviders.get(scopedKey)
-  if (existingProvider !== undefined && existingProvider !== provider) {
-    errors.push(
-      createCompileError(
-        CompileErrorCode.InvalidWorkflow,
-        `\`conversation: ${conversation.name}\` is already bound to \`${existingProvider}\` and cannot be reused by \`${provider}\``,
-        { filePath },
-      ),
-    )
-  } else if (existingProvider === undefined) {
-    scope.conversationProviders.set(scopedKey, provider)
-  }
-
-  return scopedKey
-}
-
-function scopedConversationKey(
-  conversation: { name: string; scope?: "iteration" | "loop" | "workflow" | undefined },
-  scope: VisibleScope,
-): string | undefined {
-  const resolvedScope = conversation.scope ?? (scope.insideLoop ? "iteration" : "workflow")
-  if (resolvedScope === "workflow") {
-    return `workflow:${conversation.name}`
-  }
-  if (scope.currentLoopPath === undefined) {
-    return undefined
-  }
-  return `${resolvedScope}:${scope.currentLoopPath}:${conversation.name}`
-}
-
-function filterConversationsAfterLoop(conversations: Set<string>, currentLoopPath: string | undefined): Set<string> {
-  if (currentLoopPath === undefined) {
-    return new Set(conversations)
-  }
-  return new Set(
-    [...conversations].filter(
-      (key) => !key.startsWith(`loop:${currentLoopPath}:`) && !key.startsWith(`iteration:${currentLoopPath}:`),
-    ),
-  )
-}
-
-function inferCodexReviewTarget(
-  base: string | undefined,
-  commit: string | undefined,
-  target: "base" | "commit" | "uncommitted" | undefined,
-): { kind: "ok" } | { kind: "invalid"; message: string } {
-  if (target === "uncommitted" && base === undefined && commit === undefined) {
-    return { kind: "ok" }
-  }
-  if (
-    (target === "base" && base !== undefined && commit === undefined) ||
-    (target === undefined && base !== undefined && commit === undefined)
-  ) {
-    return { kind: "ok" }
-  }
-  if (target === "commit" && commit !== undefined && base === undefined) {
-    return { kind: "ok" }
-  }
-  return {
-    kind: "invalid",
-    message:
-      "`review` requires exactly one of `target: uncommitted`, `target: base` with `base`, or `target: commit` with `commit`",
+    guaranteedResultShape: resultShape,
+    resultShape,
   }
 }
 
@@ -949,16 +690,6 @@ function isBranchExportShapeCompatible(left: ResultShape, right: ResultShape): b
   }
 
   return false
-}
-
-function unionSets<T>(sets: Iterable<Set<T>>, initial?: Set<T>): Set<T> {
-  const result = new Set(initial ?? [])
-  for (const set of sets) {
-    for (const item of set) {
-      result.add(item)
-    }
-  }
-  return result
 }
 
 function validateReference(reference: PathReference, scope: VisibleScope): string | undefined {

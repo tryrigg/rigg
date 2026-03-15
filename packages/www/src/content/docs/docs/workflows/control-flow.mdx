@@ -44,20 +44,22 @@ Repeats until a condition is met or `max` iterations is reached.
       type: codex
       with:
         action: review
-        target: uncommitted
-        prompt: Review changes.
+        review:
+          target:
+            type: uncommitted
     - id: judge
-      type: claude
+      type: codex
       with:
-        action: prompt
+        action: run
         prompt: Evaluate findings.
-        output_schema:
-          type: object
-          required: [done]
-          additionalProperties: false
-          properties:
-            done:
-              type: boolean
+        output:
+          schema:
+            type: object
+            required: [done]
+            additionalProperties: false
+            properties:
+              done:
+                type: boolean
   exports:
     done: ${{ steps.judge.result.done }}
 ```
@@ -85,7 +87,7 @@ Conditional execution. First matching `if` wins. `else` is the fallback.
         - id: fix
           type: codex
           with:
-            action: exec
+            action: run
             prompt: Fix the issues.
       exports:
         outcome: ${{ steps.fix.result }}

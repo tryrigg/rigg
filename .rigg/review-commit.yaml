@@ -7,47 +7,48 @@ steps:
   - id: remediation
     type: loop
     max: 5
-    until: ${{ steps.judge.result.accepted_count == 0 }}
+    until: ${{ len(steps.review.result.findings) == 0 || steps.judge.result.accepted_count == 0 }}
     steps:
       - id: review
         type: codex
         with:
           action: review
           model: gpt-5.4
-          target: commit
-          commit: ${{ inputs.commit_sha }}
-          title: Review commit
-          prompt: Review the selected commit for bugs and missing tests.
+          review:
+            target:
+              type: commit
+              sha: ${{ inputs.commit_sha }}
+            title: Review selected commit
 
       - id: judge
-        type: claude
+        type: codex
         with:
-          action: prompt
-          model: claude-opus-4-6
+          action: run
+          model: gpt-5.4
           prompt: |
             Read the review below.
 
             Review:
-            ${{ steps.review.result }}
+            ${{ toJSON(steps.review.result) }}
 
             Accept only findings that are valid and actionable.
-          output_schema:
-            type: object
-            required: [accepted_count, fix_brief]
-            additionalProperties: false
-            properties:
-              accepted_count:
-                type: integer
-              fix_brief:
-                type: string
+          output:
+            schema:
+              type: object
+              required: [accepted_count, fix_brief]
+              additionalProperties: false
+              properties:
+                accepted_count:
+                  type: integer
+                fix_brief:
+                  type: string
 
       - id: fix
         if: ${{ steps.judge.result.accepted_count > 0 }}
         type: codex
         with:
-          action: exec
+          action: run
           model: gpt-5.4
-          mode: full_auto
           prompt: ${{ steps.judge.result.fix_brief }}
     exports:
       accepted_count: ${{ steps.judge.result.accepted_count }}

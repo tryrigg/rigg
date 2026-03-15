@@ -1,6 +1,6 @@
 ---
 title: Examples
-description: Workflow patterns for common agentic coding tasks.
+description: Workflow patterns for common Codex-driven coding tasks.
 sidebar:
   order: 1
 ---
@@ -21,35 +21,34 @@ steps:
         type: codex
         with:
           action: review
-          target: uncommitted
-          prompt: Review for bugs and missing tests.
+          review:
+            target:
+              type: uncommitted
 
       - id: judge
-        type: claude
+        type: codex
         with:
-          action: prompt
+          action: run
           prompt: |
             Accept only valid, actionable findings:
             ${{ toJSON(steps.review.result) }}
-          output_schema:
-            type: object
-            required: [accepted_count, fix_brief]
-            additionalProperties: false
-            properties:
-              accepted_count:
-                type: integer
-              fix_brief:
-                type: string
+          output:
+            schema:
+              type: object
+              required: [accepted_count, fix_brief]
+              additionalProperties: false
+              properties:
+                accepted_count:
+                  type: integer
+                fix_brief:
+                  type: string
 
       - id: fix
         if: ${{ steps.judge.result.accepted_count > 0 }}
         type: codex
         with:
-          action: exec
-          mode: full_auto
+          action: run
           prompt: ${{ steps.judge.result.fix_brief }}
-    exports:
-      accepted_count: ${{ steps.judge.result.accepted_count }}
 ```
 
 ## Plan, review, and refine
@@ -67,43 +66,45 @@ steps:
   - id: draft
     type: codex
     with:
-      action: exec
+      action: run
       prompt: |
         Draft an implementation plan:
         ${{ inputs.requirements }}
-      output_schema:
-        type: object
-        required: [markdown]
-        additionalProperties: false
-        properties:
-          markdown:
-            type: string
+      output:
+        schema:
+          type: object
+          required: [markdown]
+          additionalProperties: false
+          properties:
+            markdown:
+              type: string
 
   - id: critique
-    type: claude
+    type: codex
     with:
-      action: prompt
+      action: run
       prompt: |
         Review for gaps:
         ${{ steps.draft.result.markdown }}
-      output_schema:
-        type: object
-        required: [has_findings, findings]
-        additionalProperties: false
-        properties:
-          has_findings:
-            type: boolean
-          findings:
-            type: array
-            items:
-              type: object
-              required: [description, suggestion]
-              additionalProperties: false
-              properties:
-                description:
-                  type: string
-                suggestion:
-                  type: string
+      output:
+        schema:
+          type: object
+          required: [has_findings, findings]
+          additionalProperties: false
+          properties:
+            has_findings:
+              type: boolean
+            findings:
+              type: array
+              items:
+                type: object
+                required: [description, suggestion]
+                additionalProperties: false
+                properties:
+                  description:
+                    type: string
+                  suggestion:
+                    type: string
 
   - id: finalize
     type: branch
@@ -113,18 +114,19 @@ steps:
           - id: improve
             type: codex
             with:
-              action: exec
+              action: run
               prompt: |
                 Apply feedback:
                 Original: ${{ steps.draft.result.markdown }}
                 Findings: ${{ toJSON(steps.critique.result.findings) }}
-              output_schema:
-                type: object
-                required: [markdown]
-                additionalProperties: false
-                properties:
-                  markdown:
-                    type: string
+              output:
+                schema:
+                  type: object
+                  required: [markdown]
+                  additionalProperties: false
+                  properties:
+                    markdown:
+                      type: string
         exports:
           markdown: ${{ steps.improve.result.markdown }}
       - else:
@@ -141,7 +143,7 @@ steps:
 
 ## Parallel checks
 
-Runs security audit, architecture review, and tests concurrently.
+Runs multiple shell checks concurrently, then summarizes them with Codex.
 
 ```yaml
 id: parallel-checks
@@ -156,13 +158,6 @@ steps:
             with:
               command: npm test
               result: text
-      - id: integration
-        steps:
-          - id: run_integration
-            type: shell
-            with:
-              command: npm run test:e2e
-              result: text
       - id: lint
         steps:
           - id: run_lint
@@ -172,86 +167,62 @@ steps:
               result: text
     exports:
       unit: ${{ steps.run_unit.result }}
-      integration: ${{ steps.run_integration.result }}
       lint: ${{ steps.run_lint.result }}
 
   - id: report
-    type: claude
+    type: codex
     with:
-      action: prompt
+      action: run
       prompt: |
         Summarize:
         Unit: ${{ steps.all.result.unit }}
-        Integration: ${{ steps.all.result.integration }}
         Lint: ${{ steps.all.result.lint }}
-      output_schema:
-        type: object
-        required: [summary, passed]
-        additionalProperties: false
-        properties:
-          summary:
-            type: string
-          passed:
-            type: boolean
+      output:
+        schema:
+          type: object
+          required: [summary]
+          additionalProperties: false
+          properties:
+            summary:
+              type: string
 ```
 
-## Iterative refinement with conversation
-
-Codex maintains context across iterations via `scope: loop`.
+## Commit review
 
 ```yaml
-id: iterative-refinement
+id: review-commit
 inputs:
-  task:
+  commit_sha:
     type: string
 steps:
-  - id: refine
-    type: loop
-    max: 3
-    until: ${{ steps.eval.result.quality >= 8 }}
-    steps:
-      - id: work
-        type: codex
-        with:
-          action: exec
-          prompt: |
-            Iteration ${{ run.iteration }}/${{ run.max_iterations }}.
-            Task: ${{ inputs.task }}
-          conversation:
-            name: worker
-            scope: loop
-      - id: eval
-        type: claude
-        with:
-          action: prompt
-          prompt: Rate quality (1-10).
-          output_schema:
-            type: object
-            required: [quality]
-            additionalProperties: false
-            properties:
-              quality:
-                type: integer
-    exports:
-      quality: ${{ steps.eval.result.quality }}
+  - id: review
+    type: codex
+    with:
+      action: review
+      review:
+        target:
+          type: commit
+          sha: ${{ inputs.commit_sha }}
+        title: Review selected commit
 ```
 
 ## Patterns
 
-### Strict output_schema
+### Strict structured output
 
 Always use `additionalProperties: false` + `required`:
 
 ```yaml
-output_schema:
-  type: object
-  required: [status, count]
-  additionalProperties: false
-  properties:
-    status:
-      type: string
-    count:
-      type: integer
+output:
+  schema:
+    type: object
+    required: [status, count]
+    additionalProperties: false
+    properties:
+      status:
+        type: string
+      count:
+        type: integer
 ```
 
 ### Branch passthrough
@@ -261,37 +232,4 @@ output_schema:
   steps: []
   exports:
     value: ${{ steps.earlier.result }}
-```
-
-### Conditional step
-
-```yaml
-- id: deploy
-  if: ${{ inputs.environment == 'prod' }}
-  type: shell
-  env:
-    DEPLOY_ENV: ${{ inputs.environment }}
-  with:
-    command: ./deploy.sh
-```
-
-### Group for encapsulation
-
-```yaml
-- id: gather
-  type: group
-  steps:
-    - id: log
-      type: shell
-      with:
-        command: git log --oneline -20
-        result: text
-    - id: diff
-      type: shell
-      with:
-        command: git diff --stat
-        result: text
-  exports:
-    log: ${{ steps.log.result }}
-    diff: ${{ steps.diff.result }}
 ```

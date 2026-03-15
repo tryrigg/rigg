@@ -4,7 +4,7 @@ import { access } from "node:fs/promises"
 import { join } from "node:path"
 
 import { listWorkflowIds, loadWorkflowProject } from "../compile/index"
-import { stringifyJson } from "../util/json"
+import { stringifyJson, tryParseJson } from "../util/json"
 import { isMissingPathError, normalizeError } from "../util/error"
 import { runWorkflow } from "../run/index"
 import { examplesDoc, schemaReferenceDoc, skillDoc, workflowSyntaxDoc } from "./docs"
@@ -97,11 +97,8 @@ function parseInputs(values: string[]): ParseInputsResult {
     }
 
     const rawValue = rest.join("=")
-    try {
-      output[key] = JSON.parse(rawValue)
-    } catch {
-      output[key] = rawValue
-    }
+    const parsedValue = tryParseJson(rawValue)
+    output[key] = parsedValue === undefined ? rawValue : parsedValue
   }
 
   return { kind: "valid", inputs: output }

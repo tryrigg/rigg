@@ -67,7 +67,7 @@ type ExecutionEnvironment = {
   controlBroker: ControlBroker
   controlHandler?: RunControlHandler | undefined
   cwd: string
-  onEvent?: ((event: RunEvent) => void) | undefined
+  emitEvent: (event: RunEvent) => void
   runActionStep: ActionStepRunner
   runState: RunSnapshot
 }
@@ -100,7 +100,7 @@ export async function executeWorkflow(options: {
     controlHandler: options.controlHandler,
     controlBroker: createControlBroker(),
     cwd: options.projectRoot,
-    onEvent: options.onEvent,
+    emitEvent: (event) => options.onEvent?.(event),
     runActionStep: resolvedRunActionStep,
     runState,
   }
@@ -112,7 +112,7 @@ export async function executeWorkflow(options: {
     })
   }
 
-  emitEvent(environment, { kind: "run_started", snapshot: runState })
+  environment.emitEvent({ kind: "run_started", snapshot: runState })
 
   try {
     const workflowEnv = renderEnvironment(options.workflow.env ?? {}, {
@@ -148,14 +148,14 @@ export async function executeWorkflow(options: {
           ? "aborted"
           : "completed"
     setRunFinished(runState, status, reason, finishedAt)
-    emitEvent(environment, { kind: "run_finished", snapshot: runState })
+    environment.emitEvent({ kind: "run_finished", snapshot: runState })
     return runState
   } catch (error) {
     const cause = normalizeExecutionError(error)
     const finishedAt = new Date().toISOString()
     const status = cause.runReason === "aborted" ? "aborted" : "failed"
     setRunFinished(runState, status, cause.runReason, finishedAt)
-    emitEvent(environment, { kind: "run_finished", snapshot: runState })
+    environment.emitEvent({ kind: "run_finished", snapshot: runState })
     throw cause
   } finally {
     await environment.codexSession?.close()
@@ -188,7 +188,7 @@ async function executeBlock(
     if (shouldPauseBeforeStep(step)) {
       const frontier = describeFrontier(step, nodePath, scope.frameId, renderContext, environment.cwd)
       if (frontier.length > 0) {
-        await waitForBarrier(controlEnvironment(environment), {
+        await waitForBarrier(environment, {
           completed: previousCompleted,
           frameId: scope.frameId,
           next: frontier,
@@ -250,7 +250,7 @@ async function executeStep(
         step,
         nodePath,
         "condition evaluated to false",
-        emitRunEvent(environment),
+        environment.emitEvent,
       )
       return {
         bindingStatus: "skipped",
@@ -290,7 +290,7 @@ async function executeAction(
   env: Record<string, string | undefined>,
 ): Promise<StepExecutionOutcome> {
   throwIfAborted(scope.signal)
-  const lifecycle = startNode(environment.runState, originalStep, nodePath, step.type, emitRunEvent(environment))
+  const lifecycle = startNode(environment.runState, originalStep, nodePath, step.type, environment.emitEvent)
 
   let output: ActionStepOutput
   try {
@@ -302,9 +302,9 @@ async function executeAction(
         cwd: environment.cwd,
         env,
         interactionHandler: async (request) =>
-          await resolveInteraction(controlEnvironment(environment), request, { nodePath, userId: step.id ?? null }),
+          await resolveInteraction(environment, request, { nodePath, userId: step.id ?? null }),
         onOutput: async (stream, chunk) => {
-          emitEvent(environment, {
+          environment.emitEvent({
             chunk,
             kind: "step_output",
             node_path: nodePath,
@@ -313,7 +313,7 @@ async function executeAction(
           })
         },
         onProviderEvent: async (event) => {
-          emitEvent(environment, {
+          environment.emitEvent({
             event,
             kind: "provider_event",
             node_path: nodePath,
@@ -329,7 +329,7 @@ async function executeAction(
       snapshot.duration_ms = 0
       snapshot.finished_at = new Date().toISOString()
       snapshot.stderr = error.message
-      finishNode(environment.runState, snapshot, emitRunEvent(environment))
+      finishNode(environment.runState, snapshot, environment.emitEvent)
       return {
         bindingStatus: null,
         completed: summarizeCompletedNode(snapshot),
@@ -343,7 +343,7 @@ async function executeAction(
     snapshot.duration_ms = 0
     snapshot.finished_at = new Date().toISOString()
     snapshot.stderr = cause.message
-    finishNode(environment.runState, snapshot, emitRunEvent(environment))
+    finishNode(environment.runState, snapshot, environment.emitEvent)
     throw cause
   }
 
@@ -364,7 +364,7 @@ async function executeAction(
   snapshot.stderr = output.stderr.length > 0 ? output.stderr : null
   snapshot.stdout = output.stdout.length > 0 ? output.stdout : null
 
-  finishNode(environment.runState, snapshot, emitRunEvent(environment))
+  finishNode(environment.runState, snapshot, environment.emitEvent)
 
   return {
     bindingStatus: interrupted ? null : statusForBinding(snapshot.status),
@@ -382,7 +382,7 @@ async function executeGroup(
   nodePath: NodePath,
   env: Record<string, string | undefined>,
 ): Promise<StepExecutionOutcome> {
-  const lifecycle = startNode(environment.runState, step, nodePath, step.type, emitRunEvent(environment))
+  const lifecycle = startNode(environment.runState, step, nodePath, step.type, environment.emitEvent)
   try {
     const result = await executeBlock(environment, { ...scope, env }, step.steps, nodePath, "run_started")
     const exports =
@@ -405,7 +405,7 @@ async function executeGroup(
     snapshot.duration_ms = Date.now() - Date.parse(lifecycle.startedAt)
     snapshot.finished_at = new Date().toISOString()
     snapshot.result = exports
-    finishNode(environment.runState, snapshot, emitRunEvent(environment))
+    finishNode(environment.runState, snapshot, environment.emitEvent)
 
     return {
       bindingStatus: result.disposition === "interrupted" ? null : statusForBinding(snapshot.status),
@@ -421,7 +421,7 @@ async function executeGroup(
       nodePath,
       lifecycle,
       error,
-      emitRunEvent(environment),
+      environment.emitEvent,
     )
     if (snapshot.status === "interrupted") {
       return {
@@ -443,7 +443,7 @@ async function executeLoop(
   nodePath: NodePath,
   env: Record<string, string | undefined>,
 ): Promise<StepExecutionOutcome> {
-  const lifecycle = startNode(environment.runState, step, nodePath, step.type, emitRunEvent(environment))
+  const lifecycle = startNode(environment.runState, step, nodePath, step.type, environment.emitEvent)
   let lastBindings: Record<string, StepBinding> = {}
   const loopScopeId = childLoopScope(scope.frameId, nodePath)
 
@@ -483,7 +483,7 @@ async function executeLoop(
         )
         snapshot.duration_ms = Date.now() - Date.parse(lifecycle.startedAt)
         snapshot.finished_at = new Date().toISOString()
-        finishNode(environment.runState, snapshot, emitRunEvent(environment))
+        finishNode(environment.runState, snapshot, environment.emitEvent)
         return {
           bindingStatus: iterationResult.disposition === "interrupted" ? null : "failed",
           completed: summarizeCompletedNode(snapshot),
@@ -510,7 +510,7 @@ async function executeLoop(
         snapshot.duration_ms = Date.now() - Date.parse(lifecycle.startedAt)
         snapshot.finished_at = new Date().toISOString()
         snapshot.result = exports
-        finishNode(environment.runState, snapshot, emitRunEvent(environment))
+        finishNode(environment.runState, snapshot, environment.emitEvent)
         return {
           bindingStatus: "succeeded",
           completed: summarizeCompletedNode(snapshot),
@@ -529,7 +529,7 @@ async function executeLoop(
       nodePath,
       lifecycle,
       error,
-      emitRunEvent(environment),
+      environment.emitEvent,
     )
     if (snapshot.status === "interrupted") {
       return {
@@ -551,7 +551,7 @@ async function executeBranch(
   nodePath: NodePath,
   env: Record<string, string | undefined>,
 ): Promise<StepExecutionOutcome> {
-  const lifecycle = startNode(environment.runState, step, nodePath, step.type, emitRunEvent(environment))
+  const lifecycle = startNode(environment.runState, step, nodePath, step.type, environment.emitEvent)
 
   try {
     let selectedCase: BranchCase | undefined
@@ -579,7 +579,7 @@ async function executeBranch(
       const snapshot = createNodeSnapshot(step.id, nodePath, step.type, "skipped", lifecycle)
       snapshot.duration_ms = 0
       snapshot.finished_at = new Date().toISOString()
-      finishNode(environment.runState, snapshot, emitRunEvent(environment))
+      finishNode(environment.runState, snapshot, environment.emitEvent)
       return {
         bindingStatus: "skipped",
         completed: summarizeCompletedNode(snapshot),
@@ -628,7 +628,7 @@ async function executeBranch(
     snapshot.duration_ms = Date.now() - Date.parse(lifecycle.startedAt)
     snapshot.finished_at = new Date().toISOString()
     snapshot.result = exports
-    finishNode(environment.runState, snapshot, emitRunEvent(environment))
+    finishNode(environment.runState, snapshot, environment.emitEvent)
     return {
       bindingStatus: branchResult.disposition === "interrupted" ? null : statusForBinding(snapshot.status),
       completed: summarizeCompletedNode(snapshot),
@@ -643,7 +643,7 @@ async function executeBranch(
       nodePath,
       lifecycle,
       error,
-      emitRunEvent(environment),
+      environment.emitEvent,
     )
     if (snapshot.status === "interrupted") {
       return {
@@ -666,7 +666,7 @@ async function executeParallel(
   env: Record<string, string | undefined>,
 ): Promise<StepExecutionOutcome> {
   throwIfAborted(scope.signal)
-  const lifecycle = startNode(environment.runState, step, nodePath, step.type, emitRunEvent(environment))
+  const lifecycle = startNode(environment.runState, step, nodePath, step.type, environment.emitEvent)
 
   try {
     const frontier = describeParallelFrontier(
@@ -682,7 +682,7 @@ async function executeParallel(
       environment.cwd,
     )
     if (frontier.length > 0) {
-      await waitForBarrier(controlEnvironment(environment), {
+      await waitForBarrier(environment, {
         completed: summarizeCompletedNode(
           currentNodeSnapshot(environment.runState, nodePath) ??
             createNodeSnapshot(step.id, nodePath, step.type, "running", lifecycle),
@@ -775,7 +775,7 @@ async function executeParallel(
     snapshot.duration_ms = Date.now() - Date.parse(lifecycle.startedAt)
     snapshot.finished_at = new Date().toISOString()
     snapshot.result = resultValue
-    finishNode(environment.runState, snapshot, emitRunEvent(environment))
+    finishNode(environment.runState, snapshot, environment.emitEvent)
     return {
       bindingStatus: interrupted ? null : statusForBinding(snapshot.status),
       completed: summarizeCompletedNode(snapshot),
@@ -790,7 +790,7 @@ async function executeParallel(
       nodePath,
       lifecycle,
       error,
-      emitRunEvent(environment),
+      environment.emitEvent,
     )
     if (snapshot.status === "interrupted") {
       return {
@@ -838,28 +838,6 @@ function evaluateExpression(template: string, context: RenderContext): unknown {
     return renderTemplate(template, context)
   } catch (error) {
     throw createEvaluationError(error)
-  }
-}
-
-function emitEvent(environment: ExecutionEnvironment, event: RunEvent): void {
-  environment.onEvent?.(event)
-}
-
-function emitRunEvent(environment: ExecutionEnvironment): (event: RunEvent) => void {
-  return (event) => emitEvent(environment, event)
-}
-
-function controlEnvironment(environment: ExecutionEnvironment): {
-  controlBroker: ControlBroker
-  controlHandler?: RunControlHandler | undefined
-  emitEvent: (event: RunEvent) => void
-  runState: RunSnapshot
-} {
-  return {
-    controlBroker: environment.controlBroker,
-    controlHandler: environment.controlHandler,
-    emitEvent: emitRunEvent(environment),
-    runState: environment.runState,
   }
 }
 

@@ -3,7 +3,7 @@ import { isStepInterrupted, normalizeExecutionError } from "./error"
 import type { RunEvent } from "./progress"
 import type { StepBinding } from "./render"
 import type { CompletedNodeSummary, NodeSnapshot, NodeStatus, RunSnapshot } from "./schema"
-import { nextNodeAttempt, setActiveNodePath, setRunPhase, upsertNodeSnapshot } from "./state"
+import { nextNodeAttempt, upsertNodeSnapshot } from "./state"
 
 export type NodeLifecycle = {
   attempt: number
@@ -69,8 +69,8 @@ export function startNode(
   }
   const snapshot = createNodeSnapshot(step.id, nodePath, nodeKind, "running", lifecycle)
   upsertNodeSnapshot(runState, snapshot)
-  setActiveNodePath(runState, nodePath)
-  setRunPhase(runState, "running")
+  runState.active_node_path = nodePath
+  runState.phase = "running"
   emitEvent({
     kind: "node_started",
     node: snapshot,
@@ -83,9 +83,9 @@ export function startNode(
 export function finishNode(runState: RunSnapshot, snapshot: NodeSnapshot, emitEvent: EmitEvent): void {
   upsertNodeSnapshot(runState, snapshot)
   if (runState.active_node_path === snapshot.node_path) {
-    setActiveNodePath(runState, null)
+    runState.active_node_path = null
   }
-  setRunPhase(runState, snapshot.status === "interrupted" ? "interrupted" : "running")
+  runState.phase = snapshot.status === "interrupted" ? "interrupted" : "running"
   emitEvent({
     kind: "node_completed",
     node: snapshot,

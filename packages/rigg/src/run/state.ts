@@ -1,13 +1,5 @@
 import { compareNodePath, type NodePath } from "../compile/schema"
-import type {
-  NodeSnapshot,
-  PendingInteraction,
-  RunPhase,
-  RunReason,
-  RunSnapshot,
-  RunStatus,
-  StepBarrier,
-} from "./schema"
+import type { NodeSnapshot, RunReason, RunSnapshot, RunStatus } from "./schema"
 
 export type MutableRunState = RunSnapshot
 export type MutableNodeSnapshot = NodeSnapshot
@@ -41,22 +33,6 @@ export function setRunFinished(
   state.active_barrier = null
   state.active_interaction = null
   state.active_node_path = null
-}
-
-export function setRunPhase(state: MutableRunState, phase: RunPhase): void {
-  state.phase = phase
-}
-
-export function setActiveBarrier(state: MutableRunState, barrier: StepBarrier | null): void {
-  state.active_barrier = barrier
-}
-
-export function setActiveInteraction(state: MutableRunState, interaction: PendingInteraction | null): void {
-  state.active_interaction = interaction
-}
-
-export function setActiveNodePath(state: MutableRunState, nodePath: string | null): void {
-  state.active_node_path = nodePath
 }
 
 export function upsertNodeSnapshot(state: MutableRunState, snapshot: MutableNodeSnapshot): void {

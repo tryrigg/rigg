@@ -7,6 +7,7 @@ import type { CodexProviderEvent } from "../codex/event"
 import type { CodexInteractionHandler } from "../codex/interaction"
 import { createCodexRuntimeSession, type CodexRuntimeSession } from "../codex/runtime"
 import { filterEnv } from "../util/env"
+import { normalizeError } from "../util/error"
 import { parseJson } from "../util/json"
 import { createStepFailedError, createTimedOutError as createRunTimedOutError } from "./error"
 import type { RenderContext } from "./render"
@@ -416,7 +417,7 @@ function parseJsonOutput(text: string | undefined, source: "Shell"): unknown {
   try {
     return parseJson((text ?? "").trim())
   } catch (error) {
-    const cause = error instanceof Error ? error : new Error(String(error))
+    const cause = normalizeError(error)
     throw createStepFailedError(new Error(`${source} step returned invalid JSON: ${cause.message}`, { cause }))
   }
 }

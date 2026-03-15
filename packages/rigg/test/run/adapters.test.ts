@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 
 import type { ActionNode } from "../../src/compile/schema"
+import type { CodexProviderEvent } from "../../src/codex/event"
 import { createCodexRuntimeSession } from "../../src/codex/runtime"
 import { runActionStep } from "../../src/run/adapters"
 import { renderContext } from "../fixture/builders"
@@ -163,7 +164,7 @@ describe("run/adapters", () => {
         },
       })
 
-      const events: Array<Record<string, unknown>> = []
+      const events: CodexProviderEvent[] = []
       const result = await runActionStep(
         {
           type: "codex",
@@ -187,7 +188,7 @@ describe("run/adapters", () => {
           cwd: root,
           env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
           onProviderEvent: (event) => {
-            events.push(event as unknown as Record<string, unknown>)
+            events.push(event)
           },
         },
       )

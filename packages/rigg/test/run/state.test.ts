@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test"
 
 import { createInitialRunState, nextNodeAttempt, setRunFinished, upsertNodeSnapshot } from "../../src/run/state"
+import type { NodeSnapshot } from "../../src/run/schema"
 import { runSnapshot } from "../fixture/builders"
 
-function nodeSnapshot(overrides: Record<string, unknown> = {}) {
+function nodeSnapshot(overrides: Partial<NodeSnapshot> = {}): NodeSnapshot {
   return {
     attempt: 1,
     duration_ms: null,
@@ -13,7 +14,7 @@ function nodeSnapshot(overrides: Record<string, unknown> = {}) {
     node_path: "/0",
     result: null,
     started_at: null,
-    status: "pending" as const,
+    status: "pending",
     stderr: null,
     stdout: null,
     user_id: null,

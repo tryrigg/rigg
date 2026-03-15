@@ -4,6 +4,7 @@ import type { CodexProviderEvent } from "../codex/event"
 import type { CodexInteractionRequest } from "../codex/interaction"
 import type { RunControlHandler, RunControlResolution, RunEvent } from "../run/progress"
 import type { FrontierNode, NodeSnapshot, PendingInteraction, RunSnapshot, StepBarrier } from "../run/schema"
+import { stringifyJsonCompact, tryParseJson } from "../util/json"
 
 const CLEAR_SCREEN = "\u001b[2J\u001b[H"
 
@@ -72,7 +73,7 @@ export function createTerminalRunSession(input: NodeJS.ReadStream, output: NodeJ
     }
 
     if (request.interaction.kind === "user_input") {
-      return await promptUserInput(readline, render, request.interaction)
+      return await promptUserInput(readline, render, requireInteractionRequest(request.interaction, "user_input"))
     }
 
     render()
@@ -169,13 +170,13 @@ async function handleInteraction(
   render: (options?: RenderOptions) => void,
   interaction: PendingInteraction,
 ): Promise<Exclude<RunControlResolution, { kind: "step_barrier" }>> {
-  const request = interaction.request as CodexInteractionRequest
+  const request = requireInteractionRequest(interaction)
 
   switch (request.kind) {
     case "approval":
       return await promptApproval(readline, request)
     case "user_input":
-      return await promptUserInput(readline, render, interaction)
+      return await promptUserInput(readline, render, request)
     case "elicitation":
       return await promptElicitation(readline, request)
   }
@@ -207,9 +208,8 @@ async function promptApproval(
 async function promptUserInput(
   readline: ReturnType<typeof createInterface>,
   render: (options?: RenderOptions) => void,
-  interaction: PendingInteraction,
+  request: Extract<CodexInteractionRequest, { kind: "user_input" }>,
 ): Promise<Extract<RunControlResolution, { kind: "user_input" }>> {
-  const request = interaction.request as Extract<CodexInteractionRequest, { kind: "user_input" }>
   const answers: Record<string, { answers: string[] }> = {}
 
   for (const [index, question] of request.questions.entries()) {
@@ -281,8 +281,8 @@ function renderBody(state: TerminalUiState, options: RenderOptions): string[] {
 }
 
 function renderRunningBody(state: TerminalUiState, nodePath: string): string[] {
-  const node = state.snapshot === null ? null : findNode(state.snapshot, nodePath)
-  const label = node === null ? nodePath : formatStepLabel(node)
+  const node = state.snapshot?.nodes.find((n) => n.node_path === nodePath) ?? null
+  const label = node === null ? nodePath : (node.user_id ?? node.node_path)
   const kind = node?.node_kind ?? "unknown"
   const lines = [`Running: ${label} [${kind}]`]
 
@@ -328,7 +328,7 @@ function renderInteractionBody(
   interaction: PendingInteraction,
   options: RenderOptions,
 ): string[] {
-  const request = interaction.request as CodexInteractionRequest
+  const request = requireInteractionRequest(interaction)
   const lines: string[] = []
   appendSection(lines, renderLastCompletedSection(state))
 
@@ -366,7 +366,7 @@ function renderInteractionBody(
       if (request.mode === "url") {
         lines.push(`  url: ${request.url}`)
       } else {
-        lines.push(`  schema: ${compactJson(request.requestedSchema)}`)
+        lines.push(`  schema: ${stringifyJsonCompact(request.requestedSchema ?? {})}`)
       }
       lines.push("")
       lines.push("[a]ccept  [d]eny  [c]cancel")
@@ -386,7 +386,7 @@ function renderLastCompletedSection(state: TerminalUiState): string[] {
     return []
   }
 
-  const node = findNode(state.snapshot, state.lastCompletedNodePath)
+  const node = state.snapshot.nodes.find((n) => n.node_path === state.lastCompletedNodePath) ?? null
   if (node === null) {
     return []
   }
@@ -406,8 +406,8 @@ function renderCompletedStep(node: NodeSnapshot): string[] {
 }
 
 function renderSucceededOutput(node: NodeSnapshot): string[] {
-  const stdoutLines = toOutputLines(node.stdout)
-  const stderrLines = toOutputLines(node.stderr)
+  const stdoutLines = splitLines(stringifyUnknown(node.stdout))
+  const stderrLines = splitLines(stringifyUnknown(node.stderr))
   const lines: string[] = []
 
   if (stdoutLines.length === 0) {
@@ -428,8 +428,8 @@ function renderSucceededOutput(node: NodeSnapshot): string[] {
 }
 
 function renderFailedOutput(node: NodeSnapshot): string[] {
-  const stdoutLines = toOutputLines(node.stdout)
-  const stderrLines = toOutputLines(node.stderr)
+  const stdoutLines = splitLines(stringifyUnknown(node.stdout))
+  const stderrLines = splitLines(stringifyUnknown(node.stderr))
 
   return [
     "  stdout:",
@@ -459,14 +459,6 @@ function appendSection(lines: string[], section: string[]): void {
   lines.push(...section)
 }
 
-function findNode(snapshot: RunSnapshot, nodePath: string): NodeSnapshot | null {
-  return snapshot.nodes.find((node) => node.node_path === nodePath) ?? null
-}
-
-function formatStepLabel(node: Pick<NodeSnapshot, "node_path" | "user_id">): string {
-  return node.user_id ?? node.node_path
-}
-
 function formatFrontierLabel(node: FrontierNode): string {
   const suffix = node.cwd ? ` cwd=${node.cwd}` : ""
   return `${node.user_id ?? node.node_path} [${node.node_kind}]${suffix}`
@@ -480,7 +472,7 @@ function formatCompletedHeader(node: NodeSnapshot): string {
   if (node.duration_ms !== null && node.duration_ms !== undefined) {
     details.push(`${(node.duration_ms / 1000).toFixed(1)}s`)
   }
-  return `--- ${formatStepLabel(node)} (${details.join(", ")}) ---`
+  return `--- ${node.user_id ?? node.node_path} (${details.join(", ")}) ---`
 }
 
 function formatUserInputHeader(header: string, index: number, total: number): string {
@@ -563,12 +555,12 @@ function ensureActiveLiveOutput(state: TerminalUiState, nodePath: string): Activ
 }
 
 function upsertAssistantEntry(liveOutput: ActiveLiveOutput, key: string, update: (current: string) => string): void {
-  const entry = [...liveOutput.entries]
-    .reverse()
-    .find((candidate) => candidate.variant === "assistant" && candidate.key === key)
-  if (entry !== undefined) {
-    entry.text = update(entry.text)
-    return
+  for (let i = liveOutput.entries.length - 1; i >= 0; i--) {
+    const candidate = liveOutput.entries[i]!
+    if (candidate.variant === "assistant" && candidate.key === key) {
+      candidate.text = update(candidate.text)
+      return
+    }
   }
 
   liveOutput.entries.push({
@@ -601,8 +593,28 @@ function normalizeQuestionAnswer(
   return answer
 }
 
-function toOutputLines(value: unknown): string[] {
-  return splitLines(stringifyUnknown(value))
+function requireInteractionRequest(interaction: PendingInteraction): CodexInteractionRequest
+function requireInteractionRequest<TKind extends CodexInteractionRequest["kind"]>(
+  interaction: PendingInteraction,
+  kind: TKind,
+): Extract<CodexInteractionRequest, { kind: TKind }>
+function requireInteractionRequest<TKind extends CodexInteractionRequest["kind"]>(
+  interaction: PendingInteraction,
+  kind?: TKind,
+): CodexInteractionRequest {
+  const requestKind = kind ?? interaction.kind
+  if (isInteractionRequest(interaction.request, requestKind)) {
+    return interaction.request
+  }
+
+  throw new Error(`run snapshot contained an invalid ${requestKind} interaction request`)
+}
+
+function isInteractionRequest<TKind extends CodexInteractionRequest["kind"]>(
+  value: unknown,
+  kind: TKind,
+): value is Extract<CodexInteractionRequest, { kind: TKind }> {
+  return typeof value === "object" && value !== null && "kind" in value && value.kind === kind
 }
 
 function splitLines(value: string): string[] {
@@ -625,13 +637,6 @@ function stringifyUnknown(value: unknown): string {
     return ""
   }
   return JSON.stringify(value, null, 2) ?? ""
-}
-
-function compactJson(value: unknown): string {
-  if (value === null || value === undefined) {
-    return "{}"
-  }
-  return JSON.stringify(value) ?? "{}"
 }
 
 function indentLines(lines: string[], prefix: string): string[] {
@@ -664,8 +669,9 @@ async function promptLine(readline: ReturnType<typeof createInterface>, prompt: 
 async function promptJson(readline: ReturnType<typeof createInterface>, prompt: string): Promise<unknown> {
   while (true) {
     const value = await promptLine(readline, prompt)
-    try {
-      return JSON.parse(value)
-    } catch {}
+    const parsed = tryParseJson(value)
+    if (parsed !== undefined) {
+      return parsed
+    }
   }
 }

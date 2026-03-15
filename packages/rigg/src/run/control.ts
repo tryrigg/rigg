@@ -13,7 +13,7 @@ import type {
   PendingInteraction,
   RunSnapshot,
 } from "./schema"
-import { setActiveBarrier, setActiveInteraction, setRunPhase, upsertNodeSnapshot } from "./state"
+import { upsertNodeSnapshot } from "./state"
 
 export type ActionContext = {
   nodePath: NodePath
@@ -34,13 +34,26 @@ type ControlEnvironment = {
 export function createControlBroker(): ControlBroker {
   const queue: Array<{
     priority: number
-    reject: (error: unknown) => void
-    resolve: (value: unknown) => void
+    run: () => Promise<void>
     sequence: number
-    task: () => Promise<unknown>
   }> = []
   let nextSequence = 0
   let processing = false
+
+  function insertSorted(entry: (typeof queue)[number]): void {
+    let lo = 0
+    let hi = queue.length
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1
+      const cmp = queue[mid]!.priority - entry.priority || entry.sequence - queue[mid]!.sequence
+      if (cmp < 0) {
+        hi = mid
+      } else {
+        lo = mid + 1
+      }
+    }
+    queue.splice(lo, 0, entry)
+  }
 
   async function pump(): Promise<void> {
     if (processing) {
@@ -50,17 +63,12 @@ export function createControlBroker(): ControlBroker {
     processing = true
     try {
       while (queue.length > 0) {
-        queue.sort((left, right) => right.priority - left.priority || left.sequence - right.sequence)
         const entry = queue.shift()
         if (entry === undefined) {
           continue
         }
 
-        try {
-          entry.resolve(await entry.task())
-        } catch (error) {
-          entry.reject(error)
-        }
+        await entry.run()
       }
     } finally {
       processing = false
@@ -70,13 +78,18 @@ export function createControlBroker(): ControlBroker {
   return {
     enqueue: async <T>(priority: number, task: () => Promise<T>): Promise<T> =>
       await new Promise<T>((resolve, reject) => {
-        queue.push({
+        const entry = {
           priority,
-          reject,
-          resolve: (value) => resolve(value as T),
+          run: async () => {
+            try {
+              resolve(await task())
+            } catch (error) {
+              reject(error)
+            }
+          },
           sequence: nextSequence++,
-          task,
-        })
+        }
+        insertSorted(entry)
         void pump()
       }),
   }
@@ -100,8 +113,8 @@ export async function waitForBarrier(
       next: input.next,
       reason: input.reason,
     }
-    setActiveBarrier(environment.runState, barrier)
-    setRunPhase(environment.runState, "waiting_for_barrier")
+    environment.runState.active_barrier = barrier
+    environment.runState.phase = "waiting_for_barrier"
     environment.emitEvent({
       barrier,
       kind: "barrier_reached",
@@ -117,8 +130,8 @@ export async function waitForBarrier(
       throw new Error(`control handler returned ${resolution.kind} for step_barrier`)
     }
 
-    setActiveBarrier(environment.runState, null)
-    setRunPhase(environment.runState, "running")
+    environment.runState.active_barrier = null
+    environment.runState.phase = "running"
     environment.emitEvent({
       action: resolution.action,
       barrier_id: barrier.barrier_id,
@@ -146,7 +159,7 @@ export async function resolveInteraction(
     const interaction: PendingInteraction = {
       created_at: new Date().toISOString(),
       interaction_id: request.requestId,
-      kind: mapInteractionKind(request.kind),
+      kind: request.kind,
       node_path: actionContext.nodePath,
       request,
       user_id: actionContext.userId,
@@ -158,8 +171,8 @@ export async function resolveInteraction(
       upsertNodeSnapshot(environment.runState, nodeSnapshot)
     }
 
-    setActiveInteraction(environment.runState, interaction)
-    setRunPhase(environment.runState, phaseForInteraction(interaction.kind))
+    environment.runState.active_interaction = interaction
+    environment.runState.phase = phaseForInteraction(interaction.kind)
     environment.emitEvent({
       interaction,
       kind: "interaction_requested",
@@ -181,8 +194,8 @@ export async function resolveInteraction(
       upsertNodeSnapshot(environment.runState, nodeSnapshot)
     }
 
-    setActiveInteraction(environment.runState, null)
-    setRunPhase(environment.runState, "running")
+    environment.runState.active_interaction = null
+    environment.runState.phase = "running"
     environment.emitEvent({
       interaction_id: interaction.interaction_id,
       kind: "interaction_resolved",
@@ -218,16 +231,5 @@ function phaseForInteraction(
       return "waiting_for_question"
     case "elicitation":
       return "waiting_for_interaction"
-  }
-}
-
-function mapInteractionKind(kind: CodexInteractionRequest["kind"]): InteractionKind {
-  switch (kind) {
-    case "approval":
-      return "approval"
-    case "user_input":
-      return "user_input"
-    case "elicitation":
-      return "elicitation"
   }
 }

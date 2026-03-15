@@ -3,6 +3,7 @@ import { validateOutputValue } from "../compile/schema"
 import { createStepFailedError } from "../run/error"
 import { normalizeError } from "../util/error"
 import { stringifyJson } from "../util/json"
+import { RIGG_VERSION } from "../version"
 import type { CodexProviderEvent } from "./event"
 import type { CodexInteractionHandler, CodexInteractionRequest, CodexInteractionResolution } from "./interaction"
 import {
@@ -161,19 +162,18 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
   }
 
   function appendDiagnostic(line: string): void {
+    let singleExecution: TurnExecution | undefined
     for (const execution of executions.values()) {
       execution.capture.diagnostics.push(line)
+      singleExecution = execution
     }
 
-    if (executions.size === 1) {
-      const execution = executions.values().next().value as TurnExecution | undefined
-      if (execution !== undefined) {
-        void captureEvent(
-          execution.capture,
-          { kind: "diagnostic", message: line, provider: "codex" },
-          execution.onEvent,
-        )
-      }
+    if (executions.size === 1 && singleExecution !== undefined) {
+      void captureEvent(
+        singleExecution.capture,
+        { kind: "diagnostic", message: line, provider: "codex" },
+        singleExecution.onEvent,
+      )
     }
   }
 
@@ -224,7 +224,7 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     clientInfo: {
       name: "@tryrigg/rigg",
       title: "Rigg",
-      version: "0.0.0",
+      version: RIGG_VERSION,
     },
   }
   await rpc.request("initialize", initializeParams)
@@ -613,7 +613,8 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
       return executions.get(turnId)
     }
     if (allowSingleFallback && executions.size === 1) {
-      return executions.values().next().value as TurnExecution | undefined
+      const firstExecution = executions.values().next()
+      return firstExecution.done ? undefined : firstExecution.value
     }
     return undefined
   }

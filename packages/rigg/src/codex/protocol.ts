@@ -2,6 +2,7 @@ import { z } from "zod"
 
 import type { OutputDefinition } from "../compile/schema"
 import { createStepFailedError } from "../run/error"
+import { normalizeError } from "../util/error"
 import { parseJson, stringifyJson } from "../util/json"
 import type { CodexProviderEvent } from "./event"
 import type { CodexInteractionRequest } from "./interaction"
@@ -460,7 +461,8 @@ export function parseJsonOutput(text: string, source: "Codex"): unknown {
   try {
     return parseJson(text.trim())
   } catch (error) {
-    throw createStepFailedError(new Error(`${source} step returned invalid JSON: ${String(error)}`, { cause: error }))
+    const cause = normalizeError(error)
+    throw createStepFailedError(new Error(`${source} step returned invalid JSON: ${cause.message}`, { cause }))
   }
 }
 

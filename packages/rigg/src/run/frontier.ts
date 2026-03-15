@@ -6,9 +6,12 @@ import {
   type ParallelNode,
   type WorkflowStep,
 } from "../compile/schema"
+import { normalizeError } from "../util/error"
 import { preview } from "./node"
 import type { RenderContext } from "./render"
 import type { FrontierNode } from "./schema"
+
+type TemplateRenderResult = { kind: "rendered"; value: string } | { error: Error; fallback: string; kind: "fallback" }
 
 export function shouldPauseBeforeStep(step: WorkflowStep): boolean {
   return step.type === "shell" || step.type === "codex" || step.type === "write_file" || step.type === "parallel"
@@ -112,9 +115,25 @@ function summarizeReviewPreview(step: Extract<WorkflowStep, { type: "codex" }>, 
 }
 
 function renderStringSafely(template: string, context: RenderContext): string {
+  const result = tryRenderTemplate(template, context)
+  if (result.kind === "rendered") {
+    return result.value
+  }
+
+  return result.fallback
+}
+
+function tryRenderTemplate(template: string, context: RenderContext): TemplateRenderResult {
   try {
-    return renderTemplateString(template, context)
-  } catch {
-    return template
+    return {
+      kind: "rendered",
+      value: renderTemplateString(template, context),
+    }
+  } catch (error) {
+    return {
+      error: normalizeError(error),
+      fallback: template,
+      kind: "fallback",
+    }
   }
 }

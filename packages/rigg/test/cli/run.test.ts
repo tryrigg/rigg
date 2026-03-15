@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test"
 
 import { applyRunEvent, createTerminalUiState, renderTerminalFrame } from "../../src/cli/run"
+import type { FrontierNode, NodeSnapshot } from "../../src/run/schema"
 import { runSnapshot } from "../fixture/builders"
 
-function nodeSnapshot(overrides: Record<string, unknown> = {}) {
+function nodeSnapshot(overrides: Partial<NodeSnapshot> = {}): NodeSnapshot {
   return {
     attempt: 1,
     duration_ms: 1200,
@@ -13,7 +14,7 @@ function nodeSnapshot(overrides: Record<string, unknown> = {}) {
     node_path: "/0",
     result: null,
     started_at: "2026-03-15T10:00:00.000Z",
-    status: "succeeded" as const,
+    status: "succeeded",
     stderr: null,
     stdout: "Done.",
     user_id: "deploy-config",
@@ -24,8 +25,8 @@ function nodeSnapshot(overrides: Record<string, unknown> = {}) {
 
 function barrierSnapshot(
   overrides: {
-    completedNode?: Record<string, unknown>
-    next?: Array<Record<string, unknown>>
+    completedNode?: Partial<NodeSnapshot>
+    next?: FrontierNode[]
   } = {},
 ) {
   const completed = nodeSnapshot(overrides.completedNode)
@@ -41,7 +42,7 @@ function barrierSnapshot(
       },
       created_at: "2026-03-15T10:01:00.000Z",
       frame_id: "root",
-      next: (overrides.next ?? [
+      next: overrides.next ?? [
         {
           cwd: "/app",
           frame_id: "root",
@@ -49,7 +50,7 @@ function barrierSnapshot(
           node_path: "/1",
           user_id: "run-migrations",
         },
-      ]) as never,
+      ],
       reason: "step_completed",
     },
     nodes: [completed],

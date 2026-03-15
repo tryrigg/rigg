@@ -26,6 +26,25 @@ export class LoopExhaustedError extends RunExecutionError {
   }
 }
 
+export class RunAbortedError extends RunExecutionError {
+  constructor(message = "workflow aborted by operator") {
+    super(message, {
+      runReason: "aborted",
+    })
+    this.name = "RunAbortedError"
+  }
+}
+
+export class StepInterruptedError extends Error {
+  override readonly cause: unknown
+
+  constructor(message = "step interrupted", options: { cause?: unknown } = {}) {
+    super(message)
+    this.name = "StepInterruptedError"
+    this.cause = options.cause
+  }
+}
+
 export function createEvaluationError(error: unknown): RunExecutionError {
   const cause = normalizeError(error)
   return new RunExecutionError(cause.message, {
@@ -60,4 +79,8 @@ export function normalizeExecutionError(error: unknown, fallbackReason: RunReaso
     cause,
     runReason: fallbackReason,
   })
+}
+
+export function isStepInterrupted(error: unknown): error is StepInterruptedError {
+  return error instanceof StepInterruptedError
 }

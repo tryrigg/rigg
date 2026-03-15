@@ -8,10 +8,9 @@ import { stringifyJson } from "../util/json"
 import { isMissingPathError, normalizeError } from "../util/error"
 import { runWorkflow } from "../run/index"
 import { examplesDoc, schemaReferenceDoc, skillDoc, workflowSyntaxDoc } from "./docs"
-import { createTerminalInteractionSession } from "./interaction"
 import { planTemplate, reviewBranchTemplate, reviewCommitTemplate, reviewUncommittedTemplate } from "./templates"
-import { TerminalProgressSink } from "./progress"
 import { renderCompileErrors } from "./output"
+import { createTerminalRunSession } from "./run"
 
 type CommandResult = {
   exitCode: number
@@ -172,22 +171,20 @@ export async function runRunCommand(
       return failure([inputs.message])
     }
 
-    const progressSink = !process.stderr.isTTY ? undefined : new TerminalProgressSink(process.stderr)
-    const interactionSession = process.stdin.isTTY
-      ? createTerminalInteractionSession(process.stdin, process.stderr)
-      : undefined
+    const runSession =
+      process.stdin.isTTY && process.stderr.isTTY ? createTerminalRunSession(process.stdin, process.stderr) : undefined
     const runResult = await (async () => {
       try {
         return await runWorkflow({
-          interactionHandler: interactionSession?.handle,
+          controlHandler: runSession?.handle,
           invocationInputs: inputs.inputs,
-          onProgress: progressSink?.emit.bind(progressSink),
+          onEvent: runSession?.emit,
           parentEnv: process.env,
           project: projectResult.project,
           workflowId,
         })
       } finally {
-        interactionSession?.close()
+        runSession?.close()
       }
     })()
 

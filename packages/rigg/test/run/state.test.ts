@@ -3,6 +3,27 @@ import { describe, expect, test } from "bun:test"
 import { createInitialRunState, nextNodeAttempt, setRunFinished, upsertNodeSnapshot } from "../../src/run/state"
 import { runSnapshot } from "../fixture/builders"
 
+function nodeSnapshot(overrides: Record<string, unknown> = {}) {
+  return {
+    attempt: 1,
+    duration_ms: null,
+    exit_code: null,
+    finished_at: null,
+    node_kind: "shell",
+    node_path: "/0",
+    result: null,
+    started_at: null,
+    status: "pending" as const,
+    stderr: null,
+    stderr_preview: "",
+    stdout: null,
+    stdout_preview: "",
+    user_id: null,
+    waiting_for: null,
+    ...overrides,
+  }
+}
+
 describe("run/state", () => {
   test("creates the initial run state", () => {
     expect(createInitialRunState("run-1", "workflow", "2026-03-14T00:00:00.000Z")).toEqual(
@@ -29,51 +50,23 @@ describe("run/state", () => {
   test("upserts node snapshots and keeps numeric order", () => {
     const state = createInitialRunState("run-1", "workflow", "2026-03-14T00:00:00.000Z")
 
-    upsertNodeSnapshot(state, {
-      attempt: 1,
-      duration_ms: null,
-      exit_code: null,
-      finished_at: null,
-      node_path: "/10",
-      result: null,
-      started_at: null,
-      status: "pending",
-      stderr: null,
-      stderr_preview: "",
-      stdout: null,
-      stdout_preview: "",
-      user_id: null,
-    })
-    upsertNodeSnapshot(state, {
-      attempt: 1,
-      duration_ms: null,
-      exit_code: null,
-      finished_at: null,
-      node_path: "/2",
-      result: null,
-      started_at: null,
-      status: "pending",
-      stderr: null,
-      stderr_preview: "",
-      stdout: null,
-      stdout_preview: "",
-      user_id: null,
-    })
-    upsertNodeSnapshot(state, {
-      attempt: 2,
-      duration_ms: 100,
-      exit_code: 0,
-      finished_at: "2026-03-14T00:01:00.000Z",
-      node_path: "/2",
-      result: "done",
-      started_at: "2026-03-14T00:00:30.000Z",
-      status: "succeeded",
-      stderr: null,
-      stderr_preview: "",
-      stdout: "done",
-      stdout_preview: "done",
-      user_id: null,
-    })
+    upsertNodeSnapshot(state, nodeSnapshot({ node_path: "/10" }))
+    upsertNodeSnapshot(state, nodeSnapshot({ node_path: "/2" }))
+    upsertNodeSnapshot(
+      state,
+      nodeSnapshot({
+        attempt: 2,
+        duration_ms: 100,
+        exit_code: 0,
+        finished_at: "2026-03-14T00:01:00.000Z",
+        node_path: "/2",
+        result: "done",
+        started_at: "2026-03-14T00:00:30.000Z",
+        status: "succeeded",
+        stdout: "done",
+        stdout_preview: "done",
+      }),
+    )
 
     expect(state.nodes.map((node) => node.node_path)).toEqual(["/2", "/10"])
     expect(state.nodes[0]).toMatchObject({
@@ -86,21 +79,7 @@ describe("run/state", () => {
     const state = createInitialRunState("run-1", "workflow", "2026-03-14T00:00:00.000Z")
     expect(nextNodeAttempt(state, "/0")).toBe(1)
 
-    upsertNodeSnapshot(state, {
-      attempt: 3,
-      duration_ms: null,
-      exit_code: null,
-      finished_at: null,
-      node_path: "/0",
-      result: null,
-      started_at: null,
-      status: "pending",
-      stderr: null,
-      stderr_preview: "",
-      stdout: null,
-      stdout_preview: "",
-      user_id: null,
-    })
+    upsertNodeSnapshot(state, nodeSnapshot({ attempt: 3 }))
 
     expect(nextNodeAttempt(state, "/0")).toBe(4)
   })

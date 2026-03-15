@@ -1,0 +1,200 @@
+import { childNodePath, type BranchCase, type NodePath, type WorkflowStep } from "../compile/schema"
+import { isStepInterrupted, normalizeExecutionError } from "./error"
+import type { RunEvent } from "./progress"
+import type { StepBinding } from "./render"
+import type { CompletedNodeSummary, NodeSnapshot, NodeStatus, RunSnapshot } from "./schema"
+import { nextNodeAttempt, setActiveNodePath, setRunPhase, upsertNodeSnapshot } from "./state"
+
+export type NodeLifecycle = {
+  attempt: number
+  startedAt: string
+}
+
+type EmitEvent = (event: RunEvent) => void
+
+export function currentNodeSnapshot(runState: RunSnapshot, nodePath: NodePath): NodeSnapshot | undefined {
+  return runState.nodes.find((node) => node.node_path === nodePath)
+}
+
+export function recordSkippedStep(
+  runState: RunSnapshot,
+  step: WorkflowStep,
+  nodePath: NodePath,
+  reason: string,
+  emitEvent: EmitEvent,
+): NodeSnapshot {
+  const snapshot = createNodeSnapshot(step.id, nodePath, step.type, "skipped", {
+    attempt: nextNodeAttempt(runState, nodePath),
+    startedAt: new Date().toISOString(),
+  })
+  snapshot.duration_ms = 0
+  snapshot.finished_at = snapshot.started_at
+  snapshot.stderr_preview = reason
+  upsertNodeSnapshot(runState, snapshot)
+
+  if (step.type === "group" || step.type === "loop") {
+    markBlockSkipped(runState, step.steps, nodePath)
+  }
+  if (step.type === "branch") {
+    for (const [index, caseNode] of step.cases.entries()) {
+      markCaseSkipped(runState, caseNode, `${nodePath}/${index}`)
+    }
+  }
+  if (step.type === "parallel") {
+    for (const [index, branch] of step.branches.entries()) {
+      markBlockSkipped(runState, branch.steps, `${nodePath}/${index}`)
+    }
+  }
+
+  emitEvent({
+    kind: "node_skipped",
+    node: snapshot,
+    reason,
+    snapshot: runState,
+  })
+
+  return snapshot
+}
+
+export function startNode(
+  runState: RunSnapshot,
+  step: WorkflowStep,
+  nodePath: NodePath,
+  nodeKind: string,
+  emitEvent: EmitEvent,
+): NodeLifecycle {
+  const lifecycle = {
+    attempt: nextNodeAttempt(runState, nodePath),
+    startedAt: new Date().toISOString(),
+  }
+  const snapshot = createNodeSnapshot(step.id, nodePath, nodeKind, "running", lifecycle)
+  upsertNodeSnapshot(runState, snapshot)
+  setActiveNodePath(runState, nodePath)
+  setRunPhase(runState, "running")
+  emitEvent({
+    kind: "node_started",
+    node: snapshot,
+    snapshot: runState,
+  })
+
+  return lifecycle
+}
+
+export function finishNode(runState: RunSnapshot, snapshot: NodeSnapshot, emitEvent: EmitEvent): void {
+  upsertNodeSnapshot(runState, snapshot)
+  if (runState.active_node_path === snapshot.node_path) {
+    setActiveNodePath(runState, null)
+  }
+  setRunPhase(runState, snapshot.status === "interrupted" ? "interrupted" : "running")
+  emitEvent({
+    kind: "node_completed",
+    node: snapshot,
+    snapshot: runState,
+  })
+}
+
+export function finishThrownControlNode(
+  runState: RunSnapshot,
+  step: WorkflowStep,
+  nodePath: NodePath,
+  lifecycle: NodeLifecycle,
+  error: unknown,
+  emitEvent: EmitEvent,
+): NodeSnapshot {
+  if (isStepInterrupted(error)) {
+    const snapshot = createNodeSnapshot(step.id, nodePath, step.type, "interrupted", lifecycle)
+    snapshot.duration_ms = Date.now() - Date.parse(lifecycle.startedAt)
+    snapshot.finished_at = new Date().toISOString()
+    snapshot.stderr_preview = error.message
+    finishNode(runState, snapshot, emitEvent)
+    return snapshot
+  }
+
+  const cause = normalizeExecutionError(error)
+  const snapshot = createNodeSnapshot(step.id, nodePath, step.type, "failed", lifecycle)
+  snapshot.duration_ms = Date.now() - Date.parse(lifecycle.startedAt)
+  snapshot.finished_at = new Date().toISOString()
+  snapshot.stderr = cause.message
+  snapshot.stderr_preview = cause.message
+  finishNode(runState, snapshot, emitEvent)
+  return snapshot
+}
+
+export function createNodeSnapshot(
+  userId: string | undefined,
+  nodePath: NodePath,
+  nodeKind: string,
+  status: NodeStatus,
+  lifecycle: NodeLifecycle,
+): NodeSnapshot {
+  return {
+    attempt: lifecycle.attempt,
+    duration_ms: null,
+    exit_code: null,
+    finished_at: null,
+    node_kind: nodeKind,
+    node_path: nodePath,
+    result: null,
+    started_at: lifecycle.startedAt,
+    status,
+    stderr: null,
+    stderr_preview: "",
+    stdout: null,
+    stdout_preview: "",
+    user_id: userId ?? null,
+    waiting_for: null,
+  }
+}
+
+export function summarizeCompletedNode(snapshot: NodeSnapshot): CompletedNodeSummary {
+  return {
+    node_kind: snapshot.node_kind,
+    node_path: snapshot.node_path,
+    result: snapshot.result ?? null,
+    status: snapshot.status,
+    user_id: snapshot.user_id ?? null,
+  }
+}
+
+export function preview(value: string): string {
+  return value.replaceAll("\n", "\\n").slice(0, 160)
+}
+
+export function statusForBinding(status: NodeStatus): StepBinding["status"] {
+  if (status === "failed" || status === "pending" || status === "skipped" || status === "succeeded") {
+    return status
+  }
+
+  throw new Error(`node status ${status} cannot be stored in step bindings`)
+}
+
+export function markCaseSkipped(runState: RunSnapshot, caseNode: BranchCase, pathPrefix: string): void {
+  markBlockSkipped(runState, caseNode.steps, pathPrefix)
+}
+
+function markBlockSkipped(runState: RunSnapshot, steps: WorkflowStep[], pathPrefix: string): void {
+  for (const [index, step] of steps.entries()) {
+    const nodePath = childNodePath(pathPrefix, index)
+    const snapshot = createNodeSnapshot(step.id, nodePath, step.type, "skipped", {
+      attempt: nextNodeAttempt(runState, nodePath),
+      startedAt: new Date().toISOString(),
+    })
+    snapshot.duration_ms = 0
+    snapshot.finished_at = snapshot.started_at
+    upsertNodeSnapshot(runState, snapshot)
+
+    if (step.type === "group" || step.type === "loop") {
+      markBlockSkipped(runState, step.steps, nodePath)
+    }
+    if (step.type === "branch") {
+      for (const [caseIndex, caseNode] of step.cases.entries()) {
+        markCaseSkipped(runState, caseNode, `${nodePath}/${caseIndex}`)
+      }
+    }
+    if (step.type === "parallel") {
+      for (const [branchIndex, branch] of step.branches.entries()) {
+        markBlockSkipped(runState, branch.steps, `${nodePath}/${branchIndex}`)
+      }
+    }
+  }
+}

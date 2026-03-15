@@ -21,6 +21,12 @@ export type FakeCodexScenario = {
     response?: Record<string, unknown> | undefined
     steps: FakeRpcStep[]
   }
+  reviewStarts?:
+    | Array<{
+        response?: Record<string, unknown> | undefined
+        steps: FakeRpcStep[]
+      }>
+    | undefined
   turnInterrupt?: {
     response?: Record<string, unknown> | undefined
     steps?: FakeRpcStep[] | undefined
@@ -29,6 +35,12 @@ export type FakeCodexScenario = {
     response?: Record<string, unknown> | undefined
     steps: FakeRpcStep[]
   }
+  turnStarts?:
+    | Array<{
+        response?: Record<string, unknown> | undefined
+        steps: FakeRpcStep[]
+      }>
+    | undefined
   versionOutput?: string | undefined
 }
 
@@ -70,7 +82,7 @@ if (args[0] !== "app-server") {
 let nextThreadId = 1;
 let nextTurnId = 1;
 let nextRequestId = 1;
-let activeTurn = null;
+const activeTurns = new Map();
 
 const rl = readline.createInterface({
   input: process.stdin,
@@ -104,31 +116,40 @@ rl.on("line", async (line) => {
     return;
   }
   if (message.method === "turn/start") {
+    const definition = (scenario.turnStarts && scenario.turnStarts.length > 0)
+      ? scenario.turnStarts.shift()
+      : scenario.turnStart;
     const turnId = "turn_" + nextTurnId++;
-    activeTurn = { kind: "turn", threadId: message.params.threadId, turnId };
-    respond(message.id, scenario.turnStart?.response ?? { turn: { id: turnId, items: [], status: "inProgress", error: null } });
+    const context = { kind: "turn", threadId: message.params.threadId, turnId };
+    activeTurns.set(turnId, context);
+    respond(message.id, definition?.response ?? { turn: { id: turnId, items: [], status: "inProgress", error: null } });
     setTimeout(() => {
-      playSteps(scenario.turnStart?.steps ?? [], activeTurn).catch(fail);
+      playSteps(definition?.steps ?? [], context).catch(fail);
     }, 0);
     return;
   }
   if (message.method === "review/start") {
+    const definition = (scenario.reviewStarts && scenario.reviewStarts.length > 0)
+      ? scenario.reviewStarts.shift()
+      : scenario.reviewStart;
     const turnId = "review_" + nextTurnId++;
-    activeTurn = { kind: "review", threadId: message.params.threadId, turnId };
+    const context = { kind: "review", threadId: message.params.threadId, turnId };
+    activeTurns.set(turnId, context);
     respond(
       message.id,
-      scenario.reviewStart?.response ?? {
+      definition?.response ?? {
         turn: { id: turnId, items: [], status: "inProgress", error: null },
         reviewThreadId: message.params.threadId,
       },
     );
     setTimeout(() => {
-      playSteps(scenario.reviewStart?.steps ?? [], activeTurn).catch(fail);
+      playSteps(definition?.steps ?? [], context).catch(fail);
     }, 0);
     return;
   }
   if (message.method === "turn/interrupt") {
     respond(message.id, scenario.turnInterrupt?.response ?? {});
+    const interruptedTurn = activeTurns.get(message.params.turnId) ?? { threadId: message.params.threadId, turnId: message.params.turnId };
     setTimeout(() => {
       playSteps(
         scenario.turnInterrupt?.steps ?? [
@@ -136,9 +157,9 @@ rl.on("line", async (line) => {
             kind: "notification",
             method: "turn/completed",
             params: {
-              threadId: activeTurn?.threadId ?? message.params.threadId,
+              threadId: interruptedTurn.threadId,
               turn: {
-                id: activeTurn?.turnId ?? message.params.turnId,
+                id: interruptedTurn.turnId,
                 items: [],
                 status: "interrupted",
                 error: null,
@@ -146,10 +167,10 @@ rl.on("line", async (line) => {
             },
           },
         ],
-        activeTurn ?? { threadId: message.params.threadId, turnId: message.params.turnId },
+        interruptedTurn,
       )
         .then(() => {
-          activeTurn = null;
+          activeTurns.delete(interruptedTurn.turnId);
         })
         .catch(fail);
     }, 0);
@@ -180,6 +201,7 @@ async function playSteps(steps, context) {
       }
     }
   }
+  activeTurns.delete(context.turnId);
 }
 
 function materialize(value, context) {

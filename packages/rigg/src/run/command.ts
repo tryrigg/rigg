@@ -1,7 +1,6 @@
 import type { WorkflowProject } from "../compile/index"
-import type { CodexInteractionHandler } from "../codex/types"
 import { workflowById } from "../compile/project"
-import type { RunProgressEvent } from "./progress"
+import type { RunControlHandler, RunEvent } from "./progress"
 import type { RunSnapshot } from "./schema"
 import { executeWorkflow } from "./execute"
 import { normalizeInvocationInputs } from "./plan"
@@ -12,9 +11,9 @@ export type RunWorkflowResult =
   | { kind: "invalid_input"; errors: string[] }
 
 export async function runWorkflowCommand(options: {
-  interactionHandler?: CodexInteractionHandler | undefined
+  controlHandler?: RunControlHandler | undefined
   invocationInputs: Record<string, unknown>
-  onProgress?: ((event: RunProgressEvent) => void) | undefined
+  onEvent?: ((event: RunEvent) => void) | undefined
   parentEnv: Record<string, string | undefined>
   project: WorkflowProject
   workflowId: string
@@ -35,9 +34,9 @@ export async function runWorkflowCommand(options: {
   return {
     kind: "completed",
     snapshot: await executeWorkflow({
-      interactionHandler: options.interactionHandler,
+      controlHandler: options.controlHandler,
       invocationInputs: inputs.inputs,
-      onProgress: options.onProgress,
+      onEvent: options.onEvent,
       parentEnv: options.parentEnv,
       projectRoot: options.project.workspace.rootDir,
       workflow,

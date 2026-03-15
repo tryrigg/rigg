@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 
 import { normalizeError } from "../util/error"
+import { isJsonObject } from "../util/json"
 import type { CodexAppServerProcess } from "./process"
 
 type JsonRpcMessage = Record<string, unknown>
@@ -218,10 +219,6 @@ function parseMessage(line: string): ParsedMessage {
     error: new Error("received codex app-server message in an unsupported JSON-RPC shape"),
     kind: "invalid",
   }
-}
-
-function isJsonObject(value: unknown): value is JsonRpcMessage {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 function isNotification(value: JsonRpcMessage): value is JsonRpcNotification {

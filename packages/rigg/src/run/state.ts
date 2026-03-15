@@ -1,13 +1,25 @@
-import type { NodeSnapshot, RunReason, RunSnapshot, RunStatus } from "./schema"
-import type { NodePath } from "../compile/schema"
+import { compareNodePath, type NodePath } from "../compile/schema"
+import type {
+  NodeSnapshot,
+  PendingInteraction,
+  RunPhase,
+  RunReason,
+  RunSnapshot,
+  RunStatus,
+  StepBarrier,
+} from "./schema"
 
 export type MutableRunState = RunSnapshot
 export type MutableNodeSnapshot = NodeSnapshot
 
 export function createInitialRunState(runId: string, workflowId: string, startedAt: string): MutableRunState {
   return {
+    active_barrier: null,
+    active_interaction: null,
+    active_node_path: null,
     finished_at: null,
     nodes: [],
+    phase: "running",
     reason: null,
     run_id: runId,
     started_at: startedAt,
@@ -25,6 +37,26 @@ export function setRunFinished(
   state.status = status
   state.reason = reason
   state.finished_at = finishedAt
+  state.phase = status === "succeeded" ? "completed" : status
+  state.active_barrier = null
+  state.active_interaction = null
+  state.active_node_path = null
+}
+
+export function setRunPhase(state: MutableRunState, phase: RunPhase): void {
+  state.phase = phase
+}
+
+export function setActiveBarrier(state: MutableRunState, barrier: StepBarrier | null): void {
+  state.active_barrier = barrier
+}
+
+export function setActiveInteraction(state: MutableRunState, interaction: PendingInteraction | null): void {
+  state.active_interaction = interaction
+}
+
+export function setActiveNodePath(state: MutableRunState, nodePath: string | null): void {
+  state.active_node_path = nodePath
 }
 
 export function upsertNodeSnapshot(state: MutableRunState, snapshot: MutableNodeSnapshot): void {
@@ -33,7 +65,7 @@ export function upsertNodeSnapshot(state: MutableRunState, snapshot: MutableNode
     state.nodes[existingIndex] = snapshot
   } else {
     state.nodes.push(snapshot)
-    state.nodes.sort((left, right) => left.node_path.localeCompare(right.node_path, undefined, { numeric: true }))
+    state.nodes.sort((left, right) => compareNodePath(left.node_path, right.node_path))
   }
 }
 

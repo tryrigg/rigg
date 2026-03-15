@@ -1,100 +1,86 @@
-import type { FrameId, NodePath } from "../compile/schema"
-import type { NodeStatus, RunReason, RunStatus } from "./schema"
+import type { CodexProviderEvent } from "../codex/event"
+import type { CodexInteractionResolution } from "../codex/interaction"
+import type { NodeSnapshot, PendingInteraction, RunSnapshot, StepBarrier } from "./schema"
 
 export type StreamKind = "stdout" | "stderr"
-export type LoopIterationOutcome = "continue" | "completed" | "failed"
-export type BranchSelection = "if" | "else"
-export type ProviderKind = "codex"
 
-export type RunProgressEvent =
+export type RunEvent =
   | {
       kind: "run_started"
-      node_count: number
-      run_id: string
-      workflow_id: string
+      snapshot: RunSnapshot
     }
   | {
-      attempt: number
-      frame_id: FrameId
       kind: "node_started"
-      node_kind: string
-      node_path: NodePath
-      provider: ProviderKind | null
-      user_id: string | null
+      node: NodeSnapshot
+      snapshot: RunSnapshot
     }
   | {
-      frame_id: FrameId
+      kind: "node_completed"
+      node: NodeSnapshot
+      snapshot: RunSnapshot
+    }
+  | {
       kind: "node_skipped"
-      node_path: NodePath
+      node: NodeSnapshot
       reason: string
-      user_id: string | null
-    }
-  | {
-      case_index: number
-      frame_id: FrameId
-      kind: "branch_selected"
-      node_path: NodePath
-      selection: BranchSelection
-      user_id: string | null
-    }
-  | {
-      frame_id: FrameId
-      iteration: number
-      kind: "loop_iteration_started"
-      max_iterations: number
-      node_path: NodePath
-      user_id: string | null
-    }
-  | {
-      frame_id: FrameId
-      iteration: number
-      kind: "loop_iteration_finished"
-      max_iterations: number
-      node_path: NodePath
-      outcome: LoopIterationOutcome
-      user_id: string | null
+      snapshot: RunSnapshot
     }
   | {
       chunk: string
       kind: "step_output"
+      node_path: string
       stream: StreamKind
-    }
-  | {
-      detail: string | null
-      frame_id: FrameId
-      kind: "provider_tool_use"
-      node_path: NodePath
-      provider: ProviderKind
-      tool: string
       user_id: string | null
     }
   | {
-      frame_id: FrameId
-      kind: "provider_status"
-      message: string
-      node_path: NodePath
-      provider: ProviderKind
+      event: CodexProviderEvent
+      kind: "provider_event"
+      node_path: string
       user_id: string | null
     }
   | {
-      frame_id: FrameId
-      kind: "provider_error"
-      message: string
-      node_path: NodePath
-      provider: ProviderKind
-      user_id: string | null
+      barrier: StepBarrier
+      kind: "barrier_reached"
+      snapshot: RunSnapshot
     }
   | {
-      duration_ms: number | null
-      exit_code: number | null
-      frame_id: FrameId
-      kind: "node_finished"
-      node_path: NodePath
-      status: NodeStatus
-      user_id: string | null
+      action: "abort" | "continue"
+      barrier_id: string
+      kind: "barrier_resolved"
+      snapshot: RunSnapshot
+    }
+  | {
+      interaction: PendingInteraction
+      kind: "interaction_requested"
+      snapshot: RunSnapshot
+    }
+  | {
+      interaction_id: string
+      kind: "interaction_resolved"
+      resolution: CodexInteractionResolution
+      snapshot: RunSnapshot
     }
   | {
       kind: "run_finished"
-      reason: RunReason
-      status: Exclude<RunStatus, "running">
+      snapshot: RunSnapshot
     }
+
+export type StepBarrierResolution = {
+  action: "abort" | "continue"
+  kind: "step_barrier"
+}
+
+export type RunControlRequest =
+  | {
+      barrier: StepBarrier
+      kind: "step_barrier"
+      snapshot: RunSnapshot
+    }
+  | {
+      interaction: PendingInteraction
+      kind: "interaction"
+      snapshot: RunSnapshot
+    }
+
+export type RunControlResolution = CodexInteractionResolution | StepBarrierResolution
+export type RunControlHandler = (request: RunControlRequest) => Promise<RunControlResolution> | RunControlResolution

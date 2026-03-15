@@ -25,8 +25,12 @@ export function workflowProject(
 
 export function runSnapshot(overrides: Partial<RunSnapshot> = {}): RunSnapshot {
   return {
+    active_barrier: overrides.active_barrier ?? null,
+    active_interaction: overrides.active_interaction ?? null,
+    active_node_path: overrides.active_node_path ?? null,
     finished_at: overrides.finished_at ?? null,
     nodes: overrides.nodes ?? [],
+    phase: overrides.phase ?? "running",
     reason: overrides.reason ?? null,
     run_id: overrides.run_id ?? "run-123",
     started_at: overrides.started_at ?? "2026-03-14T00:00:00.000Z",

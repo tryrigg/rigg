@@ -3,8 +3,9 @@ import { dirname, isAbsolute, join } from "node:path"
 
 import { renderTemplateString } from "../compile/expr"
 import type { ActionNode, CodexNode } from "../compile/schema"
+import type { CodexProviderEvent } from "../codex/event"
+import type { CodexInteractionHandler } from "../codex/interaction"
 import { createCodexRuntimeSession, type CodexRuntimeSession } from "../codex/runtime"
-import type { CodexInteractionHandler, CodexProviderEvent } from "../codex/types"
 import { filterEnv } from "../util/env"
 import { parseJson } from "../util/json"
 import { createStepFailedError, createTimedOutError as createRunTimedOutError } from "./error"
@@ -22,6 +23,7 @@ export type ActionStepOutput = {
   result: unknown
   stderr: string
   stdout: string
+  termination: "completed" | "failed" | "interrupted"
 }
 
 export type ActionExecutionOptions = {
@@ -31,12 +33,14 @@ export type ActionExecutionOptions = {
   interactionHandler?: CodexInteractionHandler | undefined
   onOutput?: ((stream: StreamName, chunk: string) => Promise<void> | void) | undefined
   onProviderEvent?: ((event: ProviderEvent) => Promise<void> | void) | undefined
+  signal?: AbortSignal | undefined
 }
 
 export type ProcessOutput = {
   exitCode: number
   stderr: string
   stdout: string
+  termination: "completed" | "interrupted"
 }
 
 export type StreamEventParser<TEvent> = {
@@ -56,6 +60,7 @@ export async function runActionStep(
         env: options.env,
         onOutput: options.onOutput,
         resultMode: step.with.result ?? "text",
+        signal: options.signal,
       })
     case "write_file": {
       const path = renderString(step.with.path, context)
@@ -66,6 +71,7 @@ export async function runActionStep(
         result: await runWriteFileStep(path, content, options.cwd),
         stderr: "",
         stdout: "",
+        termination: "completed",
       }
     }
     case "codex":
@@ -92,11 +98,12 @@ async function runShellStep(
       ...output,
       providerEvents: [],
       result: null,
+      termination: output.termination,
     }
   }
 
   if (options.resultMode === "none") {
-    return { ...output, providerEvents: [], result: null }
+    return { ...output, providerEvents: [], result: null, termination: output.termination }
   }
 
   if (options.resultMode === "json") {
@@ -104,6 +111,7 @@ async function runShellStep(
       ...output,
       providerEvents: [],
       result: parseJsonOutput(output.stdout, "Shell"),
+      termination: output.termination,
     }
   }
 
@@ -111,6 +119,7 @@ async function runShellStep(
     ...output,
     providerEvents: [],
     result: output.stdout,
+    termination: output.termination,
   }
 }
 
@@ -144,11 +153,13 @@ async function runCodexRunStep(
   return await withCodexSession(options, async (session) => {
     const result = await session.run({
       cwd: options.cwd,
+      interactionHandler: options.interactionHandler,
       model: runConfig.model,
+      onEvent: options.onProviderEvent,
       outputSchema: runConfig.output?.schema,
       prompt: renderString(runConfig.prompt, context),
+      signal: options.signal,
     })
-    await flushProviderEvents(result.providerEvents, options.onProviderEvent)
     return result
   })
 }
@@ -166,27 +177,37 @@ async function runCodexReviewStep(
   return await withCodexSession(options, async (session) => {
     const result = await session.review({
       cwd: options.cwd,
+      interactionHandler: options.interactionHandler,
       model: reviewConfig.model,
-      target: inferReviewScope(reviewConfig.review.target, context),
+      onEvent: options.onProviderEvent,
+      signal: options.signal,
+      target: inferReviewScope(reviewConfig.review, context),
     })
-    await flushProviderEvents(result.providerEvents, options.onProviderEvent)
     return result
   })
 }
 
 function inferReviewScope(
-  target: CodexNode["with"] extends infer T
-    ? T extends { action: "review"; review: { target: infer ReviewTarget } }
-      ? ReviewTarget
+  review: CodexNode["with"] extends infer T
+    ? T extends { action: "review"; review: infer ReviewConfig }
+      ? ReviewConfig
       : never
     : never,
   context: RenderContext,
-): { type: "base"; value: string } | { type: "commit"; value: string } | { type: "uncommitted" } {
+):
+  | { type: "base"; value: string }
+  | { title?: string | undefined; type: "commit"; value: string }
+  | { type: "uncommitted" } {
+  const target = review.target
   if (target.type === "base") {
     return { type: "base", value: renderString(target.branch, context) }
   }
   if (target.type === "commit") {
-    return { type: "commit", value: renderString(target.sha, context) }
+    return {
+      title: review.title === undefined ? undefined : renderString(review.title, context),
+      type: "commit",
+      value: renderString(target.sha, context),
+    }
   }
   return { type: "uncommitted" }
 }
@@ -199,6 +220,7 @@ export async function runProcess<TEvent>(
     env: Record<string, string | undefined>
     onOutput?: ((stream: StreamName, chunk: string) => Promise<void> | void) | undefined
     onStdoutEvent?: ((event: TEvent) => Promise<void> | void) | undefined
+    signal?: AbortSignal | undefined
     stdoutEventParser?: StreamEventParser<TEvent> | undefined
     timeoutMs?: number | undefined
   },
@@ -217,6 +239,7 @@ async function runShellProcess(
     cwd: string
     env: Record<string, string | undefined>
     onOutput?: ((stream: StreamName, chunk: string) => Promise<void> | void) | undefined
+    signal?: AbortSignal | undefined
   },
 ): Promise<ProcessOutput> {
   const shell = resolveShellInvocation(command, options.env)
@@ -227,6 +250,7 @@ async function runShellProcess(
 
   return runSpawnedProcess(child, {
     onOutput: options.onOutput,
+    signal: options.signal,
   })
 }
 
@@ -252,11 +276,13 @@ async function runSpawnedProcess<TEvent>(
   options: {
     onOutput?: ((stream: StreamName, chunk: string) => Promise<void> | void) | undefined
     onStdoutEvent?: ((event: TEvent) => Promise<void> | void) | undefined
+    signal?: AbortSignal | undefined
     stdoutEventParser?: StreamEventParser<TEvent> | undefined
     timeoutMs?: number | undefined
   },
 ): Promise<ProcessOutput> {
   let timedOut = false
+  let interrupted = false
   let killTimer: ReturnType<typeof setTimeout> | undefined
   let graceTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -279,6 +305,20 @@ async function runSpawnedProcess<TEvent>(
     }, options.timeoutMs)
   }
 
+  const abortListener = () => {
+    interrupted = true
+    child.kill("SIGTERM")
+    graceTimer = setTimeout(() => {
+      child.kill("SIGKILL")
+    }, PROVIDER_TERMINATE_GRACE_MS)
+  }
+
+  if (options.signal?.aborted) {
+    abortListener()
+  } else {
+    options.signal?.addEventListener("abort", abortListener, { once: true })
+  }
+
   try {
     const [exitCode, stdout, stderr] = await Promise.all([
       child.exited,
@@ -298,9 +338,11 @@ async function runSpawnedProcess<TEvent>(
       exitCode,
       stderr,
       stdout,
+      termination: interrupted ? "interrupted" : "completed",
     }
   } finally {
     cleanupTimers()
+    options.signal?.removeEventListener("abort", abortListener)
   }
 }
 
@@ -425,20 +467,10 @@ async function withCodexSession(
   const session = await createCodexRuntimeSession({
     cwd: options.cwd,
     env: options.env,
-    interactionHandler: options.interactionHandler,
   })
   try {
     return await action(session)
   } finally {
     await session.close()
-  }
-}
-
-async function flushProviderEvents(
-  events: ProviderEvent[],
-  onProviderEvent: ActionExecutionOptions["onProviderEvent"],
-): Promise<void> {
-  for (const event of events) {
-    await onProviderEvent?.(event)
   }
 }

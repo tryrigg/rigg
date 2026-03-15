@@ -4,7 +4,10 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 
 import type { WorkflowDocument } from "../../src/compile/schema"
+import { StepInterruptedError } from "../../src/run/error"
+import type { RunEvent } from "../../src/run/progress"
 import { executeWorkflow } from "../../src/run/execute"
+import { installFakeCodex } from "../fixture/fake-codex"
 
 describe("run/execute", () => {
   test("uses project root as the execution cwd and write_file base path", async () => {
@@ -194,7 +197,7 @@ describe("run/execute", () => {
     }
   })
 
-  test("waits for sibling parallel branches before surfacing a thrown branch error", async () => {
+  test("interrupts sibling parallel branches after a thrown branch error", async () => {
     const root = await mkdtemp(join(tmpdir(), "rigg-execute-parallel-"))
     const nodeStatuses = new Map<string, string>()
 
@@ -202,15 +205,27 @@ describe("run/execute", () => {
       await expect(
         executeWorkflow({
           internals: {
-            runActionStep: async (step) => {
+            runActionStep: async (step, _context, options) => {
               if (step.id === "slow") {
-                await new Promise((resolve) => setTimeout(resolve, 100))
+                await new Promise((resolve, reject) => {
+                  const timer = setTimeout(resolve, 100)
+                  const onAbort = () => {
+                    clearTimeout(timer)
+                    reject(new StepInterruptedError("slow branch interrupted"))
+                  }
+                  if (options.signal?.aborted) {
+                    onAbort()
+                    return
+                  }
+                  options.signal?.addEventListener("abort", onAbort, { once: true })
+                })
                 return {
                   exitCode: 0,
                   providerEvents: [],
                   result: "finished",
                   stderr: "",
                   stdout: "finished",
+                  termination: "completed",
                 }
               }
 
@@ -223,9 +238,9 @@ describe("run/execute", () => {
             },
           },
           invocationInputs: {},
-          onProgress: (event) => {
-            if (event.kind === "node_finished" && event.user_id !== null) {
-              nodeStatuses.set(event.user_id, event.status)
+          onEvent: (event: RunEvent) => {
+            if (event.kind === "node_completed" && event.node.user_id != null) {
+              nodeStatuses.set(event.node.user_id, event.node.status)
             }
           },
           parentEnv: process.env,
@@ -270,7 +285,7 @@ describe("run/execute", () => {
         }),
       ).rejects.toThrow("branch exploded")
 
-      expect(nodeStatuses.get("slow")).toBe("succeeded")
+      expect(nodeStatuses.get("slow")).toBe("interrupted")
       expect(nodeStatuses.get("boom")).toBe("failed")
     } finally {
       await rm(root, { force: true, recursive: true })
@@ -289,6 +304,7 @@ describe("run/execute", () => {
             result: "ok",
             stderr: "",
             stdout: "ok",
+            termination: "completed",
           }),
         },
         invocationInputs: {},
@@ -332,108 +348,575 @@ describe("run/execute", () => {
     }
   })
 
-  test("emits only a failed loop iteration event when loop exports fail", async () => {
-    const root = await mkdtemp(join(tmpdir(), "rigg-execute-loop-events-"))
-    const outcomes: string[] = []
+  test("pauses at step barriers and continues in order", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-barrier-"))
+    const barriers: Array<{ next: string[]; reason: string }> = []
 
     try {
-      await expect(
-        executeWorkflow({
-          internals: {
-            runActionStep: async () => ({
-              exitCode: 0,
-              providerEvents: [],
-              result: "ok",
-              stderr: "",
-              stdout: "ok",
-            }),
-          },
-          invocationInputs: {},
-          onProgress: (event) => {
-            if (event.kind === "loop_iteration_finished") {
-              outcomes.push(event.outcome)
-            }
-          },
-          parentEnv: process.env,
-          projectRoot: root,
-          workflow: {
-            id: "loop-export-failure",
-            steps: [
-              {
-                exports: {
-                  invalid: "${{ missing() }}",
-                },
-                id: "retry",
-                max: 2,
-                steps: [
-                  {
-                    id: "work",
-                    type: "shell",
-                    with: {
-                      command: "work",
-                      result: "text",
-                    },
-                  },
-                ],
-                type: "loop",
-                until: "${{ true }}",
+      const snapshot = await executeWorkflow({
+        controlHandler: async (request) => {
+          if (request.kind === "step_barrier") {
+            barriers.push({
+              next: request.barrier.next.map((step) => step.user_id ?? step.node_path),
+              reason: request.barrier.reason,
+            })
+            return { action: "continue", kind: "step_barrier" }
+          }
+          throw new Error(`unexpected control request ${request.kind}`)
+        },
+        internals: {
+          runActionStep: async () => ({
+            exitCode: 0,
+            providerEvents: [],
+            result: "ok",
+            stderr: "",
+            stdout: "ok",
+            termination: "completed",
+          }),
+        },
+        invocationInputs: {},
+        parentEnv: process.env,
+        projectRoot: root,
+        workflow: {
+          id: "barrier-sequence",
+          steps: [
+            {
+              id: "first",
+              type: "shell",
+              with: {
+                command: "first",
+                result: "text",
               },
-            ],
-          },
-        }),
-      ).rejects.toThrow("unsupported function `missing`")
+            },
+            {
+              id: "second",
+              type: "shell",
+              with: {
+                command: "second",
+                result: "text",
+              },
+            },
+          ],
+        },
+      })
 
-      expect(outcomes).toEqual(["failed"])
+      expect(snapshot.status).toBe("succeeded")
+      expect(barriers).toEqual([
+        { next: ["first"], reason: "run_started" },
+        { next: ["second"], reason: "step_completed" },
+      ])
     } finally {
       await rm(root, { force: true, recursive: true })
     }
   })
 
-  test("emits provider events through progress updates", async () => {
-    const root = await mkdtemp(join(tmpdir(), "rigg-execute-provider-logs-"))
-    const events: string[] = []
+  test("surfaces parallel frontiers as a single barrier", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-parallel-barrier-"))
+    const barrierNext: string[][] = []
 
     try {
       await executeWorkflow({
+        controlHandler: async (request) => {
+          if (request.kind === "step_barrier") {
+            barrierNext.push(request.barrier.next.map((step) => step.user_id ?? step.node_path))
+            return { action: "continue", kind: "step_barrier" }
+          }
+          throw new Error(`unexpected control request ${request.kind}`)
+        },
         internals: {
-          runActionStep: async (_step, _context, options) => {
-            await options.onProviderEvent?.({
-              kind: "status",
-              message: "thread started thread_123",
-              provider: "codex",
-            })
-            return {
-              exitCode: 0,
-              providerEvents: [],
-              result: "ok",
-              stderr: "",
-              stdout: "",
-            }
-          },
+          runActionStep: async () => ({
+            exitCode: 0,
+            providerEvents: [],
+            result: "ok",
+            stderr: "",
+            stdout: "ok",
+            termination: "completed",
+          }),
         },
         invocationInputs: {},
-        onProgress: (event) => {
-          if (event.kind === "provider_status") {
-            events.push(event.message)
-          }
-        },
         parentEnv: process.env,
         projectRoot: root,
         workflow: {
-          id: "provider-logs",
+          id: "parallel-barrier",
+          steps: [
+            {
+              id: "fanout",
+              type: "parallel",
+              branches: [
+                {
+                  id: "left",
+                  steps: [
+                    {
+                      id: "left_step",
+                      type: "shell",
+                      with: {
+                        command: "left",
+                        result: "text",
+                      },
+                    },
+                  ],
+                },
+                {
+                  id: "right",
+                  steps: [
+                    {
+                      id: "right_step",
+                      type: "shell",
+                      with: {
+                        command: "right",
+                        result: "text",
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      })
+
+      expect(barrierNext[0]).toEqual(["left_step", "right_step"])
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("routes provider interactions through the workflow control handler", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-codex-interactions-"))
+    const requests: string[] = []
+
+    try {
+      const binDir = await installFakeCodex(root, {
+        turnStart: {
+          steps: [
+            {
+              kind: "request",
+              method: "item/commandExecution/requestApproval",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                itemId: "cmd_1",
+                reason: "Need approval",
+                command: "git status",
+                cwd: root,
+                availableDecisions: ["accept", "decline", "cancel"],
+              },
+              expectResult: {
+                decision: "accept",
+              },
+            },
+            {
+              kind: "request",
+              method: "item/tool/requestUserInput",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                itemId: "input_1",
+                questions: [
+                  {
+                    id: "choice",
+                    header: "Choice",
+                    question: "Pick one",
+                    isOther: false,
+                    isSecret: false,
+                    options: [{ label: "A", description: "Pick A" }],
+                  },
+                ],
+              },
+              expectResult: {
+                answers: {
+                  choice: {
+                    answers: ["A"],
+                  },
+                },
+              },
+            },
+            {
+              kind: "notification",
+              method: "item/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                item: {
+                  type: "agentMessage",
+                  id: "msg_1",
+                  text: "done",
+                  phase: null,
+                },
+              },
+            },
+            {
+              kind: "notification",
+              method: "turn/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turn: { id: "__TURN_ID__", items: [], status: "completed", error: null },
+              },
+            },
+          ],
+        },
+      })
+
+      const snapshot = await executeWorkflow({
+        controlHandler: async (request) => {
+          if (request.kind === "step_barrier") {
+            return { action: "continue", kind: "step_barrier" }
+          }
+          requests.push(request.interaction.kind)
+          switch (request.interaction.kind) {
+            case "approval":
+              return { decision: "accept", kind: "approval" }
+            case "user_input":
+              return { answers: { choice: { answers: ["A"] } }, kind: "user_input" }
+            case "elicitation":
+              return { action: "accept", content: {}, kind: "elicitation" }
+          }
+        },
+        invocationInputs: {},
+        parentEnv: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+        projectRoot: root,
+        workflow: {
+          id: "codex-control",
           steps: [
             {
               id: "agent",
               type: "codex",
               with: {
                 action: "run",
-                prompt: "Say hi",
+                prompt: "Do the work",
               },
             },
           ],
         },
       })
-      expect(events).toContain("thread started thread_123")
+
+      expect(snapshot.status).toBe("succeeded")
+      expect(requests).toEqual(["approval", "user_input"])
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("supports concurrent codex turns in parallel branches and preserves branch-local interactions", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-codex-parallel-"))
+    const interactions: string[] = []
+
+    try {
+      const binDir = await installFakeCodex(root, {
+        turnStarts: [
+          {
+            steps: [
+              {
+                kind: "request",
+                method: "item/tool/requestUserInput",
+                params: {
+                  threadId: "__THREAD_ID__",
+                  turnId: "__TURN_ID__",
+                  itemId: "input_left",
+                  questions: [
+                    {
+                      id: "left",
+                      header: "Left",
+                      question: "Answer left",
+                      isOther: false,
+                      isSecret: false,
+                    },
+                  ],
+                },
+                expectResult: {
+                  answers: {
+                    left: {
+                      answers: ["L"],
+                    },
+                  },
+                },
+              },
+              {
+                kind: "notification",
+                method: "item/completed",
+                params: {
+                  threadId: "__THREAD_ID__",
+                  turnId: "__TURN_ID__",
+                  item: {
+                    type: "agentMessage",
+                    id: "msg_left",
+                    text: "left done",
+                    phase: null,
+                  },
+                },
+              },
+              {
+                kind: "notification",
+                method: "turn/completed",
+                params: {
+                  threadId: "__THREAD_ID__",
+                  turn: { id: "__TURN_ID__", items: [], status: "completed", error: null },
+                },
+              },
+            ],
+          },
+          {
+            steps: [
+              {
+                kind: "request",
+                method: "item/tool/requestUserInput",
+                params: {
+                  threadId: "__THREAD_ID__",
+                  turnId: "__TURN_ID__",
+                  itemId: "input_right",
+                  questions: [
+                    {
+                      id: "right",
+                      header: "Right",
+                      question: "Answer right",
+                      isOther: false,
+                      isSecret: false,
+                    },
+                  ],
+                },
+                expectResult: {
+                  answers: {
+                    right: {
+                      answers: ["R"],
+                    },
+                  },
+                },
+              },
+              {
+                kind: "notification",
+                method: "item/completed",
+                params: {
+                  threadId: "__THREAD_ID__",
+                  turnId: "__TURN_ID__",
+                  item: {
+                    type: "agentMessage",
+                    id: "msg_right",
+                    text: "right done",
+                    phase: null,
+                  },
+                },
+              },
+              {
+                kind: "notification",
+                method: "turn/completed",
+                params: {
+                  threadId: "__THREAD_ID__",
+                  turn: { id: "__TURN_ID__", items: [], status: "completed", error: null },
+                },
+              },
+            ],
+          },
+        ],
+      })
+
+      const snapshot = await executeWorkflow({
+        controlHandler: async (request) => {
+          if (request.kind === "step_barrier") {
+            return { action: "continue", kind: "step_barrier" }
+          }
+          interactions.push(`${request.interaction.user_id}:${request.interaction.kind}`)
+          if (request.interaction.kind !== "user_input") {
+            throw new Error(`unexpected interaction ${request.interaction.kind}`)
+          }
+          return request.interaction.user_id === "left_agent"
+            ? { answers: { left: { answers: ["L"] } }, kind: "user_input" }
+            : { answers: { right: { answers: ["R"] } }, kind: "user_input" }
+        },
+        invocationInputs: {},
+        parentEnv: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+        projectRoot: root,
+        workflow: {
+          id: "parallel-codex",
+          steps: [
+            {
+              id: "fanout",
+              type: "parallel",
+              branches: [
+                {
+                  id: "left",
+                  steps: [
+                    {
+                      id: "left_agent",
+                      type: "codex",
+                      with: {
+                        action: "run",
+                        prompt: "left",
+                      },
+                    },
+                  ],
+                },
+                {
+                  id: "right",
+                  steps: [
+                    {
+                      id: "right_agent",
+                      type: "codex",
+                      with: {
+                        action: "run",
+                        prompt: "right",
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      })
+
+      expect(snapshot.status).toBe("succeeded")
+      expect(interactions.sort()).toEqual(["left_agent:user_input", "right_agent:user_input"])
+      expect(snapshot.nodes.find((node) => node.user_id === "left_agent")?.status).toBe("succeeded")
+      expect(snapshot.nodes.find((node) => node.user_id === "right_agent")?.status).toBe("succeeded")
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("interrupts a hanging codex sibling when another parallel branch fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-codex-parallel-failfast-"))
+
+    try {
+      const binDir = await installFakeCodex(root, {
+        turnStarts: [
+          {
+            steps: [],
+          },
+          {
+            steps: [
+              {
+                kind: "notification",
+                method: "turn/completed",
+                params: {
+                  threadId: "__THREAD_ID__",
+                  turn: {
+                    id: "__TURN_ID__",
+                    items: [],
+                    status: "failed",
+                    error: { message: "boom" },
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      })
+
+      const snapshot = await executeWorkflow({
+        controlHandler: async (request) => {
+          if (request.kind === "step_barrier") {
+            return { action: "continue", kind: "step_barrier" }
+          }
+          throw new Error(`unexpected control request ${request.kind}`)
+        },
+        invocationInputs: {},
+        parentEnv: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+        projectRoot: root,
+        workflow: {
+          id: "parallel-codex-failfast",
+          steps: [
+            {
+              id: "fanout",
+              type: "parallel",
+              branches: [
+                {
+                  id: "left",
+                  steps: [
+                    {
+                      id: "left_agent",
+                      type: "codex",
+                      with: {
+                        action: "run",
+                        prompt: "left",
+                      },
+                    },
+                  ],
+                },
+                {
+                  id: "right",
+                  steps: [
+                    {
+                      id: "right_agent",
+                      type: "codex",
+                      with: {
+                        action: "run",
+                        prompt: "right",
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      })
+
+      expect(snapshot.status).toBe("failed")
+      expect(snapshot.nodes.find((node) => node.user_id === "right_agent")?.status).toBe("failed")
+      expect(snapshot.nodes.find((node) => node.user_id === "left_agent")?.status).toBe("interrupted")
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("includes codex preview data in step barriers", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-barrier-preview-"))
+    const barriers: RunEvent[] = []
+
+    try {
+      await executeWorkflow({
+        controlHandler: async (request) => {
+          if (request.kind !== "step_barrier") {
+            throw new Error(`unexpected control request ${request.kind}`)
+          }
+          return { action: "continue", kind: "step_barrier" }
+        },
+        internals: {
+          runActionStep: async () => ({
+            exitCode: 0,
+            providerEvents: [],
+            result: "ok",
+            stderr: "",
+            stdout: "ok",
+            termination: "completed",
+          }),
+        },
+        invocationInputs: { branch: "main" },
+        onEvent: (event) => {
+          if (event.kind === "barrier_reached") {
+            barriers.push(event)
+          }
+        },
+        parentEnv: process.env,
+        projectRoot: root,
+        workflow: {
+          id: "barrier-preview",
+          steps: [
+            {
+              id: "review",
+              type: "codex",
+              with: {
+                action: "run",
+                model: "gpt-5.4",
+                prompt: "Review branch ${{ inputs.branch }}",
+              },
+            },
+          ],
+        },
+      })
+
+      const firstBarrier = barriers[0]
+      expect(firstBarrier?.kind).toBe("barrier_reached")
+      if (firstBarrier?.kind !== "barrier_reached") {
+        throw new Error("missing barrier")
+      }
+      expect(firstBarrier.barrier.next[0]).toMatchObject({
+        action: "run",
+        cwd: root,
+        model: "gpt-5.4",
+        prompt_preview: "Review branch main",
+        user_id: "review",
+      })
     } finally {
       await rm(root, { force: true, recursive: true })
     }

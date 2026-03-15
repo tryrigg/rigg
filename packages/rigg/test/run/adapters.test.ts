@@ -161,15 +161,34 @@ describe("run/adapters", () => {
       expect(result.exitCode).toBe(0)
       expect(result.result).toEqual({ summary: "done" })
       expect(events).toEqual([
-        { kind: "status", message: "thread started thread_1", provider: "codex" },
-        { kind: "status", message: "turn started turn_1", provider: "codex" },
+        { kind: "thread_started", provider: "codex", threadId: "thread_1" },
+        { kind: "turn_started", provider: "codex", threadId: "thread_1", turnId: "turn_1" },
         {
+          itemId: "cmd_1",
           detail: `command=cat src/main.ts cwd=${root}`,
-          kind: "tool_use",
+          kind: "tool_started",
           provider: "codex",
+          threadId: "thread_1",
           tool: "command_execution",
+          turnId: "turn_1",
         },
-        { kind: "status", message: '{"summary":"done"}', provider: "codex" },
+        {
+          itemId: "msg_1",
+          kind: "message_delta",
+          provider: "codex",
+          text: '{"summary":"done"}',
+          threadId: "thread_1",
+          turnId: "turn_1",
+        },
+        {
+          itemId: "msg_1",
+          kind: "message_completed",
+          provider: "codex",
+          text: '{"summary":"done"}',
+          threadId: "thread_1",
+          turnId: "turn_1",
+        },
+        { kind: "turn_completed", provider: "codex", status: "completed", threadId: "thread_1", turnId: "turn_1" },
       ])
     } finally {
       await rm(root, { force: true, recursive: true })
@@ -431,17 +450,20 @@ describe("run/adapters", () => {
         cwd: root,
         env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
       })
+      const controller = new AbortController()
 
       const execution = session.run({
         cwd: root,
+        signal: controller.signal,
         prompt: "Wait for interruption",
       })
 
       await new Promise((resolve) => setTimeout(resolve, 50))
-      await session.interruptActiveTurn()
+      controller.abort()
 
       await expect(execution).resolves.toMatchObject({
-        exitCode: 1,
+        exitCode: 130,
+        termination: "interrupted",
       })
       await session.close()
     } finally {

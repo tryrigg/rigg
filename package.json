@@ -11,6 +11,7 @@
     "check:www": "bun run --cwd packages/www check",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "rigg": "bun run --cwd packages/rigg rigg",
     "test": "bun run --cwd packages/rigg test"
   },
   "devDependencies": {

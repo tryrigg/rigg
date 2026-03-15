@@ -9,6 +9,7 @@
   "scripts": {
     "build:cli": "bun run ../../script/build-cli.ts",
     "check": "bunx tsc --noEmit",
+    "rigg": "bun run ./src/cli/bootstrap.ts",
     "test": "bun test",
     "test:randomize": "bun test --randomize",
     "validate": "bun run ./src/cli/bootstrap.ts validate"

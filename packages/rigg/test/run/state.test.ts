@@ -15,9 +15,7 @@ function nodeSnapshot(overrides: Record<string, unknown> = {}) {
     started_at: null,
     status: "pending" as const,
     stderr: null,
-    stderr_preview: "",
     stdout: null,
-    stdout_preview: "",
     user_id: null,
     waiting_for: null,
     ...overrides,
@@ -64,7 +62,6 @@ describe("run/state", () => {
         started_at: "2026-03-14T00:00:30.000Z",
         status: "succeeded",
         stdout: "done",
-        stdout_preview: "done",
       }),
     )
 

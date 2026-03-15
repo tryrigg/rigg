@@ -29,7 +29,7 @@ export function recordSkippedStep(
   })
   snapshot.duration_ms = 0
   snapshot.finished_at = snapshot.started_at
-  snapshot.stderr_preview = reason
+  snapshot.stderr = reason
   upsertNodeSnapshot(runState, snapshot)
 
   if (step.type === "group" || step.type === "loop") {
@@ -105,7 +105,7 @@ export function finishThrownControlNode(
     const snapshot = createNodeSnapshot(step.id, nodePath, step.type, "interrupted", lifecycle)
     snapshot.duration_ms = Date.now() - Date.parse(lifecycle.startedAt)
     snapshot.finished_at = new Date().toISOString()
-    snapshot.stderr_preview = error.message
+    snapshot.stderr = error.message
     finishNode(runState, snapshot, emitEvent)
     return snapshot
   }
@@ -115,7 +115,6 @@ export function finishThrownControlNode(
   snapshot.duration_ms = Date.now() - Date.parse(lifecycle.startedAt)
   snapshot.finished_at = new Date().toISOString()
   snapshot.stderr = cause.message
-  snapshot.stderr_preview = cause.message
   finishNode(runState, snapshot, emitEvent)
   return snapshot
 }
@@ -138,9 +137,7 @@ export function createNodeSnapshot(
     started_at: lifecycle.startedAt,
     status,
     stderr: null,
-    stderr_preview: "",
     stdout: null,
-    stdout_preview: "",
     user_id: userId ?? null,
     waiting_for: null,
   }

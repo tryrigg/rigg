@@ -33,6 +33,13 @@ rigg run <workflow_id> [--input key=value]
 | ------------------- | ----------------------------------------------------------------------- |
 | `--input key=value` | Set input parameter (repeatable). Values are JSON-parsed when possible. |
 
-Interactive progress is shown by default on TTY. Non-TTY execution suppresses it.
+On a TTY, `rigg run` opens a stateful terminal UI with:
+
+- a run header
+- a live running view for the active step output and codex activity
+- a waiting view for barriers and interactions
+- a final view that shows the last completed step result
+
+Use `Ctrl-C` to interrupt the active step. Non-TTY execution suppresses the interactive UI.
 
 Workflows are discovered from the nearest `.rigg/` directory.

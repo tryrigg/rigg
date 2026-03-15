@@ -50,9 +50,7 @@ export const NodeSnapshotSchema = z.object({
   started_at: z.string().min(1).optional().nullable(),
   status: NodeStatusSchema,
   stderr: z.string().optional().nullable(),
-  stderr_preview: z.string(),
   stdout: z.unknown().optional().nullable(),
-  stdout_preview: z.string(),
   user_id: z.string().min(1).optional().nullable(),
   waiting_for: InteractionKindSchema.optional().nullable(),
 })

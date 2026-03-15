@@ -33,6 +33,14 @@ bun run --cwd packages/rigg build:cli
 ./packages/rigg/dist/rigg --help
 ```
 
+For local debugging against the workspace implementation:
+
+```bash
+bun run rigg --version
+bun run rigg validate
+bun run rigg run debug-progress
+```
+
 ## Quickstart
 
 Initialize a project:
@@ -78,8 +86,9 @@ Supported step types:
 ## Notes
 
 - Workflows are discovered from the nearest `.rigg/` directory.
-- `rigg run --json` writes a JSON snapshot to stdout.
-- Interactive runs show live progress; `--json`, `--quiet`, and non-TTY runs do not.
+- `rigg run` opens a stateful terminal UI on TTYs with a run header, active pane, interaction pane, and barrier pane.
+- Barrier steps can be advanced with `continue`, stopped with `abort`, and inspected with `inspect-output`.
+- Provider interactions are answered in place from the terminal UI; `Ctrl-C` interrupts the active step.
 - Run state is in-memory only; Rigg does not persist run history.
 
 ## Docs

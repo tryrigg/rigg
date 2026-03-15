@@ -105,44 +105,6 @@ type TurnResult = {
   text: string
 }
 
-const SOFT_NOTIFICATION_METHODS = new Set([
-  "account/updated",
-  "account/rateLimits/updated",
-  "app/list/updated",
-  "configWarning",
-  "deprecationNotice",
-  "fuzzyFileSearch/sessionCompleted",
-  "fuzzyFileSearch/sessionUpdated",
-  "hook/completed",
-  "hook/started",
-  "item/commandExecution/outputDelta",
-  "item/commandExecution/terminalInteraction",
-  "item/fileChange/outputDelta",
-  "item/mcpToolCall/progress",
-  "item/plan/delta",
-  "item/reasoning/summaryPartAdded",
-  "item/reasoning/summaryTextDelta",
-  "item/reasoning/textDelta",
-  "model/rerouted",
-  "rawResponseItem/completed",
-  "serverRequest/resolved",
-  "skills/changed",
-  "thread/archived",
-  "thread/closed",
-  "thread/compacted",
-  "thread/name/updated",
-  "thread/realtime/closed",
-  "thread/realtime/error",
-  "thread/realtime/itemAdded",
-  "thread/realtime/outputAudio/delta",
-  "thread/realtime/started",
-  "thread/status/changed",
-  "thread/tokenUsage/updated",
-  "thread/unarchived",
-  "windows/worldWritableWarning",
-  "windowsSandbox/setupCompleted",
-])
-
 export type CodexStepResult = {
   exitCode: number
   providerEvents: CodexProviderEvent[]
@@ -642,11 +604,7 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
       return
     }
 
-    if (SOFT_NOTIFICATION_METHODS.has(method)) {
-      return
-    }
-
-    throw new Error(`unsupported codex app-server notification: ${method}`)
+    return
   }
 
   function executionFromParams(params: unknown, allowSingleFallback = true): TurnExecution | undefined {

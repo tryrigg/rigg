@@ -95,6 +95,40 @@ describe("run/adapters", () => {
             },
             {
               kind: "notification",
+              method: "codex/event/mcp_startup_complete",
+              params: {
+                conversationId: "conv_1",
+                id: "event_1",
+                msg: {
+                  type: "mcp_startup_complete",
+                  cancelled: [],
+                  failed: [],
+                  ready: [],
+                },
+              },
+            },
+            {
+              kind: "notification",
+              method: "codex/event/future_event",
+              params: {
+                conversationId: "conv_1",
+                id: "event_2",
+                msg: {
+                  type: "future_event",
+                },
+              },
+            },
+            {
+              kind: "notification",
+              method: "turn/plan/updated",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                steps: [],
+              },
+            },
+            {
+              kind: "notification",
               method: "item/agentMessage/delta",
               params: {
                 threadId: "__THREAD_ID__",

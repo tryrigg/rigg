@@ -31,6 +31,8 @@ rigg run hello --input name=Rigg       # run a workflow
 
 ## Output
 
-Interactive progress is shown on TTY. Non-TTY execution suppresses it automatically.
+On a TTY, `rigg run` opens a stateful terminal UI that switches between a live running view, a waiting view for barriers and interactions, and a final result view. During `codex` steps, the running view also shows live codex activity such as assistant text and tool progress. Use `continue` or `abort` at barriers, and use `Ctrl-C` to interrupt the active step.
+
+Non-TTY execution suppresses the interactive UI automatically.
 
 Run state is in-memory only; Rigg does not persist run history.

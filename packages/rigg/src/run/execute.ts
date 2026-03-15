@@ -36,7 +36,6 @@ import {
   finishNode,
   finishThrownControlNode,
   markCaseSkipped,
-  preview,
   recordSkippedStep,
   startNode,
   statusForBinding,
@@ -329,7 +328,7 @@ async function executeAction(
       const snapshot = createNodeSnapshot(originalStep.id, nodePath, step.type, "interrupted", lifecycle)
       snapshot.duration_ms = 0
       snapshot.finished_at = new Date().toISOString()
-      snapshot.stderr_preview = error.message
+      snapshot.stderr = error.message
       finishNode(environment.runState, snapshot, emitRunEvent(environment))
       return {
         bindingStatus: null,
@@ -344,7 +343,6 @@ async function executeAction(
     snapshot.duration_ms = 0
     snapshot.finished_at = new Date().toISOString()
     snapshot.stderr = cause.message
-    snapshot.stderr_preview = cause.message
     finishNode(environment.runState, snapshot, emitRunEvent(environment))
     throw cause
   }
@@ -364,9 +362,7 @@ async function executeAction(
   snapshot.finished_at = finishedAt
   snapshot.result = interrupted || failed ? null : output.result
   snapshot.stderr = output.stderr.length > 0 ? output.stderr : null
-  snapshot.stderr_preview = preview(output.stderr)
   snapshot.stdout = output.stdout.length > 0 ? output.stdout : null
-  snapshot.stdout_preview = preview(output.stdout)
 
   finishNode(environment.runState, snapshot, emitRunEvent(environment))
 

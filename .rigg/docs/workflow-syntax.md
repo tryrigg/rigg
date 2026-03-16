@@ -45,14 +45,6 @@ steps:
     action: run
     prompt: Implement the feature.
     model: gpt-5.4
-    output:
-      schema:
-        type: object
-        required: [summary]
-        additionalProperties: false
-        properties:
-          summary:
-            type: string
 
 # Review mode
 - id: review
@@ -65,6 +57,8 @@ steps:
         type: uncommitted # uncommitted | base | commit
       title: Optional title
 ```
+
+`action: run` returns plain text.
 
 For `review.target`:
 
@@ -79,7 +73,7 @@ For `review.target`:
   type: write_file
   with:
     path: ${{ inputs.output_path }}
-    content: ${{ steps.draft.result.markdown }}
+    content: ${{ steps.draft.result }}
 ```
 
 ## Control Flow
@@ -104,7 +98,7 @@ For `review.target`:
 - id: remediation
   type: loop
   max: 5
-  until: ${{ steps.review.result.findings == [] }}
+  until: ${{ len(steps.review.result.findings) == 0 }}
   steps: []
 ```
 
@@ -116,7 +110,7 @@ Inside loops: `${{ run.iteration }}`, `${{ run.max_iterations }}`, and `${{ run.
 - id: decide
   type: branch
   cases:
-    - if: ${{ steps.check.result.ok }}
+    - if: ${{ steps.check.result == "ok" }}
       steps: []
       exports:
         status: ${{ "ok" }}
@@ -171,6 +165,6 @@ rigg run <workflow_id> --input key=value
 ## Key Rules
 
 1. Access step outputs via `steps.<id>.result`
-2. `with.output.schema` must use `type: object` at the root
-3. `codex` supports `action: run` and `action: review`
+2. `codex` supports `action: run` and `action: review`
+3. `codex run` returns text, while `codex review` returns the built-in review object shape
 4. Unknown YAML keys cause validation errors

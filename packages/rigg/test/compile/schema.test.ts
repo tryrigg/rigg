@@ -1,10 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import {
-  canonicalizeOutputSchema,
-  codexReviewOutputDefinition,
   InputSchema,
-  OutputSchema,
   childLoopScope,
   childNodePath,
   compareFrameId,
@@ -20,9 +17,7 @@ import {
   rootNodePath,
   validateIdentifier,
   validateInputDefinitions,
-  validateOutputDefinition,
   validateInputValue,
-  validateOutputValue,
 } from "../../src/compile/schema"
 import { AnyJsonShape, BooleanShape, IntegerShape, StringShape } from "../../src/compile/expr"
 
@@ -56,7 +51,7 @@ describe("compile/schema", () => {
     expect(loopIterationFrameId(loopScope, 3)).toBe(`${loopScope}.iter.3`)
   })
 
-  test("decodes nullable input and output schemas", () => {
+  test("decodes nullable input schemas", () => {
     expect(
       InputSchema.parse({
         default: "draft",
@@ -67,35 +62,14 @@ describe("compile/schema", () => {
       nullable: true,
       type: "string",
     })
-
-    expect(
-      OutputSchema.parse({
-        properties: {
-          accepted: { type: "boolean" },
-        },
-        required: ["accepted"],
-        type: "object",
-      }),
-    ).toEqual({
-      properties: {
-        accepted: { type: "boolean" },
-      },
-      required: ["accepted"],
-      type: "object",
-    })
   })
 
   test("rejects invalid schema structure", () => {
     const objectResult = InputSchema.safeParse({ type: "object" })
-    const arrayResult = OutputSchema.safeParse({ type: "array" })
 
     expect(objectResult.success).toBe(false)
-    expect(arrayResult.success).toBe(false)
     if (!objectResult.success) {
       expect(objectResult.error.issues[0]?.message).toContain("object inputs require `properties`")
-    }
-    if (!arrayResult.success) {
-      expect(arrayResult.error.issues[0]?.message).toContain("array outputs require `items`")
     }
   })
 
@@ -150,69 +124,6 @@ describe("compile/schema", () => {
     ).toEqual([expect.stringContaining("inputs.slug.pattern is not a valid regular expression:")])
   })
 
-  test("validates output schema semantics and canonicalizes provider schemas", () => {
-    expect(
-      validateOutputDefinition(
-        {
-          properties: {
-            accepted: { type: "boolean" },
-          },
-          required: ["accepted", "missing"],
-          type: "object",
-        },
-        "with.output.schema",
-      ),
-    ).toEqual(["with.output.schema.required references unknown property `missing`"])
-
-    expect(
-      validateOutputDefinition(
-        {
-          maxLength: 5,
-          type: "string",
-        } as never,
-        "with.output.schema",
-      ),
-    ).toEqual(["with.output.schema.maxLength uses an unsupported keyword"])
-
-    expect(
-      canonicalizeOutputSchema({
-        properties: {
-          zeta: { type: "string" },
-          alpha: {
-            properties: {
-              ok: { type: "boolean" },
-            },
-            required: ["ok"],
-            type: "object",
-          },
-        },
-        required: ["zeta", "alpha"],
-        type: "object",
-      }),
-    ).toEqual({
-      additionalProperties: false,
-      properties: {
-        alpha: {
-          additionalProperties: false,
-          properties: {
-            ok: { type: "boolean" },
-          },
-          required: ["ok"],
-          type: "object",
-        },
-        zeta: { type: "string" },
-      },
-      required: ["alpha", "zeta"],
-      type: "object",
-    })
-
-    expect(validateOutputValue(codexReviewOutputDefinition(), { findings: [] })).toEqual([
-      "result.overall_correctness is required",
-      "result.overall_explanation is required",
-      "result.overall_confidence_score is required",
-    ])
-  })
-
   test("validates input values", () => {
     const schema = InputSchema.parse({
       additionalProperties: false,
@@ -246,31 +157,6 @@ describe("compile/schema", () => {
     ])
   })
 
-  test("validates output values", () => {
-    const schema = OutputSchema.parse({
-      additionalProperties: false,
-      properties: {
-        findings: {
-          items: {
-            properties: {
-              title: { type: "string" },
-            },
-            required: ["title"],
-            type: "object",
-          },
-          type: "array",
-        },
-      },
-      required: ["findings"],
-      type: "object",
-    })
-
-    expect(validateOutputValue(schema, { findings: [{}], extra: true })).toEqual([
-      "result.findings.0.title is required",
-      "result.extra is not allowed",
-    ])
-  })
-
   test("collects input defaults using current JSON coercion behavior", () => {
     expect(
       defaultsForInputs({
@@ -289,7 +175,7 @@ describe("compile/schema", () => {
     })
   })
 
-  test("derives output shapes from output schemas", () => {
+  test("derives result shapes from schemas", () => {
     expect(
       shapeFromSchema({
         properties: {

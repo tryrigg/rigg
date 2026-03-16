@@ -193,15 +193,6 @@ const INPUT_ALLOWED_FIELDS: Record<JsonSchemaType, ReadonlySet<keyof InputDefini
   string: new Set(["default", "description", "enum", "maxLength", "minLength", "nullable", "pattern", "type"]),
 }
 
-const OUTPUT_ALLOWED_FIELDS: Record<JsonSchemaType, ReadonlySet<keyof OutputDefinition>> = {
-  array: new Set(["items", "nullable", "type"]),
-  boolean: new Set(["nullable", "type"]),
-  integer: new Set(["nullable", "type"]),
-  number: new Set(["nullable", "type"]),
-  object: new Set(["additionalProperties", "nullable", "properties", "required", "type"]),
-  string: new Set(["nullable", "type"]),
-}
-
 const CODEX_REVIEW_OUTPUT_DEFINITION: OutputDefinition = {
   additionalProperties: false,
   properties: {
@@ -291,13 +282,6 @@ const InputSchemaBase = z
   })
   .strict()
 
-const OutputSchemaBase = z
-  .object({
-    additionalProperties: z.boolean().optional(),
-    required: z.array(z.string()).optional(),
-  })
-  .strict()
-
 export const InputSchema: z.ZodType<InputDefinition> = z.lazy(() =>
   InputSchemaBase.extend({
     items: InputSchema.optional(),
@@ -324,25 +308,6 @@ export const InputSchema: z.ZodType<InputDefinition> = z.lazy(() =>
     }))
     .superRefine((value, ctx) => {
       validateSchemaStructure(value, "input", ctx)
-    }),
-)
-
-export const OutputSchema: z.ZodType<OutputDefinition> = z.lazy(() =>
-  OutputSchemaBase.extend({
-    items: OutputSchema.optional(),
-    properties: z.record(z.string(), OutputSchema).optional(),
-    type: TypeFieldSchema,
-  })
-    .transform((value) => ({
-      additionalProperties: value.additionalProperties,
-      items: value.items,
-      nullable: value.type.nullable ? true : undefined,
-      properties: value.properties,
-      required: value.required,
-      type: value.type.type,
-    }))
-    .superRefine((value, ctx) => {
-      validateSchemaStructure(value, "output", ctx)
     }),
 )
 
@@ -415,32 +380,6 @@ function validateInputDefinition(schema: InputDefinition, path: string, nested: 
 
   if (schema.type === "array" && schema.items !== undefined) {
     validateInputDefinition(schema.items, `${path}.items`, true, errors)
-  }
-}
-
-export function validateOutputDefinition(schema: OutputDefinition, path: string): string[] {
-  const errors: string[] = []
-  validateOutputSchema(schema, path, errors)
-  return errors
-}
-
-function validateOutputSchema(schema: OutputDefinition, path: string, errors: string[]): void {
-  validateAllowedSchemaFields(schema, path, OUTPUT_ALLOWED_FIELDS[schema.type], errors)
-
-  if (schema.type === "object") {
-    const properties = schema.properties ?? {}
-    for (const key of schema.required ?? []) {
-      if (!(key in properties)) {
-        errors.push(`${path}.required references unknown property \`${key}\``)
-      }
-    }
-    for (const [key, property] of Object.entries(properties)) {
-      validateOutputSchema(property, `${path}.properties.${key}`, errors)
-    }
-  }
-
-  if (schema.type === "array" && schema.items !== undefined) {
-    validateOutputSchema(schema.items, `${path}.items`, errors)
   }
 }
 
@@ -539,59 +478,6 @@ export function validateInputValue(schema: InputDefinition, value: unknown, path
   }
 }
 
-export function validateOutputValue(schema: OutputDefinition, value: unknown, path = "result"): string[] {
-  if (value === null) {
-    return schema.nullable ? [] : [`${path} must not be null`]
-  }
-
-  switch (schema.type) {
-    case "string":
-      return typeof value === "string" ? [] : [`${path} must be a string`]
-    case "integer":
-      return Number.isInteger(value) ? [] : [`${path} must be an integer`]
-    case "number":
-      return typeof value === "number" && !Number.isNaN(value) ? [] : [`${path} must be a number`]
-    case "boolean":
-      return typeof value === "boolean" ? [] : [`${path} must be a boolean`]
-    case "array":
-      if (!Array.isArray(value)) {
-        return [`${path} must be an array`]
-      }
-      {
-        const items = schema.items
-        return items === undefined
-          ? []
-          : value.flatMap((item, index) => validateOutputValue(items, item, `${path}.${index}`))
-      }
-    case "object":
-      if (!isJsonObject(value)) {
-        return [`${path} must be an object`]
-      }
-      {
-        const errors: string[] = []
-        const properties = schema.properties ?? {}
-        for (const key of schema.required ?? []) {
-          if (!(key in value)) {
-            errors.push(`${path}.${key} is required`)
-          }
-        }
-        for (const [key, propertySchema] of Object.entries(properties)) {
-          if (key in value) {
-            errors.push(...validateOutputValue(propertySchema, value[key], `${path}.${key}`))
-          }
-        }
-        if (schema.additionalProperties === false) {
-          for (const key of Object.keys(value)) {
-            if (!(key in properties)) {
-              errors.push(`${path}.${key} is not allowed`)
-            }
-          }
-        }
-        return errors
-      }
-  }
-}
-
 export function defaultsForInputs(inputs: Record<string, InputDefinition>): Record<string, JsonValue> {
   return Object.fromEntries(
     Object.entries(inputs)
@@ -674,30 +560,6 @@ export function resolveInputPathShape(
   }
 }
 
-export function canonicalizeOutputSchema(schema: OutputDefinition): unknown {
-  const type = schema.nullable ? [schema.type, "null"] : schema.type
-  switch (schema.type) {
-    case "object":
-      return {
-        additionalProperties: schema.additionalProperties ?? false,
-        properties: Object.fromEntries(
-          Object.entries(schema.properties ?? {})
-            .sort(([left], [right]) => left.localeCompare(right))
-            .map(([key, value]) => [key, canonicalizeOutputSchema(value)] as const),
-        ),
-        required: [...(schema.required ?? [])].sort(),
-        type,
-      }
-    case "array":
-      return {
-        ...(schema.items === undefined ? {} : { items: canonicalizeOutputSchema(schema.items) }),
-        type,
-      }
-    default:
-      return { type }
-  }
-}
-
 export function codexReviewOutputDefinition(): OutputDefinition {
   return CODEX_REVIEW_OUTPUT_DEFINITION
 }
@@ -737,12 +599,6 @@ const CodexReviewSchema = z
   })
   .strict()
 
-const CodexOutputSchema = z
-  .object({
-    schema: OutputSchema,
-  })
-  .strict()
-
 const CodexReviewWithSchema = z
   .object({
     action: z.literal("review"),
@@ -755,7 +611,6 @@ const CodexRunWithSchema = z
   .object({
     action: z.literal("run"),
     model: z.string().min(1).optional(),
-    output: CodexOutputSchema.optional(),
     prompt: z.string().min(1),
   })
   .strict()
@@ -931,7 +786,6 @@ export const WorkflowDocumentSchema: z.ZodType<WorkflowDocument> = z
   .strict()
 
 export type ActionNode = CodexNode | ShellNode | WriteFileNode
-export type StructuredOutput = OutputDefinition
 
 function validateAllowedSchemaFields<T extends object>(
   schema: T,

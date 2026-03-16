@@ -27,14 +27,13 @@
 
 ## type: codex (action: run)
 
-| Field                | Type       | Required |
-| -------------------- | ---------- | -------- |
-| `with.action`        | `run`      | Yes      |
-| `with.prompt`        | template   | Yes      |
-| `with.model`         | string     | No       |
-| `with.output.schema` | JSONSchema | No       |
+| Field         | Type     | Required |
+| ------------- | -------- | -------- |
+| `with.action` | `run`    | Yes      |
+| `with.prompt` | template | Yes      |
+| `with.model`  | string   | No       |
 
-`with.output.schema` must be an object schema at the root.
+`codex run` returns plain text.
 
 ## type: codex (action: review)
 
@@ -99,19 +98,6 @@ overall_confidence_score: number
 | ---------- | --------------------- | -------- |
 | `branches` | array<Branch>         | Yes      |
 | `exports`  | map<string, template> | No       |
-
-## Output Schema
-
-```yaml
-output:
-  schema:
-    type: object
-    required: [status]
-    additionalProperties: false
-    properties:
-      status:
-        type: string
-```
 
 ## Validation Rules
 

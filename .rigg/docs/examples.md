@@ -8,7 +8,7 @@ steps:
   - id: remediation
     type: loop
     max: 5
-    until: ${{ len(steps.review.result.findings) == 0 || steps.judge.result.accepted_count == 0 }}
+    until: ${{ len(steps.review.result.findings) == 0 }}
     steps:
       - id: review
         type: codex
@@ -18,34 +18,18 @@ steps:
             target:
               type: uncommitted
 
-      - id: judge
+      - id: fix
+        if: ${{ len(steps.review.result.findings) > 0 }}
         type: codex
         with:
           action: run
           prompt: |
-            Accept only findings that are valid and actionable.
+            Address the accepted findings from this review.
             Review:
             ${{ toJSON(steps.review.result) }}
-          output:
-            schema:
-              type: object
-              required: [accepted_count, fix_brief]
-              additionalProperties: false
-              properties:
-                accepted_count:
-                  type: integer
-                fix_brief:
-                  type: string
-
-      - id: fix
-        if: ${{ steps.judge.result.accepted_count > 0 }}
-        type: codex
-        with:
-          action: run
-          prompt: ${{ steps.judge.result.fix_brief }}
 ```
 
-## 2. Plan, critique, and write a document
+## 2. Draft and write a document
 
 ```yaml
 id: plan
@@ -63,48 +47,12 @@ steps:
         Draft an implementation plan.
         Requirements:
         ${{ inputs.requirements }}
-      output:
-        schema:
-          type: object
-          required: [markdown]
-          additionalProperties: false
-          properties:
-            markdown:
-              type: string
-
-  - id: critique
-    type: codex
-    with:
-      action: run
-      prompt: |
-        Critique this draft and list concrete improvements.
-        Draft:
-        ${{ steps.draft.result.markdown }}
-      output:
-        schema:
-          type: object
-          required: [has_findings, findings]
-          additionalProperties: false
-          properties:
-            has_findings:
-              type: boolean
-            findings:
-              type: array
-              items:
-                type: object
-                required: [description, suggestion]
-                additionalProperties: false
-                properties:
-                  description:
-                    type: string
-                  suggestion:
-                    type: string
 
   - id: write
     type: write_file
     with:
       path: ${{ inputs.output_path }}
-      content: ${{ steps.draft.result.markdown }}
+      content: ${{ steps.draft.result }}
 ```
 
 ## 3. Parallel checks
@@ -141,14 +89,6 @@ steps:
         ${{ steps.all.result.unit }}
         Lint:
         ${{ steps.all.result.lint }}
-      output:
-        schema:
-          type: object
-          required: [summary]
-          additionalProperties: false
-          properties:
-            summary:
-              type: string
 ```
 
 ## 4. Commit review
@@ -167,17 +107,4 @@ steps:
         target:
           type: commit
           sha: ${{ inputs.commit_sha }}
-```
-
-## Common Pattern: Structured output
-
-```yaml
-output:
-  schema:
-    type: object
-    required: [summary]
-    additionalProperties: false
-    properties:
-      summary:
-        type: string
 ```

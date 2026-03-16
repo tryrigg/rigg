@@ -30,7 +30,6 @@ import {
   resolveInputPathShape,
   validateIdentifier,
   validateInputDefinitions,
-  validateOutputDefinition,
 } from "./schema"
 import type { WorkflowProject } from "./project"
 import { normalizeError } from "../util/error"
@@ -472,25 +471,10 @@ function validateCodex(
   }
 
   validateTemplate(step.with.prompt, filePath, scope, errors)
-  const outputSchema = step.with.output?.schema
-  if (outputSchema !== undefined && outputSchema.type !== "object") {
-    errors.push(
-      createCompileError(CompileErrorCode.InvalidWorkflow, "Codex run `output.schema` must use `type: object`.", {
-        filePath,
-      }),
-    )
-  }
-  if (outputSchema !== undefined) {
-    for (const message of validateOutputDefinition(outputSchema, "with.output.schema")) {
-      errors.push(createCompileError(CompileErrorCode.InvalidWorkflow, message, { filePath }))
-    }
-  }
-
-  const resultShape = outputSchema === undefined ? StringShape : shapeFromSchema(outputSchema)
   return {
     availableStepShapes: new Map(scope.availableStepShapes),
-    guaranteedResultShape: resultShape,
-    resultShape,
+    guaranteedResultShape: StringShape,
+    resultShape: StringShape,
   }
 }
 

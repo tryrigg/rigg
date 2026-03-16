@@ -35,8 +35,8 @@ describe("compile/validate", () => {
         },
         {
           exports: {
-            done: "${{ steps.check.result.done }}",
             iteration: "${{ run.iteration }}",
+            summary: "${{ steps.check.result }}",
           },
           id: "fix_loop",
           max: 2,
@@ -46,24 +46,15 @@ describe("compile/validate", () => {
               type: "codex",
               with: {
                 action: "run",
-                output: {
-                  schema: {
-                    properties: {
-                      done: { type: "boolean" },
-                    },
-                    required: ["done"],
-                    type: "object",
-                  },
-                },
                 prompt: "Evaluate",
               },
             },
           ],
           type: "loop",
-          until: "${{ steps.check.result.done }}",
+          until: "${{ run.iteration == 1 }}",
         },
         shellStep("echo ${{ steps.group_summary.result.summary }}"),
-        shellStep("echo ${{ steps.fix_loop.result.done }}"),
+        shellStep("echo ${{ steps.fix_loop.result.summary }}"),
       ],
     }
 
@@ -141,24 +132,15 @@ describe("compile/validate", () => {
           id: "draft",
           type: "codex",
           with: {
-            action: "run",
-            output: {
-              schema: {
-                additionalProperties: false,
-                properties: {
-                  tags: {
-                    items: { type: "string" },
-                    type: "array",
-                  },
-                },
-                required: ["tags"],
-                type: "object",
+            action: "review",
+            review: {
+              target: {
+                type: "uncommitted",
               },
             },
-            prompt: "Draft",
           },
         },
-        shellStep("echo ${{ steps.draft.result.tags.foo }}"),
+        shellStep("echo ${{ steps.draft.result.findings.foo }}"),
       ],
     })
 
@@ -222,19 +204,10 @@ describe("compile/validate", () => {
           type: "codex",
           with: {
             action: "run",
-            output: {
-              schema: {
-                properties: {
-                  accepted: { type: "boolean" },
-                },
-                required: ["accepted"],
-                type: "object",
-              },
-            },
             prompt: "Judge",
           },
         },
-        shellStep("echo ${{ steps.maybe.result.accepted }}"),
+        shellStep("echo ${{ steps.maybe.result }}"),
       ],
     })
     const conditionalGroup = expectSingleError({
@@ -253,29 +226,6 @@ describe("compile/validate", () => {
 
     expect(conditionalAction?.message).toBe("`steps.maybe.result` is not available for this node")
     expect(conditionalGroup?.message).toBe("`steps.summary.result` is not available for this node")
-  })
-
-  test("requires object-shaped codex structured output", () => {
-    const error = expectSingleError({
-      id: "invalid-output-shape",
-      steps: [
-        {
-          id: "draft",
-          type: "codex",
-          with: {
-            action: "run",
-            output: {
-              schema: {
-                type: "string",
-              },
-            },
-            prompt: "Draft",
-          },
-        },
-      ],
-    })
-
-    expect(error?.message).toBe("Codex run `output.schema` must use `type: object`.")
   })
 
   test("rejects duplicate workflow ids, duplicate step ids, and duplicate parallel branch ids", () => {
@@ -327,23 +277,7 @@ describe("compile/validate", () => {
     expect(duplicateBranch?.message).toBe("`branches[1]` reuses local branch id `unit` within the same parallel node")
   })
 
-  test("validates codex review targets and codex run output schemas", () => {
-    const runSchemaError = expectSingleError({
-      id: "codex-schema",
-      steps: [
-        {
-          id: "edit",
-          type: "codex",
-          with: {
-            action: "run",
-            output: { schema: { type: "string" } },
-            prompt: "Edit",
-          },
-        },
-      ],
-    })
-
-    expect(runSchemaError?.message).toBe("Codex run `output.schema` must use `type: object`.")
+  test("validates codex review targets", () => {
     expect(
       validateWorkspace(
         workflowProject([

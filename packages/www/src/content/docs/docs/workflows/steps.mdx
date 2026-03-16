@@ -34,17 +34,9 @@ Generates or modifies code.
     action: run
     prompt: Add input validation.
     model: gpt-5.4
-    output:
-      schema:
-        type: object
-        required: [summary]
-        additionalProperties: false
-        properties:
-          summary:
-            type: string
 ```
 
-`output.schema` is optional. When present, Rigg validates the final Codex response locally as structured JSON.
+`steps.<id>.result` is always the final plain-text response.
 
 ### review
 
@@ -95,30 +87,10 @@ Writes content to a file.
   type: write_file
   with:
     path: ${{ inputs.output_path }}
-    content: ${{ steps.draft.result.markdown }}
+    content: ${{ steps.draft.result }}
 ```
 
-## Structured output
+## Result access
 
-Use `with.output.schema` on `codex` `run` steps. The root must be `type: object`.
-
-```yaml
-output:
-  schema:
-    type: object
-    required: [status, findings]
-    additionalProperties: false
-    properties:
-      status:
-        type: string
-      findings:
-        type: array
-        items:
-          type: object
-          required: [description]
-          properties:
-            description:
-              type: string
-```
-
-Result fields are accessed via `steps.<id>.result.<field>`.
+- `codex run`: `steps.draft.result`
+- `codex review`: `steps.review.result.findings`

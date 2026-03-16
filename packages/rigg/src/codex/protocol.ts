@@ -1,9 +1,8 @@
 import { z } from "zod"
 
-import type { OutputDefinition } from "../compile/schema"
 import { createStepFailedError } from "../run/error"
 import { normalizeError } from "../util/error"
-import { parseJson, stringifyJson } from "../util/json"
+import { parseJson } from "../util/json"
 import type { CodexProviderEvent } from "./event"
 import { inferApprovalDecisionIntent, type CodexInteractionRequest } from "./interaction"
 import type { CodexReviewResult } from "./review"
@@ -450,16 +449,6 @@ export function mapReviewTarget(target: ReviewThreadTarget): ReviewStartTarget {
     sha: target.value,
     type: "commit",
   }
-}
-
-export function buildRunPrompt(prompt: string, outputSchema: OutputDefinition | undefined): string {
-  if (outputSchema === undefined) {
-    return prompt
-  }
-
-  return [prompt, "", "Return only a JSON object that matches this schema exactly.", stringifyJson(outputSchema)].join(
-    "\n",
-  )
 }
 
 export function parseJsonOutput(text: string | undefined, source: string): unknown {

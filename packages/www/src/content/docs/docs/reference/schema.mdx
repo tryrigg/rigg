@@ -32,14 +32,13 @@ sidebar:
 
 ## type: codex (action: run)
 
-| Field                | Type       | Required |
-| -------------------- | ---------- | -------- |
-| `with.action`        | `run`      | Yes      |
-| `with.prompt`        | template   | Yes      |
-| `with.model`         | string     | No       |
-| `with.output.schema` | JSONSchema | No       |
+| Field         | Type     | Required |
+| ------------- | -------- | -------- |
+| `with.action` | `run`    | Yes      |
+| `with.prompt` | template | Yes      |
+| `with.model`  | string   | No       |
 
-`with.output.schema` must use `type: object` at the root.
+`codex run` returns plain text.
 
 ## type: codex (action: review)
 

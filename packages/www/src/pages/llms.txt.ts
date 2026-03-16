@@ -35,7 +35,7 @@ Supported agents: Codex (OpenAI), Claude Code (Anthropic). Coming soon: opencode
 
 Key features:
 - YAML-based pipeline definitions with sequential steps, parallel branches, and loops with conditions
-- Structured output schemas for agent steps
+- Plain-text Codex run steps and built-in structured Codex review results
 - Conditional execution with expression evaluation
 - File I/O steps for saving results
 - Git-versioned workflows shared across the team

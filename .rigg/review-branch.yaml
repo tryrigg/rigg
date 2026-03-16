@@ -7,7 +7,7 @@ steps:
   - id: remediation
     type: loop
     max: 5
-    until: ${{ len(steps.review.result.findings) == 0 || steps.judge.result.accepted_count == 0 }}
+    until: ${{ len(steps.review.result.findings) == 0 }}
     steps:
       - id: review
         type: codex
@@ -19,36 +19,15 @@ steps:
               type: base
               branch: ${{ inputs.base_branch }}
 
-      - id: judge
+      - id: fix
+        if: ${{ len(steps.review.result.findings) > 0 }}
         type: codex
         with:
           action: run
           model: gpt-5.4
           prompt: |
-            Read the review below.
+            Address the accepted findings from this review.
+            Make the smallest correct code changes needed to resolve them.
 
             Review:
             ${{ toJSON(steps.review.result) }}
-
-            Accept only findings that are valid and actionable.
-          output:
-            schema:
-              type: object
-              required: [accepted_count, fix_brief]
-              additionalProperties: false
-              properties:
-                accepted_count:
-                  type: integer
-                fix_brief:
-                  type: string
-
-      - id: fix
-        if: ${{ steps.judge.result.accepted_count > 0 }}
-        type: codex
-        with:
-          action: run
-          model: gpt-5.4
-          prompt: ${{ steps.judge.result.fix_brief }}
-    exports:
-      accepted_count: ${{ steps.judge.result.accepted_count }}
-      fix_brief: ${{ steps.judge.result.fix_brief }}

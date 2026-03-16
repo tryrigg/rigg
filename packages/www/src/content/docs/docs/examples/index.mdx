@@ -7,7 +7,7 @@ sidebar:
 
 ## Review & auto-fix loop
 
-Reviews uncommitted changes, filters findings, auto-fixes in a loop.
+Reviews uncommitted changes and auto-fixes in a loop.
 
 ```yaml
 id: review-uncommitted
@@ -15,7 +15,7 @@ steps:
   - id: remediation
     type: loop
     max: 5
-    until: ${{ len(steps.review.result.findings) == 0 || steps.judge.result.accepted_count == 0 }}
+    until: ${{ len(steps.review.result.findings) == 0 }}
     steps:
       - id: review
         type: codex
@@ -25,35 +25,20 @@ steps:
             target:
               type: uncommitted
 
-      - id: judge
+      - id: fix
+        if: ${{ len(steps.review.result.findings) > 0 }}
         type: codex
         with:
           action: run
           prompt: |
-            Accept only valid, actionable findings:
+            Address the accepted findings from this review.
+            Review:
             ${{ toJSON(steps.review.result) }}
-          output:
-            schema:
-              type: object
-              required: [accepted_count, fix_brief]
-              additionalProperties: false
-              properties:
-                accepted_count:
-                  type: integer
-                fix_brief:
-                  type: string
-
-      - id: fix
-        if: ${{ steps.judge.result.accepted_count > 0 }}
-        type: codex
-        with:
-          action: run
-          prompt: ${{ steps.judge.result.fix_brief }}
 ```
 
 ## Plan, review, and refine
 
-Drafts a plan, reviews for gaps, conditionally refines, then saves.
+Drafts a plan, critiques it, refines it, then saves.
 
 ```yaml
 id: plan
@@ -70,14 +55,6 @@ steps:
       prompt: |
         Draft an implementation plan:
         ${{ inputs.requirements }}
-      output:
-        schema:
-          type: object
-          required: [markdown]
-          additionalProperties: false
-          properties:
-            markdown:
-              type: string
 
   - id: critique
     type: codex
@@ -85,60 +62,24 @@ steps:
       action: run
       prompt: |
         Review for gaps:
-        ${{ steps.draft.result.markdown }}
-      output:
-        schema:
-          type: object
-          required: [has_findings, findings]
-          additionalProperties: false
-          properties:
-            has_findings:
-              type: boolean
-            findings:
-              type: array
-              items:
-                type: object
-                required: [description, suggestion]
-                additionalProperties: false
-                properties:
-                  description:
-                    type: string
-                  suggestion:
-                    type: string
+        ${{ steps.draft.result }}
 
-  - id: finalize
-    type: branch
-    cases:
-      - if: ${{ steps.critique.result.has_findings }}
-        steps:
-          - id: improve
-            type: codex
-            with:
-              action: run
-              prompt: |
-                Apply feedback:
-                Original: ${{ steps.draft.result.markdown }}
-                Findings: ${{ toJSON(steps.critique.result.findings) }}
-              output:
-                schema:
-                  type: object
-                  required: [markdown]
-                  additionalProperties: false
-                  properties:
-                    markdown:
-                      type: string
-        exports:
-          markdown: ${{ steps.improve.result.markdown }}
-      - else:
-        steps: []
-        exports:
-          markdown: ${{ steps.draft.result.markdown }}
+  - id: refine
+    type: codex
+    with:
+      action: run
+      prompt: |
+        Improve this plan using the critique.
+        Draft:
+        ${{ steps.draft.result }}
+        Critique:
+        ${{ steps.critique.result }}
 
   - id: save
     type: write_file
     with:
       path: ${{ inputs.output_path }}
-      content: ${{ steps.finalize.result.markdown }}
+      content: ${{ steps.refine.result }}
 ```
 
 ## Parallel checks
@@ -177,14 +118,6 @@ steps:
         Summarize:
         Unit: ${{ steps.all.result.unit }}
         Lint: ${{ steps.all.result.lint }}
-      output:
-        schema:
-          type: object
-          required: [summary]
-          additionalProperties: false
-          properties:
-            summary:
-              type: string
 ```
 
 ## Commit review
@@ -207,21 +140,12 @@ steps:
 
 ## Patterns
 
-### Strict structured output
+### Review-driven loop
 
-Always use `additionalProperties: false` + `required`:
+Use review findings as the loop condition:
 
 ```yaml
-output:
-  schema:
-    type: object
-    required: [status, count]
-    additionalProperties: false
-    properties:
-      status:
-        type: string
-      count:
-        type: integer
+until: ${{ len(steps.review.result.findings) == 0 }}
 ```
 
 ### Branch passthrough

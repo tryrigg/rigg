@@ -10,34 +10,26 @@ const usecases = [
 <span class="hl-key">steps</span>:
   - <span class="hl-key">id</span>: loop
     <span class="hl-key">type</span>: <span class="hl-type">loop</span>
-    <span class="hl-key">until</span>: <span class="hl-str">\${{ steps.judge.result.needs_fix == false }}</span>
+    <span class="hl-key">until</span>: <span class="hl-str">\${{ len(steps.review.result.findings) == 0 }}</span>
     <span class="hl-key">max</span>: 5
     <span class="hl-key">steps</span>:
       - <span class="hl-key">id</span>: review
         <span class="hl-key">type</span>: <span class="hl-type">codex</span>
         <span class="hl-key">with</span>:
           <span class="hl-key">action</span>: review
-          <span class="hl-key">prompt</span>: <span class="hl-str">Review uncommitted changes for bugs.</span>
-          <span class="hl-key">output_schema</span>:
-            <span class="hl-key">properties</span>:
-              <span class="hl-key">findings</span>: { <span class="hl-key">type</span>: <span class="hl-type">array</span> }
-      - <span class="hl-key">id</span>: judge
-        <span class="hl-key">type</span>: <span class="hl-type">claude</span>
-        <span class="hl-key">with</span>:
-          <span class="hl-key">prompt</span>: <span class="hl-str">Evaluate findings and decide which need fixing.</span>
-          <span class="hl-key">output_schema</span>:
-            <span class="hl-key">properties</span>:
-              <span class="hl-key">needs_fix</span>: { <span class="hl-key">type</span>: <span class="hl-type">boolean</span> }
+          <span class="hl-key">review</span>:
+            <span class="hl-key">target</span>:
+              <span class="hl-key">type</span>: <span class="hl-str">uncommitted</span>
       - <span class="hl-key">id</span>: fix
-        <span class="hl-key">if</span>: <span class="hl-str">\${{ steps.judge.result.needs_fix }}</span>
+        <span class="hl-key">if</span>: <span class="hl-str">\${{ len(steps.review.result.findings) > 0 }}</span>
         <span class="hl-key">type</span>: <span class="hl-type">codex</span>
         <span class="hl-key">with</span>:
-          <span class="hl-key">action</span>: exec
-          <span class="hl-key">prompt</span>: <span class="hl-str">\${{ steps.judge.result.valid_findings }}</span>`,
+          <span class="hl-key">action</span>: run
+          <span class="hl-key">prompt</span>: <span class="hl-str">Address: \${{ toJSON(steps.review.result) }}</span>`,
     steps: [
-      { num: 1, title: 'Codex reviews your changes', desc: 'Scans uncommitted changes and returns structured findings — bugs, style issues, potential regressions.' },
-      { num: 2, title: 'Claude judges the findings', desc: 'Evaluates each finding, filters out noise, and decides whether fixes are actually needed.' },
-      { num: 3, title: 'Codex auto-fixes, then loops', desc: 'Valid issues get fixed automatically. The loop repeats until clean — up to 5 iterations.' },
+      { num: 1, title: 'Codex reviews your changes', desc: 'Scans uncommitted changes and returns built-in review findings.' },
+      { num: 2, title: 'Codex applies fixes', desc: 'The fix step receives the review object and edits the code directly.' },
+      { num: 3, title: 'The loop stops when findings hit zero', desc: 'No extra parser or schema layer is needed. The review result drives the condition.' },
     ],
   },
   {
@@ -51,34 +43,27 @@ const usecases = [
   - <span class="hl-key">id</span>: draft
     <span class="hl-key">type</span>: <span class="hl-type">codex</span>
     <span class="hl-key">with</span>:
-      <span class="hl-key">action</span>: exec
+      <span class="hl-key">action</span>: run
       <span class="hl-key">prompt</span>: <span class="hl-str">Draft an implementation plan for: \${{ inputs.requirements }}</span>
-      <span class="hl-key">output_schema</span>:
-        <span class="hl-key">properties</span>:
-          <span class="hl-key">plan</span>: { <span class="hl-key">type</span>: <span class="hl-type">string</span> }
   - <span class="hl-key">id</span>: critique
-    <span class="hl-key">type</span>: <span class="hl-type">claude</span>
-    <span class="hl-key">with</span>:
-      <span class="hl-key">prompt</span>: <span class="hl-str">Review this plan for gaps: \${{ steps.draft.result.plan }}</span>
-      <span class="hl-key">output_schema</span>:
-        <span class="hl-key">properties</span>:
-          <span class="hl-key">has_issues</span>: { <span class="hl-key">type</span>: <span class="hl-type">boolean</span> }
-          <span class="hl-key">feedback</span>: { <span class="hl-key">type</span>: <span class="hl-type">string</span> }
-  - <span class="hl-key">id</span>: refine
-    <span class="hl-key">if</span>: <span class="hl-str">\${{ steps.critique.result.has_issues }}</span>
     <span class="hl-key">type</span>: <span class="hl-type">codex</span>
     <span class="hl-key">with</span>:
-      <span class="hl-key">action</span>: exec
-      <span class="hl-key">prompt</span>: <span class="hl-str">Improve the plan based on: \${{ steps.critique.result.feedback }}</span>
+      <span class="hl-key">action</span>: run
+      <span class="hl-key">prompt</span>: <span class="hl-str">Review this plan for gaps: \${{ steps.draft.result }}</span>
+  - <span class="hl-key">id</span>: refine
+    <span class="hl-key">type</span>: <span class="hl-type">codex</span>
+    <span class="hl-key">with</span>:
+      <span class="hl-key">action</span>: run
+      <span class="hl-key">prompt</span>: <span class="hl-str">Improve the draft using this critique: \${{ steps.critique.result }}</span>
   - <span class="hl-key">id</span>: save
     <span class="hl-key">type</span>: <span class="hl-type">write_file</span>
     <span class="hl-key">with</span>:
       <span class="hl-key">path</span>: <span class="hl-str">PLAN.md</span>
-      <span class="hl-key">content</span>: <span class="hl-str">\${{ steps.refine.result.plan || steps.draft.result.plan }}</span>`,
+      <span class="hl-key">content</span>: <span class="hl-str">\${{ steps.refine.result }}</span>`,
     steps: [
-      { num: 1, title: 'Codex drafts the plan', desc: 'Analyzes requirements and produces a structured implementation plan with file paths and steps.' },
-      { num: 2, title: 'Claude reviews for gaps', desc: 'A second AI reviews the plan for ambiguities, missing edge cases, and architectural issues.' },
-      { num: 3, title: 'Refine and save', desc: 'Refinement only runs when issues are found. The final plan is saved to PLAN.md.' },
+      { num: 1, title: 'Codex drafts the plan', desc: 'The first run step produces plain text that can be reused directly.' },
+      { num: 2, title: 'A second pass critiques it', desc: 'Critique is also just text, so the workflow stays simple.' },
+      { num: 3, title: 'Refine and save', desc: 'The final plan is a plain-text result written straight to PLAN.md.' },
     ],
   },
   {

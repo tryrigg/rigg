@@ -38,7 +38,7 @@ Repeats until a condition is met or `max` iterations is reached.
 - id: fix_loop
   type: loop
   max: 5 # required
-  until: ${{ steps.judge.result.done }} # required
+  until: ${{ len(steps.review.result.findings) == 0 }} # required
   steps:
     - id: review
       type: codex
@@ -47,21 +47,16 @@ Repeats until a condition is met or `max` iterations is reached.
         review:
           target:
             type: uncommitted
-    - id: judge
+    - id: fix
+      if: ${{ len(steps.review.result.findings) > 0 }}
       type: codex
       with:
         action: run
-        prompt: Evaluate findings.
-        output:
-          schema:
-            type: object
-            required: [done]
-            additionalProperties: false
-            properties:
-              done:
-                type: boolean
+        prompt: |
+          Address these review findings:
+          ${{ toJSON(steps.review.result) }}
   exports:
-    done: ${{ steps.judge.result.done }}
+    clean: ${{ len(steps.review.result.findings) == 0 }}
 ```
 
 ### Loop context variables
@@ -82,7 +77,7 @@ Conditional execution. First matching `if` wins. `else` is the fallback.
 - id: decide
   type: branch
   cases:
-    - if: ${{ steps.check.result.has_issues }}
+    - if: ${{ steps.check.result == 'needs_fix' }}
       steps:
         - id: fix
           type: codex

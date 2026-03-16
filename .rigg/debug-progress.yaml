@@ -19,14 +19,6 @@ steps:
         - Read only a few files.
         - Mention at least one file path you inspected.
         - Keep the answer concise.
-      output:
-        schema:
-          type: object
-          required: [markdown]
-          additionalProperties: false
-          properties:
-            markdown:
-              type: string
 
   - id: midrun_wait
     type: shell
@@ -48,15 +40,7 @@ steps:
         - Do not ask follow-up questions.
 
         Note:
-        ${{ steps.codex_probe.result.markdown }}
-      output:
-        schema:
-          type: object
-          required: [markdown]
-          additionalProperties: false
-          properties:
-            markdown:
-              type: string
+        ${{ steps.codex_probe.result }}
 
   - id: write
     type: write_file
@@ -66,7 +50,7 @@ steps:
         # Debug Progress Run
 
         ## Probe
-        ${{ steps.codex_probe.result.markdown }}
+        ${{ steps.codex_probe.result }}
 
         ## Summary
-        ${{ steps.summarize.result.markdown }}
+        ${{ steps.summarize.result }}

@@ -17,14 +17,6 @@ steps:
 
         Requirements:
         ${{ inputs.requirements }}
-      output:
-        schema:
-          type: object
-          required: [markdown]
-          additionalProperties: false
-          properties:
-            markdown:
-              type: string
 
   - id: critique
     type: codex
@@ -36,67 +28,25 @@ steps:
         Identify ambiguities, flawed assumptions, and missing edge cases.
 
         Draft:
-        ${{ steps.draft.result.markdown }}
-      output:
-        schema:
-          type: object
-          required: [has_findings, findings]
-          additionalProperties: false
-          properties:
-            has_findings:
-              type: boolean
-            findings:
-              type: array
-              items:
-                type: object
-                required: [description, suggestion]
-                additionalProperties: false
-                properties:
-                  description:
-                    type: string
-                  suggestion:
-                    type: string
+        ${{ steps.draft.result }}
 
-  - id: finalize
-    type: branch
-    cases:
-      - if: ${{ steps.critique.result.has_findings }}
-        steps:
-          - id: improve
-            type: codex
-            with:
-              action: run
-              model: gpt-5.4
-              prompt: |
-                Improve the plan using the findings below.
+  - id: refine
+    type: codex
+    with:
+      action: run
+      model: gpt-5.4
+      prompt: |
+        Improve the plan below using the critique.
+        Preserve concrete file paths, milestones, and validation steps.
 
-                Original draft:
-                ${{ steps.draft.result.markdown }}
+        Draft:
+        ${{ steps.draft.result }}
 
-                Findings:
-                ${{ toJSON(steps.critique.result.findings) }}
-              output:
-                schema:
-                  type: object
-                  required: [markdown]
-                  additionalProperties: false
-                  properties:
-                    markdown:
-                      type: string
-        exports:
-          markdown: ${{ steps.improve.result.markdown }}
-      - else:
-        steps:
-          - id: noop
-            type: shell
-            with:
-              command: "true"
-              result: none
-        exports:
-          markdown: ${{ steps.draft.result.markdown }}
+        Critique:
+        ${{ steps.critique.result }}
 
   - id: write
     type: write_file
     with:
       path: ${{ inputs.output_path }}
-      content: ${{ steps.finalize.result.markdown }}
+      content: ${{ steps.refine.result }}

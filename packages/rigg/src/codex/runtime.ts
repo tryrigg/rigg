@@ -1,8 +1,4 @@
-import type { OutputDefinition } from "../compile/schema"
-import { validateOutputValue } from "../compile/schema"
-import { createStepFailedError } from "../run/error"
 import { isAbortError, normalizeError } from "../util/error"
-import { stringifyJson } from "../util/json"
 import { RIGG_VERSION } from "../version"
 import type { CodexProviderEvent } from "./event"
 import {
@@ -19,7 +15,6 @@ import {
 } from "./process"
 import { createCodexRpcClient } from "./rpc"
 import {
-  buildRunPrompt,
   ensureAuthenticatedAccount,
   mapReviewTarget,
   parseApprovalRequest,
@@ -27,7 +22,6 @@ import {
   parseElicitationRequest,
   parseErrorNotification,
   parseItemNotification,
-  parseJsonOutput,
   parseMessageDeltaNotification,
   parseReviewItem,
   parseReviewText,
@@ -77,7 +71,6 @@ type TurnStartParams = {
     type: "text"
   }>
   model: string | null
-  outputSchema: null
   threadId: string
 }
 
@@ -158,7 +151,6 @@ export type CodexRuntimeSession = {
     interactionHandler?: CodexInteractionHandler | undefined
     model?: string | undefined
     onEvent?: ((event: CodexProviderEvent) => Promise<void> | void) | undefined
-    outputSchema?: OutputDefinition | undefined
     prompt: string
     signal?: AbortSignal | undefined
   }) => Promise<CodexStepResult>
@@ -488,7 +480,6 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     interactionHandler?: CodexInteractionHandler | undefined
     model?: string | undefined
     onEvent?: ((event: CodexProviderEvent) => Promise<void> | void) | undefined
-    outputSchema?: OutputDefinition | undefined
     prompt: string
     signal?: AbortSignal | undefined
   }): Promise<CodexStepResult> {
@@ -510,11 +501,9 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
       throw normalizeError(error)
     }
 
-    const prompt = buildRunPrompt(options_.prompt, options_.outputSchema)
     const params: TurnStartParams = {
-      input: [{ text: prompt, text_elements: [], type: "text" }],
+      input: [{ text: options_.prompt, text_elements: [], type: "text" }],
       model: options_.model ?? null,
-      outputSchema: null,
       threadId,
     }
     let turn: TurnResult
@@ -539,29 +528,12 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
       return finalizeFailedTurn(turn)
     }
 
-    if (options_.outputSchema === undefined) {
-      return {
-        exitCode: 0,
-        providerEvents: [...turn.providerEvents],
-        result: turn.text,
-        stderr: turn.diagnostics.join("\n"),
-        stdout: turn.text,
-        termination: "completed",
-      }
-    }
-
-    const parsed = parseJsonOutput(turn.text, "Codex")
-    const validationErrors = validateOutputValue(options_.outputSchema, parsed)
-    if (validationErrors.length > 0) {
-      throw createStepFailedError(new Error(validationErrors.join("; ")))
-    }
-
     return {
       exitCode: 0,
       providerEvents: [...turn.providerEvents],
-      result: parsed,
+      result: turn.text,
       stderr: turn.diagnostics.join("\n"),
-      stdout: typeof parsed === "string" ? parsed : stringifyJson(parsed),
+      stdout: turn.text,
       termination: "completed",
     }
   }

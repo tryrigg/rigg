@@ -156,7 +156,6 @@ async function runCodexRunStep(
       interactionHandler: options.interactionHandler,
       model: runConfig.model,
       onEvent: options.onProviderEvent,
-      outputSchema: runConfig.output?.schema,
       prompt: renderString(runConfig.prompt, context),
       signal: options.signal,
     })

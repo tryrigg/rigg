@@ -18,89 +18,12 @@ steps:
 
         Requirements:
         \${{ inputs.requirements }}
-      output:
-        schema:
-          type: object
-          required: [markdown]
-          additionalProperties: false
-          properties:
-            markdown:
-              type: string
-
-  - id: critique
-    type: codex
-    with:
-      action: run
-      model: gpt-5.4
-      prompt: |
-        Review this implementation plan critically.
-        Identify ambiguities, flawed assumptions, and missing edge cases.
-
-        Draft:
-        \${{ steps.draft.result.markdown }}
-      output:
-        schema:
-          type: object
-          required: [has_findings, findings]
-          additionalProperties: false
-          properties:
-            has_findings:
-              type: boolean
-            findings:
-              type: array
-              items:
-                type: object
-                required: [description, suggestion]
-                additionalProperties: false
-                properties:
-                  description:
-                    type: string
-                  suggestion:
-                    type: string
-
-  - id: finalize
-    type: branch
-    cases:
-      - if: \${{ steps.critique.result.has_findings }}
-        steps:
-          - id: improve
-            type: codex
-            with:
-              action: run
-              model: gpt-5.4
-              prompt: |
-                Improve the plan using the accepted findings below.
-
-                Original draft:
-                \${{ steps.draft.result.markdown }}
-
-                Findings:
-                \${{ toJSON(steps.critique.result.findings) }}
-              output:
-                schema:
-                  type: object
-                  required: [markdown]
-                  additionalProperties: false
-                  properties:
-                    markdown:
-                      type: string
-        exports:
-          markdown: \${{ steps.improve.result.markdown }}
-      - else:
-        steps:
-          - id: noop
-            type: shell
-            with:
-              command: "true"
-              result: none
-        exports:
-          markdown: \${{ steps.draft.result.markdown }}
 
   - id: write
     type: write_file
     with:
       path: \${{ inputs.output_path }}
-      content: \${{ steps.finalize.result.markdown }}
+      content: \${{ steps.draft.result }}
 `.trimStart()
 
 export const reviewUncommittedTemplate = `
@@ -109,7 +32,7 @@ steps:
   - id: remediation
     type: loop
     max: 5
-    until: \${{ len(steps.review.result.findings) == 0 || steps.judge.result.accepted_count == 0 }}
+    until: \${{ len(steps.review.result.findings) == 0 }}
     steps:
       - id: review
         type: codex
@@ -120,39 +43,19 @@ steps:
             target:
               type: uncommitted
 
-      - id: judge
+      - id: fix
+        if: \${{ len(steps.review.result.findings) > 0 }}
         type: codex
         with:
           action: run
           model: gpt-5.4
           prompt: |
-            Read the review below.
+            Address the findings from this review.
 
             Review:
             \${{ toJSON(steps.review.result) }}
-
-            Accept only findings that are valid and actionable.
-          output:
-            schema:
-              type: object
-              required: [accepted_count, fix_brief]
-              additionalProperties: false
-              properties:
-                accepted_count:
-                  type: integer
-                fix_brief:
-                  type: string
-
-      - id: fix
-        if: \${{ steps.judge.result.accepted_count > 0 }}
-        type: codex
-        with:
-          action: run
-          model: gpt-5.4
-          prompt: \${{ steps.judge.result.fix_brief }}
     exports:
-      accepted_count: \${{ steps.judge.result.accepted_count }}
-      fix_brief: \${{ steps.judge.result.fix_brief }}
+      finding_count: \${{ len(steps.review.result.findings) }}
 `.trimStart()
 
 export const reviewBranchTemplate = `
@@ -165,7 +68,7 @@ steps:
   - id: remediation
     type: loop
     max: 5
-    until: \${{ len(steps.review.result.findings) == 0 || steps.judge.result.accepted_count == 0 }}
+    until: \${{ len(steps.review.result.findings) == 0 }}
     steps:
       - id: review
         type: codex
@@ -177,39 +80,19 @@ steps:
               type: base
               branch: \${{ inputs.base_branch }}
 
-      - id: judge
+      - id: fix
+        if: \${{ len(steps.review.result.findings) > 0 }}
         type: codex
         with:
           action: run
           model: gpt-5.4
           prompt: |
-            Read the review below.
+            Address the findings from this review.
 
             Review:
             \${{ toJSON(steps.review.result) }}
-
-            Accept only findings that are valid and actionable.
-          output:
-            schema:
-              type: object
-              required: [accepted_count, fix_brief]
-              additionalProperties: false
-              properties:
-                accepted_count:
-                  type: integer
-                fix_brief:
-                  type: string
-
-      - id: fix
-        if: \${{ steps.judge.result.accepted_count > 0 }}
-        type: codex
-        with:
-          action: run
-          model: gpt-5.4
-          prompt: \${{ steps.judge.result.fix_brief }}
     exports:
-      accepted_count: \${{ steps.judge.result.accepted_count }}
-      fix_brief: \${{ steps.judge.result.fix_brief }}
+      finding_count: \${{ len(steps.review.result.findings) }}
 `.trimStart()
 
 export const reviewCommitTemplate = `
@@ -222,7 +105,7 @@ steps:
   - id: remediation
     type: loop
     max: 5
-    until: \${{ len(steps.review.result.findings) == 0 || steps.judge.result.accepted_count == 0 }}
+    until: \${{ len(steps.review.result.findings) == 0 }}
     steps:
       - id: review
         type: codex
@@ -234,37 +117,17 @@ steps:
               type: commit
               sha: \${{ inputs.commit_sha }}
 
-      - id: judge
+      - id: fix
+        if: \${{ len(steps.review.result.findings) > 0 }}
         type: codex
         with:
           action: run
           model: gpt-5.4
           prompt: |
-            Read the review below.
+            Address the findings from this review.
 
             Review:
             \${{ toJSON(steps.review.result) }}
-
-            Accept only findings that are valid and actionable.
-          output:
-            schema:
-              type: object
-              required: [accepted_count, fix_brief]
-              additionalProperties: false
-              properties:
-                accepted_count:
-                  type: integer
-                fix_brief:
-                  type: string
-
-      - id: fix
-        if: \${{ steps.judge.result.accepted_count > 0 }}
-        type: codex
-        with:
-          action: run
-          model: gpt-5.4
-          prompt: \${{ steps.judge.result.fix_brief }}
     exports:
-      accepted_count: \${{ steps.judge.result.accepted_count }}
-      fix_brief: \${{ steps.judge.result.fix_brief }}
+      finding_count: \${{ len(steps.review.result.findings) }}
 `.trimStart()

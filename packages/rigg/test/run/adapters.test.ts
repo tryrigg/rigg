@@ -196,7 +196,7 @@ describe("run/adapters", () => {
                 threadId: "__THREAD_ID__",
                 turnId: "__TURN_ID__",
                 itemId: "msg_1",
-                delta: '{"summary":"done"}',
+                delta: "done",
               },
             },
             {
@@ -208,7 +208,7 @@ describe("run/adapters", () => {
                 item: {
                   type: "agentMessage",
                   id: "msg_1",
-                  text: '{"summary":"done"}',
+                  text: "done",
                   phase: null,
                 },
               },
@@ -231,16 +231,6 @@ describe("run/adapters", () => {
           type: "codex",
           with: {
             action: "run",
-            output: {
-              schema: {
-                additionalProperties: false,
-                properties: {
-                  summary: { type: "string" },
-                },
-                required: ["summary"],
-                type: "object",
-              },
-            },
             prompt: "Summarize the change.",
           },
         },
@@ -255,7 +245,7 @@ describe("run/adapters", () => {
       )
 
       expect(result.exitCode).toBe(0)
-      expect(result.result).toEqual({ summary: "done" })
+      expect(result.result).toBe("done")
       expect(events).toEqual([
         { kind: "thread_started", provider: "codex", threadId: "thread_1" },
         { kind: "turn_started", provider: "codex", threadId: "thread_1", turnId: "turn_1" },
@@ -272,7 +262,7 @@ describe("run/adapters", () => {
           itemId: "msg_1",
           kind: "message_delta",
           provider: "codex",
-          text: '{"summary":"done"}',
+          text: "done",
           threadId: "thread_1",
           turnId: "turn_1",
         },
@@ -280,7 +270,7 @@ describe("run/adapters", () => {
           itemId: "msg_1",
           kind: "message_completed",
           provider: "codex",
-          text: '{"summary":"done"}',
+          text: "done",
           threadId: "thread_1",
           turnId: "turn_1",
         },
@@ -291,7 +281,7 @@ describe("run/adapters", () => {
     }
   })
 
-  test("preserves streamed codex output when agent completion omits text", async () => {
+  test("preserves streamed codex text when agent completion omits text", async () => {
     const root = await mkdtemp(join(tmpdir(), "rigg-codex-run-streamed-app-server-"))
     try {
       const binDir = await installFakeCodex(root, {
@@ -304,7 +294,7 @@ describe("run/adapters", () => {
                 threadId: "__THREAD_ID__",
                 turnId: "__TURN_ID__",
                 itemId: "msg_1",
-                delta: '{"summary":"',
+                delta: "do",
               },
             },
             {
@@ -314,7 +304,7 @@ describe("run/adapters", () => {
                 threadId: "__THREAD_ID__",
                 turnId: "__TURN_ID__",
                 itemId: "msg_1",
-                delta: 'done"}',
+                delta: "ne",
               },
             },
             {
@@ -348,16 +338,6 @@ describe("run/adapters", () => {
           type: "codex",
           with: {
             action: "run",
-            output: {
-              schema: {
-                additionalProperties: false,
-                properties: {
-                  summary: { type: "string" },
-                },
-                required: ["summary"],
-                type: "object",
-              },
-            },
             prompt: "Summarize the change.",
           },
         },
@@ -372,8 +352,8 @@ describe("run/adapters", () => {
       )
 
       expect(result.exitCode).toBe(0)
-      expect(result.result).toEqual({ summary: "done" })
-      expect(result.stdout).toBe(JSON.stringify({ summary: "done" }, null, 2))
+      expect(result.result).toBe("done")
+      expect(result.stdout).toBe("done")
       expect(events).toEqual([
         { kind: "thread_started", provider: "codex", threadId: "thread_1" },
         { kind: "turn_started", provider: "codex", threadId: "thread_1", turnId: "turn_1" },
@@ -381,7 +361,7 @@ describe("run/adapters", () => {
           itemId: "msg_1",
           kind: "message_delta",
           provider: "codex",
-          text: '{"summary":"',
+          text: "do",
           threadId: "thread_1",
           turnId: "turn_1",
         },
@@ -389,7 +369,7 @@ describe("run/adapters", () => {
           itemId: "msg_1",
           kind: "message_delta",
           provider: "codex",
-          text: 'done"}',
+          text: "ne",
           threadId: "thread_1",
           turnId: "turn_1",
         },
@@ -397,7 +377,7 @@ describe("run/adapters", () => {
           itemId: "msg_1",
           kind: "message_completed",
           provider: "codex",
-          text: '{"summary":"done"}',
+          text: "done",
           threadId: "thread_1",
           turnId: "turn_1",
         },

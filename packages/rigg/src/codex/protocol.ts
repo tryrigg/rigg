@@ -8,8 +8,6 @@ import type { CodexProviderEvent } from "./event"
 import { inferApprovalDecisionIntent, type CodexInteractionRequest } from "./interaction"
 import type { CodexReviewResult } from "./review"
 
-const REVIEW_BULLET_PATTERN = /^- (?:\[[x ]\] )?(.+?) — (.+:\d+-\d+)$/
-
 const JsonObjectSchema = z.record(z.string(), z.unknown())
 const NullableStringSchema = z.string().nullable().optional()
 
@@ -508,21 +506,25 @@ function parseReviewFindings(block: string): CodexReviewResult["findings"] {
     | undefined
 
   for (const line of block.split(/\r?\n/)) {
-    const bullet = REVIEW_BULLET_PATTERN.exec(line)
-    if (bullet?.[1] !== undefined && bullet[2] !== undefined) {
+    if (isReviewBulletLine(line)) {
+      const header = parseReviewFindingHeader(line)
+      if (header === null) {
+        throw createStepFailedError(new Error(`Codex review returned an unsupported finding header: ${line.trim()}`))
+      }
+
       if (current !== undefined) {
         findings.push(finalizeReviewFinding(current))
       }
       current = {
         bodyLines: [],
-        location: bullet[2],
-        title: bullet[1],
+        location: header.location,
+        title: header.title,
       }
       continue
     }
 
-    if (current !== undefined && line.startsWith("  ")) {
-      current.bodyLines.push(line.slice(2))
+    if (current !== undefined) {
+      current.bodyLines.push(line.startsWith("  ") ? line.slice(2) : line)
     }
   }
 
@@ -538,21 +540,103 @@ function finalizeReviewFinding(input: {
   location: string
   title: string
 }): CodexReviewResult["findings"][number] {
-  const locationMatch = /^(.*):(\d+)-(\d+)$/.exec(input.location.trim())
+  const location = parseReviewFindingLocation(input.location)
+  if (location === null) {
+    throw createStepFailedError(new Error(`Codex review returned an unsupported code location: ${input.location}`))
+  }
 
   return {
     body: input.bodyLines.join("\n"),
     code_location: {
-      absolute_file_path: locationMatch?.[1] ?? input.location,
+      absolute_file_path: location.absoluteFilePath,
       line_range: {
-        end: Number.parseInt(locationMatch?.[3] ?? "0", 10),
-        start: Number.parseInt(locationMatch?.[2] ?? "0", 10),
+        end: location.end,
+        start: location.start,
       },
     },
     confidence_score: 0,
     priority: null,
     title: input.title.trim(),
   }
+}
+
+function isReviewBulletLine(line: string): boolean {
+  return line.startsWith("- ") || line.startsWith("- [x] ") || line.startsWith("- [ ] ")
+}
+
+function parseReviewFindingHeader(line: string): { location: string; title: string } | null {
+  const bullet = /^- (?:\[[x ]\] )?(?<content>.+)$/.exec(line)
+  const content = bullet?.groups?.["content"]?.trim()
+  if (content === undefined || content.length === 0) {
+    return null
+  }
+
+  const separatorIndex = content.lastIndexOf(" — ")
+  if (separatorIndex <= 0) {
+    return null
+  }
+
+  const title = content.slice(0, separatorIndex).trim()
+  const location = content.slice(separatorIndex + " — ".length).trim()
+  if (title.length === 0 || location.length === 0) {
+    return null
+  }
+
+  return { location, title }
+}
+
+function parseReviewFindingLocation(location: string): { absoluteFilePath: string; end: number; start: number } | null {
+  const normalized = location.trim()
+
+  const columnRange = /^(.*):(\d+):(\d+)-(\d+):(\d+)$/.exec(normalized)
+  if (columnRange !== null) {
+    const absoluteFilePath = columnRange[1]
+    const start = columnRange[2]
+    const end = columnRange[4]
+    if (absoluteFilePath === undefined || start === undefined || end === undefined) {
+      return null
+    }
+
+    return {
+      absoluteFilePath,
+      end: Number.parseInt(end, 10),
+      start: Number.parseInt(start, 10),
+    }
+  }
+
+  const lineRange = /^(.*):(\d+)-(\d+)$/.exec(normalized)
+  if (lineRange !== null) {
+    const absoluteFilePath = lineRange[1]
+    const start = lineRange[2]
+    const end = lineRange[3]
+    if (absoluteFilePath === undefined || start === undefined || end === undefined) {
+      return null
+    }
+
+    return {
+      absoluteFilePath,
+      end: Number.parseInt(end, 10),
+      start: Number.parseInt(start, 10),
+    }
+  }
+
+  const singleLine = /^(.*):(\d+)$/.exec(normalized)
+  if (singleLine !== null) {
+    const absoluteFilePath = singleLine[1]
+    const lineText = singleLine[2]
+    if (absoluteFilePath === undefined || lineText === undefined) {
+      return null
+    }
+
+    const line = Number.parseInt(lineText, 10)
+    return {
+      absoluteFilePath,
+      end: line,
+      start: line,
+    }
+  }
+
+  return null
 }
 
 function summarizePairs(value: Record<string, unknown>, keys: readonly string[]): string | undefined {

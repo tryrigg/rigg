@@ -104,10 +104,12 @@ type TurnExecution = {
   cleanup: () => void
   errorMessage: string | null
   interactionHandler?: CodexInteractionHandler | undefined
+  interrupting: boolean
   onEvent?: ((event: CodexProviderEvent) => Promise<void> | void) | undefined
   reject: (error: Error) => void
   resolve: (value: TurnResult) => void
   reviewText: string | null
+  settled: boolean
   threadId: string
   turnId: string
 }
@@ -116,7 +118,11 @@ type DeferredTurnMessage =
   | { kind: "notification"; method: string; params: unknown }
   | { id: string | number; kind: "request"; method: string; params: unknown }
 
-type ExecutionLookup = { execution: TurnExecution; kind: "found" } | { kind: "deferred" } | { kind: "missing" }
+type ExecutionLookup =
+  | { execution: TurnExecution; kind: "found" }
+  | { kind: "deferred" }
+  | { kind: "missing" }
+  | { kind: "stale" }
 
 type TurnResult = {
   diagnostics: string[]
@@ -159,12 +165,16 @@ export type CodexRuntimeSession = {
 }
 
 export async function createCodexRuntimeSession(options: CodexRuntimeOptions): Promise<CodexRuntimeSession> {
+  const INTERRUPT_REQUEST_TIMEOUT_MS = 1_000
+  const INTERRUPT_TIMEOUT_REASON = "rigg interrupt timeout"
+
   assertSupportedCodexVersion(options)
 
   const appServer = startCodexAppServer(options)
   const rpc = createCodexRpcClient(appServer)
   const deferredTurnMessages = new Map<string, DeferredTurnMessage[]>()
   const executions = new Map<string, TurnExecution>()
+  const staleTurnIds = new Set<string>()
   let closed = false
   let pendingTurnStarts = 0
 
@@ -226,25 +236,114 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
 
   function failAllTurns(error: Error): void {
     for (const execution of executions.values()) {
-      execution.cleanup()
-      execution.reject(error)
+      rejectExecution(execution, error)
     }
-    executions.clear()
   }
 
   function trackExecution(execution: TurnExecution): void {
     executions.set(execution.turnId, execution)
   }
 
-  function untrackExecution(turnId: string): TurnExecution | undefined {
-    const execution = executions.get(turnId)
-    if (execution === undefined) {
-      return undefined
+  function settleExecution(
+    execution: TurnExecution,
+    result: TurnResult,
+    options_: { tombstone?: boolean } = {},
+  ): boolean {
+    if (execution.settled) {
+      return false
     }
 
+    execution.settled = true
     execution.cleanup()
-    executions.delete(turnId)
-    return execution
+    executions.delete(execution.turnId)
+    if (options_.tombstone === true) {
+      staleTurnIds.add(execution.turnId)
+    }
+    execution.resolve(result)
+    return true
+  }
+
+  function rejectExecution(execution: TurnExecution, error: Error): boolean {
+    if (execution.settled) {
+      return false
+    }
+
+    execution.settled = true
+    execution.cleanup()
+    executions.delete(execution.turnId)
+    execution.reject(error)
+    return true
+  }
+
+  async function emitInterruptedTurnEvent(execution: TurnExecution): Promise<void> {
+    await captureEvent(
+      execution.capture,
+      {
+        kind: "turn_completed",
+        provider: "codex",
+        status: "interrupted",
+        threadId: execution.threadId,
+        turnId: execution.turnId,
+      },
+      execution.onEvent,
+    )
+  }
+
+  function buildTurnResult(execution: TurnExecution, status: string): TurnResult {
+    return {
+      diagnostics: execution.capture.diagnostics,
+      errorMessage: execution.errorMessage,
+      providerEvents: execution.capture.providerEvents,
+      reviewText: execution.reviewText,
+      status,
+      text: renderAssistantTranscript(execution.assistantTranscript),
+    }
+  }
+
+  async function completeInterruptedExecution(execution: TurnExecution): Promise<void> {
+    if (execution.settled) {
+      return
+    }
+
+    try {
+      await emitInterruptedTurnEvent(execution)
+    } catch (error) {
+      rejectExecution(execution, normalizeError(error))
+      return
+    }
+    settleExecution(execution, buildTurnResult(execution, "interrupted"), { tombstone: true })
+  }
+
+  async function interruptExecution(execution: TurnExecution): Promise<void> {
+    if (execution.settled || execution.interrupting) {
+      return
+    }
+
+    execution.interrupting = true
+    const timeoutController = new AbortController()
+    const timeout = setTimeout(() => {
+      timeoutController.abort(INTERRUPT_TIMEOUT_REASON)
+    }, INTERRUPT_REQUEST_TIMEOUT_MS)
+
+    try {
+      await rpc.request(
+        "turn/interrupt",
+        {
+          threadId: execution.threadId,
+          turnId: execution.turnId,
+        } satisfies TurnInterruptParams,
+        { signal: timeoutController.signal },
+      )
+    } catch (error) {
+      if (!timeoutController.signal.aborted || timeoutController.signal.reason !== INTERRUPT_TIMEOUT_REASON) {
+        rejectExecution(execution, normalizeError(error))
+        return
+      }
+    } finally {
+      clearTimeout(timeout)
+    }
+
+    await completeInterruptedExecution(execution)
   }
 
   void appServer.exited.then((exit) => {
@@ -341,19 +440,18 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
         cleanup: () => {},
         errorMessage: null,
         interactionHandler: input.interactionHandler,
+        interrupting: false,
         onEvent: input.onEvent,
         reject: turnPromise.reject,
         resolve: turnPromise.resolve,
         reviewText: null,
+        settled: false,
         threadId: input.threadId,
         turnId: activeTurnId,
       }
 
       const abortListener = () => {
-        void interruptTurn({ threadId: input.threadId, turnId: activeTurnId }).catch((error) => {
-          untrackExecution(activeTurnId)
-          turnPromise.reject(normalizeError(error))
-        })
+        void interruptExecution(execution)
       }
 
       execution.cleanup = () => {
@@ -532,14 +630,12 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
   }
 
   async function interruptTurn(input: { threadId: string; turnId: string }): Promise<void> {
-    if (!executions.has(input.turnId)) {
+    const execution = executions.get(input.turnId)
+    if (execution === undefined) {
       return
     }
-    const params: TurnInterruptParams = {
-      threadId: input.threadId,
-      turnId: input.turnId,
-    }
-    await rpc.request("turn/interrupt", params)
+
+    await interruptExecution(execution)
   }
 
   async function close(): Promise<void> {
@@ -548,6 +644,7 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     }
     closed = true
     deferredTurnMessages.clear()
+    staleTurnIds.clear()
     failAllTurns(new Error("codex runtime session closed"))
     await rpc.close()
   }
@@ -556,6 +653,9 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     const requestId = String(id)
     const executionLookup = lookupExecution({ id, kind: "request", method, params })
     if (executionLookup.kind === "deferred") {
+      return
+    }
+    if (executionLookup.kind === "stale") {
       return
     }
     if (executionLookup.kind === "missing") {
@@ -623,6 +723,10 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     }
 
     if (method === "error") {
+      if (isStaleTurnMessage({ kind: "notification", method, params })) {
+        return
+      }
+
       const notification = parseErrorNotification(params)
       const execution = executionFromParams(params, false)
       if (execution === undefined) {
@@ -647,6 +751,9 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     if (method === "item/agentMessage/delta") {
       const executionLookup = lookupExecution({ kind: "notification", method, params })
       if (executionLookup.kind === "deferred") {
+        return
+      }
+      if (executionLookup.kind === "stale") {
         return
       }
       if (executionLookup.kind === "missing") {
@@ -679,6 +786,9 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     if (method === "item/started" || method === "item/completed") {
       const executionLookup = lookupExecution({ kind: "notification", method, params })
       if (executionLookup.kind === "deferred") {
+        return
+      }
+      if (executionLookup.kind === "stale") {
         return
       }
       if (executionLookup.kind === "missing") {
@@ -727,6 +837,10 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     }
 
     if (method === "turn/completed") {
+      if (isStaleTurnMessage({ kind: "notification", method, params })) {
+        return
+      }
+
       const notification = parseTurnCompletedNotification(params)
       const execution = executions.get(notification.turnId)
       if (execution === undefined) {
@@ -747,17 +861,8 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
         execution.onEvent,
       )
 
-      const result: TurnResult = {
-        diagnostics: execution.capture.diagnostics,
-        errorMessage: notification.errorMessage ?? execution.errorMessage,
-        providerEvents: execution.capture.providerEvents,
-        reviewText: execution.reviewText,
-        status: notification.status,
-        text: renderAssistantTranscript(execution.assistantTranscript),
-      }
-
-      untrackExecution(notification.turnId)
-      execution.resolve(result)
+      execution.errorMessage = notification.errorMessage ?? execution.errorMessage
+      settleExecution(execution, buildTurnResult(execution, notification.status))
       return
     }
 
@@ -777,6 +882,10 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
   }
 
   function lookupExecution(message: DeferredTurnMessage, allowSingleFallback = true): ExecutionLookup {
+    if (isStaleTurnMessage(message)) {
+      return { kind: "stale" }
+    }
+
     const execution = executionFromParams(message.params, allowSingleFallback)
     if (execution !== undefined) {
       return { execution, kind: "found" }
@@ -815,6 +924,11 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
       return readTurnCompletedNotificationTurnId(message.params)
     }
     return undefined
+  }
+
+  function isStaleTurnMessage(message: DeferredTurnMessage): boolean {
+    const turnId = readDeferredTurnId(message)
+    return turnId !== undefined && staleTurnIds.has(turnId)
   }
 
   async function flushDeferredTurnMessages(turnId: string): Promise<void> {

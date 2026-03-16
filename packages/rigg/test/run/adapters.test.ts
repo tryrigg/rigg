@@ -770,6 +770,83 @@ describe("run/adapters", () => {
     }
   })
 
+  test("completes interruption when app-server acknowledges without turn completion", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-codex-interrupt-ack-only-"))
+    try {
+      const binDir = await installFakeCodex(root, {
+        turnInterrupt: {
+          steps: [],
+        },
+        turnStart: {
+          steps: [],
+        },
+      })
+      const session = await createCodexRuntimeSession({
+        cwd: root,
+        env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+      })
+      const controller = new AbortController()
+      const startedAt = Date.now()
+
+      const execution = session.run({
+        cwd: root,
+        signal: controller.signal,
+        prompt: "Wait for interruption",
+      })
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      controller.abort()
+
+      await expect(execution).resolves.toMatchObject({
+        exitCode: 130,
+        termination: "interrupted",
+      })
+      expect(Date.now() - startedAt).toBeLessThan(700)
+      await session.close()
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("completes interruption when app-server never responds to turn/interrupt", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-codex-interrupt-no-response-"))
+    try {
+      const binDir = await installFakeCodex(root, {
+        turnInterrupt: {
+          respond: false,
+          steps: [],
+        },
+        turnStart: {
+          steps: [],
+        },
+      })
+      const session = await createCodexRuntimeSession({
+        cwd: root,
+        env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+      })
+      const controller = new AbortController()
+      const startedAt = Date.now()
+
+      const execution = session.run({
+        cwd: root,
+        signal: controller.signal,
+        prompt: "Wait for interruption",
+      })
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      controller.abort()
+
+      await expect(execution).resolves.toMatchObject({
+        exitCode: 130,
+        termination: "interrupted",
+      })
+      expect(Date.now() - startedAt).toBeLessThan(1_500)
+      await session.close()
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
   test("fails an active turn on malformed app-server output", async () => {
     const root = await mkdtemp(join(tmpdir(), "rigg-codex-malformed-json-"))
     try {

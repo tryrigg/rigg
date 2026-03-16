@@ -44,7 +44,9 @@ export type FakeCodexScenario = {
       }>
     | undefined
   turnInterrupt?: {
+    respond?: boolean | undefined
     response?: Record<string, unknown> | undefined
+    responseDelayMs?: number | undefined
     steps?: FakeRpcStep[] | undefined
   }
   turnStart?: {
@@ -208,7 +210,18 @@ rl.on("line", async (line) => {
     return;
   }
   if (message.method === "turn/interrupt") {
-    respond(message.id, scenario.turnInterrupt?.response ?? {});
+    const interruptResponse = scenario.turnInterrupt?.response ?? {};
+    const respondToInterrupt = scenario.turnInterrupt?.respond ?? true;
+    const responseDelayMs = scenario.turnInterrupt?.responseDelayMs ?? 0;
+    if (respondToInterrupt) {
+      if (responseDelayMs > 0) {
+        setTimeout(() => {
+          respond(message.id, interruptResponse);
+        }, responseDelayMs);
+      } else {
+        respond(message.id, interruptResponse);
+      }
+    }
     const interruptedTurn = activeTurns.get(message.params.turnId) ?? { threadId: message.params.threadId, turnId: message.params.turnId };
     setTimeout(() => {
       playSteps(

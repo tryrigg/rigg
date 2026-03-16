@@ -1291,6 +1291,9 @@ describe("run/execute", () => {
 
     try {
       const binDir = await installFakeCodex(root, {
+        turnInterrupt: {
+          steps: [],
+        },
         turnStart: {
           steps: [],
         },

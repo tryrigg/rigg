@@ -14,6 +14,7 @@ import {
   type ParallelNode,
   type WorkflowStep,
 } from "../compile/schema"
+import { normalizeError } from "../util/error"
 import { createEvaluationError, createStepFailedError } from "./error"
 import { preview } from "./node"
 import type { RenderContext, StepBinding } from "./render"
@@ -388,7 +389,12 @@ function summarizeReviewPreview(step: Extract<ActionNode, { type: "codex" }>, co
 function renderStringSafely(template: string, context: RenderContext): string {
   try {
     return renderTemplateString(template, context)
-  } catch {
-    return template
+  } catch (error) {
+    const message = normalizeError(error).message
+    if (message.length === 0) {
+      return `${template} (preview unavailable)`
+    }
+
+    return `${template} (preview unavailable: ${message})`
   }
 }

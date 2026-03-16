@@ -9,6 +9,14 @@ import {
 import type { FrontierNode, NodeSnapshot } from "../../src/run/schema"
 import { runSnapshot } from "../fixture/builders"
 
+function requireDefined<T>(value: T | undefined | null, message: string): T {
+  if (value == null) {
+    throw new Error(message)
+  }
+
+  return value
+}
+
 function nodeSnapshot(overrides: Partial<NodeSnapshot> = {}): NodeSnapshot {
   return {
     attempt: 1,
@@ -73,7 +81,7 @@ describe("cli/run", () => {
     applyRunEvent(state, { kind: "run_started", snapshot })
     applyRunEvent(state, {
       kind: "node_started",
-      node: snapshot.nodes[0]!,
+      node: requireDefined(snapshot.nodes[0], "expected the first node snapshot"),
       snapshot,
     })
     applyRunEvent(state, {
@@ -112,7 +120,7 @@ describe("cli/run", () => {
     applyRunEvent(state, { kind: "run_started", snapshot })
     applyRunEvent(state, {
       kind: "node_started",
-      node: snapshot.nodes[0]!,
+      node: requireDefined(snapshot.nodes[0], "expected the first node snapshot"),
       snapshot,
     })
     applyRunEvent(state, {
@@ -258,7 +266,7 @@ describe("cli/run", () => {
 
     applyRunEvent(state, { kind: "run_started", snapshot })
     applyRunEvent(state, {
-      barrier: snapshot.active_barrier!,
+      barrier: requireDefined(snapshot.active_barrier, "expected an active barrier"),
       kind: "barrier_reached",
       snapshot,
     })

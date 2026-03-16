@@ -585,7 +585,10 @@ function ensureLiveOutput(state: TerminalUiState, nodePath: string): ActiveLiveO
 
 function upsertAssistantEntry(liveOutput: ActiveLiveOutput, key: string, update: (current: string) => string): void {
   for (let i = liveOutput.entries.length - 1; i >= 0; i--) {
-    const candidate = liveOutput.entries[i]!
+    const candidate = liveOutput.entries[i]
+    if (candidate === undefined) {
+      continue
+    }
     if (candidate.variant === "assistant" && candidate.key === key) {
       candidate.text = update(candidate.text)
       return

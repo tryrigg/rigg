@@ -37,6 +37,7 @@ import {
   parseTurnStartResponse,
   parseUserInputRequest,
   readPermissionsPayload,
+  readTurnCompletedNotificationTurnId,
   readTurnIdFromParams,
   type ReviewStartTarget,
   type ReviewThreadTarget,
@@ -289,8 +290,10 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     const bootstrapError = normalizeError(error)
     try {
       await close()
-    } catch {
-      // Prefer surfacing the bootstrap failure; close() is best-effort here.
+    } catch (closeError) {
+      throw new Error("failed to close codex runtime session after bootstrap failure", {
+        cause: new AggregateError([bootstrapError, normalizeError(closeError)]),
+      })
     }
     throw bootstrapError
   }
@@ -809,11 +812,7 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
       return turnId
     }
     if (message.kind === "notification" && message.method === "turn/completed") {
-      try {
-        return parseTurnCompletedNotification(message.params).turnId
-      } catch {
-        return undefined
-      }
+      return readTurnCompletedNotificationTurnId(message.params)
     }
     return undefined
   }

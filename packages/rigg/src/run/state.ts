@@ -50,7 +50,8 @@ export function upsertNodeSnapshot(state: MutableRunState, snapshot: MutableNode
     let hi = state.nodes.length
     while (lo < hi) {
       const mid = (lo + hi) >>> 1
-      if (compareNodePath(state.nodes[mid]!.node_path, snapshot.node_path) < 0) {
+      const current = state.nodes[mid]
+      if (current !== undefined && compareNodePath(current.node_path, snapshot.node_path) < 0) {
         lo = mid + 1
       } else {
         hi = mid

@@ -247,6 +247,11 @@ export function parseTurnCompletedNotification(params: unknown): TurnCompletedNo
   }
 }
 
+export function readTurnCompletedNotificationTurnId(params: unknown): string | undefined {
+  const result = TurnCompletedNotificationSchema.safeParse(params)
+  return result.success ? result.data.turn.id : undefined
+}
+
 export function readTurnIdFromParams(params: unknown): string | undefined {
   const result = TurnScopedParamsSchema.safeParse(params)
   return result.success ? result.data.turnId : undefined

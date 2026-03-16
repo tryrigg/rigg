@@ -36,8 +36,7 @@ type ControlQueueEntry = {
   dispose: () => void
   priority: number
   reject: (error: unknown) => void
-  resolve: (value: unknown) => void
-  run: (signal: AbortSignal) => Promise<unknown>
+  run: (signal: AbortSignal) => Promise<void>
   sequence: number
   started: boolean
 }
@@ -98,7 +97,7 @@ export function createControlBroker(): ControlBroker {
 
         entry.started = true
         try {
-          entry.resolve(await entry.run(entry.controller.signal))
+          await entry.run(entry.controller.signal)
         } catch (error) {
           entry.reject(error)
           if (!isStepInterrupted(error)) {
@@ -139,8 +138,9 @@ export function createControlBroker(): ControlBroker {
           dispose: () => input.signal?.removeEventListener("abort", abortListener),
           priority: input.priority,
           reject,
-          resolve: (value) => resolve(value as T),
-          run: async (signal) => await input.run(signal),
+          run: async (signal) => {
+            resolve(await input.run(signal))
+          },
           sequence: nextSequence++,
           started: false,
         }

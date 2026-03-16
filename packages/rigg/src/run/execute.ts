@@ -38,7 +38,7 @@ import {
   summarizeCompletedNode,
   type NodeLifecycle,
 } from "./node"
-import { evaluateExpression, frontierForPreparedStep, prepareStep, renderEnvironment, type PreparedStep } from "./plan"
+import { evaluateExpression, prepareStep, renderEnvironment, type PreparedStep } from "./plan"
 import type { RunControlHandler, RunEvent } from "./progress"
 import { snapshotRunEvent } from "./snapshot"
 import type { BarrierReason, CompletedNodeSummary, RunReason, RunSnapshot } from "./schema"
@@ -188,18 +188,7 @@ async function executeBlock(
       },
       environment.cwd,
     )
-    const frontier = frontierForPreparedStep(
-      prepared,
-      nodePath,
-      {
-        env: scope.env,
-        frameId: scope.frameId,
-        inputs: scope.inputs,
-        run: scope.run,
-        steps: bindings,
-      },
-      environment.cwd,
-    )
+    const frontier = prepared.frontier
     if (frontier.length > 0) {
       const frontierReleased = consumeReleasedFrontier(
         scope.releasedFrontierNodePaths,
@@ -421,8 +410,7 @@ async function executeGroup(
   nodePath: NodePath,
   env: Record<string, string | undefined>,
 ): Promise<StepExecutionOutcome> {
-  const lifecycle = startNode(environment.runState, step, nodePath, step.type, environment.emitEvent)
-  try {
+  return await executeControlNode(environment, step, nodePath, async (lifecycle) => {
     const result = await executeBlock(
       environment,
       {
@@ -441,10 +429,8 @@ async function executeGroup(
             run: scope.run,
             steps: { ...scope.steps, ...result.bindings },
           })
-    return finishControlStep(environment, step, nodePath, lifecycle, result.disposition, result.reason, exports)
-  } catch (error) {
-    return handleThrownControlStep(environment, step, nodePath, lifecycle, error)
-  }
+    return finalizeControlStep(environment, step, nodePath, lifecycle, result.disposition, result.reason, exports)
+  })
 }
 
 async function executeLoop(
@@ -454,7 +440,6 @@ async function executeLoop(
   nodePath: NodePath,
   env: Record<string, string | undefined>,
 ): Promise<StepExecutionOutcome> {
-  const lifecycle = startNode(environment.runState, step, nodePath, step.type, environment.emitEvent)
   let lastBindings: Record<string, StepBinding> = {}
   const loopScopeId = childLoopScope(scope.frameId, nodePath)
   let iterationBarrierContext = {
@@ -462,7 +447,7 @@ async function executeLoop(
     reason: "loop_iteration_started",
   } satisfies BarrierContext
 
-  try {
+  return await executeControlNode(environment, step, nodePath, async (lifecycle) => {
     for (let iteration = 1; iteration <= step.max; iteration += 1) {
       const iterationFrameId = loopIterationFrameId(loopScopeId, iteration)
       const iterationRun = {
@@ -493,7 +478,7 @@ async function executeLoop(
         reason: "loop_iteration_started",
       }
       if (iterationResult.disposition !== "completed") {
-        return finishControlStep(
+        return finalizeControlStep(
           environment,
           step,
           nodePath,
@@ -517,14 +502,12 @@ async function executeLoop(
           run: iterationRun,
           steps: { ...scope.steps, ...lastBindings },
         })
-        return finishControlStep(environment, step, nodePath, lifecycle, "completed", undefined, exports)
+        return finalizeControlStep(environment, step, nodePath, lifecycle, "completed", undefined, exports)
       }
     }
 
     throw new LoopExhaustedError(step.id ?? nodePath, step.max)
-  } catch (error) {
-    return handleThrownControlStep(environment, step, nodePath, lifecycle, error)
-  }
+  })
 }
 
 async function executeBranch(
@@ -535,9 +518,7 @@ async function executeBranch(
   env: Record<string, string | undefined>,
   selection: { caseNode: BranchCase; index: number } | null,
 ): Promise<StepExecutionOutcome> {
-  const lifecycle = startNode(environment.runState, step, nodePath, step.type, environment.emitEvent)
-
-  try {
+  return await executeControlNode(environment, step, nodePath, async (lifecycle) => {
     if (selection === null) {
       const snapshot = createNodeSnapshot(step.id, nodePath, step.type, "skipped", lifecycle)
       snapshot.duration_ms = 0
@@ -581,7 +562,7 @@ async function executeBranch(
             run: scope.run,
             steps: { ...scope.steps, ...branchResult.bindings },
           })
-    return finishControlStep(
+    return finalizeControlStep(
       environment,
       step,
       nodePath,
@@ -590,9 +571,7 @@ async function executeBranch(
       branchResult.reason,
       exports,
     )
-  } catch (error) {
-    return handleThrownControlStep(environment, step, nodePath, lifecycle, error)
-  }
+  })
 }
 
 async function executeParallel(
@@ -604,9 +583,7 @@ async function executeParallel(
   branchReleasedFrontierNodePaths: NodePath[][],
 ): Promise<StepExecutionOutcome> {
   throwIfAborted(scope.signal)
-  const lifecycle = startNode(environment.runState, step, nodePath, step.type, environment.emitEvent)
-
-  try {
+  return await executeControlNode(environment, step, nodePath, async (lifecycle) => {
     const branchControllers = step.branches.map(() => createAbortController(scope.signal))
     let branchFailure: RunReason | undefined
     let thrownError: Error | undefined
@@ -689,7 +666,7 @@ async function executeParallel(
             run: scope.run,
             steps: { ...scope.steps, ...mergedBindings },
           })
-    return finishControlStep(
+    return finalizeControlStep(
       environment,
       step,
       nodePath,
@@ -698,12 +675,24 @@ async function executeParallel(
       branchFailure,
       resultValue,
     )
+  })
+}
+
+async function executeControlNode(
+  environment: ExecutionEnvironment,
+  step: ControlNode,
+  nodePath: NodePath,
+  run: (lifecycle: NodeLifecycle) => Promise<StepExecutionOutcome>,
+): Promise<StepExecutionOutcome> {
+  const lifecycle = startNode(environment.runState, step, nodePath, step.type, environment.emitEvent)
+  try {
+    return await run(lifecycle)
   } catch (error) {
     return handleThrownControlStep(environment, step, nodePath, lifecycle, error)
   }
 }
 
-function finishControlStep(
+function finalizeControlStep(
   environment: ExecutionEnvironment,
   step: ControlNode,
   nodePath: NodePath,

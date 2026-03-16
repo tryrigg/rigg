@@ -25,15 +25,17 @@ import type {
   WorkflowStep,
 } from "./schema"
 import {
+  areResultShapesCompatible,
   codexReviewOutputDefinition,
+  descendResultShape,
   shapeFromSchema,
   resolveInputPathShape,
+  validateResultShapePath,
   validateIdentifier,
   validateInputDefinitions,
 } from "./schema"
 import type { WorkflowProject } from "./project"
 import { normalizeError } from "../util/error"
-import { deepEqual } from "../util/json"
 
 type VisibleScope = {
   availableStepShapes: Map<string, ResultShape>
@@ -347,7 +349,7 @@ function validateBranchStep(
       branchResultShape = firstShape
       for (const shape of restShapes) {
         const merged = mergeResultShapes(branchResultShape, shape)
-        if (!isBranchExportShapeCompatible(branchResultShape, shape)) {
+        if (!areResultShapesCompatible(branchResultShape, shape)) {
           errors.push(
             createCompileError(
               CompileErrorCode.InvalidWorkflow,
@@ -619,7 +621,7 @@ function resolvePathShape(reference: PathReference, scope: VisibleScope): Result
     let shape = scope.availableStepShapes.get(stepId) ?? AnyJsonShape
     const segments = rest[0] === "result" ? rest.slice(1) : []
     for (const segment of segments) {
-      shape = descendShape(shape, segment)
+      shape = descendResultShape(shape, segment)
     }
     return shape
   }
@@ -630,47 +632,6 @@ function resolvePathShape(reference: PathReference, scope: VisibleScope): Result
   }
 
   return AnyJsonShape
-}
-
-function descendShape(shape: ResultShape, segment: string): ResultShape {
-  if (shape.kind === "object") {
-    return shape.fields[segment] ?? AnyJsonShape
-  }
-  if (shape.kind === "array") {
-    return shape.items ?? AnyJsonShape
-  }
-  return AnyJsonShape
-}
-
-function isBranchExportShapeCompatible(left: ResultShape, right: ResultShape): boolean {
-  if (deepEqual(left, right)) {
-    return true
-  }
-
-  if ((left.kind === "integer" && right.kind === "number") || (left.kind === "number" && right.kind === "integer")) {
-    return true
-  }
-
-  if (left.kind === "array" && right.kind === "array") {
-    if (left.items === undefined || right.items === undefined) {
-      return left.items === undefined && right.items === undefined
-    }
-    return isBranchExportShapeCompatible(left.items, right.items)
-  }
-
-  if (left.kind === "object" && right.kind === "object") {
-    const leftKeys = Object.keys(left.fields)
-    const rightKeys = Object.keys(right.fields)
-    if (leftKeys.length !== rightKeys.length || leftKeys.some((key) => !(key in right.fields))) {
-      return false
-    }
-
-    return leftKeys.every((key) =>
-      isBranchExportShapeCompatible(left.fields[key] ?? AnyJsonShape, right.fields[key] ?? AnyJsonShape),
-    )
-  }
-
-  return false
 }
 
 function validateReference(reference: PathReference, scope: VisibleScope): string | undefined {
@@ -719,47 +680,8 @@ function validateReference(reference: PathReference, scope: VisibleScope): strin
     if (access !== "result") {
       return `\`steps.${stepId}.${access}\` is not available; use \`steps.${stepId}.result\``
     }
-    return validateResultPath(stepId, shape, rest)
+    return validateResultShapePath(stepId, shape, rest)
   }
 
   return undefined
-}
-
-function validateResultPath(stepId: string, shape: ResultShape, segments: string[]): string | undefined {
-  if (segments.length === 0) {
-    return shape.kind === "none" ? `\`steps.${stepId}.result\` is not available for this node` : undefined
-  }
-
-  switch (shape.kind) {
-    case "none":
-      return `\`steps.${stepId}.result\` is not available for this node`
-    case "string":
-    case "integer":
-    case "number":
-    case "boolean":
-      return `\`steps.${stepId}.result\` does not support nested field access`
-    case "any_json":
-      return undefined
-    case "object": {
-      const [segment, ...rest] = segments
-      if (segment === undefined) {
-        return undefined
-      }
-      const child = shape.fields[segment]
-      if (child === undefined) {
-        return `\`steps.${stepId}.result.${segment}\` is not declared`
-      }
-      return validateResultPath(stepId, child, rest)
-    }
-    case "array": {
-      const [segment, ...rest] = segments
-      if (segment === undefined) {
-        return undefined
-      }
-      if (!/^\d+$/.test(segment)) {
-        return `\`steps.${stepId}.result\` array access must use a numeric index`
-      }
-      return shape.items === undefined ? undefined : validateResultPath(stepId, shape.items, rest)
-    }
-  }
 }

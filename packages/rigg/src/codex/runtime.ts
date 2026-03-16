@@ -146,6 +146,22 @@ type TurnResult = {
   text: string
 }
 
+type RuntimeRequestMethod =
+  | "item/commandExecution/requestApproval"
+  | "item/fileChange/requestApproval"
+  | "item/permissions/requestApproval"
+  | "item/tool/requestUserInput"
+  | "mcpServer/elicitation/request"
+
+type RuntimeNotificationMethod =
+  | "error"
+  | "item/agentMessage/delta"
+  | "item/completed"
+  | "item/started"
+  | "thread/started"
+  | "turn/completed"
+  | "turn/started"
+
 export type CodexStepResult = {
   exitCode: number
   providerEvents: CodexProviderEvent[]
@@ -570,59 +586,50 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     return await turnPromise.promise
   }
 
-  async function run(options_: {
+  async function executeThreadTurn(input: {
     collaborationMode?: CollaborationModeKind | undefined
     cwd: string
+    finalizeCompletedTurn: (turn: TurnResult) => CodexStepResult
     interactionHandler?: CodexInteractionHandler | undefined
+    method: TurnMethod
     model?: string | undefined
     onEvent?: ((event: CodexProviderEvent) => Promise<void> | void) | undefined
-    prompt: string
     signal?: AbortSignal | undefined
+    startThreadModel?: string | undefined
+    turnParams: (threadId: string) => Promise<ReviewStartParams | TurnStartParams>
   }): Promise<CodexStepResult> {
     const capture: TurnCapture = { diagnostics: [], providerEvents: [] }
     let threadId: string
     try {
       threadId = await startThread({
         capture,
-        cwd: options_.cwd,
-        model: options_.collaborationMode === undefined ? options_.model : undefined,
-        onEvent: options_.onEvent,
-        signal: options_.signal,
+        cwd: input.cwd,
+        model: input.startThreadModel,
+        onEvent: input.onEvent,
+        signal: input.signal,
       })
     } catch (error) {
-      if (options_.signal?.aborted && isAbortError(error)) {
+      if (input.signal?.aborted && isAbortError(error)) {
         await close()
         return interruptedStepResult(capture)
       }
       throw normalizeError(error)
     }
 
-    const params: TurnStartParams = {
-      ...(options_.collaborationMode === undefined
-        ? { model: options_.model ?? null }
-        : {
-            collaborationMode: await resolveCollaborationMode(
-              options_.collaborationMode,
-              options_.model,
-              options_.signal,
-            ),
-          }),
-      input: [{ text: options_.prompt, text_elements: [], type: "text" }],
-      threadId,
-    }
     let turn: TurnResult
     try {
+      const params = await input.turnParams(threadId)
       turn = await executeTurn({
         capture,
-        interactionHandler: options_.interactionHandler,
-        method: "turn/start",
-        onEvent: options_.onEvent,
+        interactionHandler: input.interactionHandler,
+        method: input.method,
+        onEvent: input.onEvent,
         params,
-        signal: options_.signal,
+        signal: input.signal,
         threadId,
       })
     } catch (error) {
-      if (options_.signal?.aborted && isAbortError(error)) {
+      if (input.signal?.aborted && isAbortError(error)) {
         await close()
         return interruptedStepResult(capture)
       }
@@ -632,14 +639,49 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
       return finalizeFailedTurn(turn)
     }
 
-    return {
-      exitCode: 0,
-      providerEvents: [...turn.providerEvents],
-      result: turn.text,
-      stderr: turn.diagnostics.join("\n"),
-      stdout: turn.text,
-      termination: "completed",
-    }
+    return input.finalizeCompletedTurn(turn)
+  }
+
+  async function run(options_: {
+    collaborationMode?: CollaborationModeKind | undefined
+    cwd: string
+    interactionHandler?: CodexInteractionHandler | undefined
+    model?: string | undefined
+    onEvent?: ((event: CodexProviderEvent) => Promise<void> | void) | undefined
+    prompt: string
+    signal?: AbortSignal | undefined
+  }): Promise<CodexStepResult> {
+    return await executeThreadTurn({
+      collaborationMode: options_.collaborationMode,
+      cwd: options_.cwd,
+      finalizeCompletedTurn: (turn) => ({
+        exitCode: 0,
+        providerEvents: [...turn.providerEvents],
+        result: turn.text,
+        stderr: turn.diagnostics.join("\n"),
+        stdout: turn.text,
+        termination: "completed",
+      }),
+      interactionHandler: options_.interactionHandler,
+      method: "turn/start",
+      model: options_.model,
+      onEvent: options_.onEvent,
+      signal: options_.signal,
+      startThreadModel: options_.collaborationMode === undefined ? options_.model : undefined,
+      turnParams: async (threadId) => ({
+        ...(options_.collaborationMode === undefined
+          ? { model: options_.model ?? null }
+          : {
+              collaborationMode: await resolveCollaborationMode(
+                options_.collaborationMode,
+                options_.model,
+                options_.signal,
+              ),
+            }),
+        input: [{ text: options_.prompt, text_elements: [], type: "text" }],
+        threadId,
+      }),
+    })
   }
 
   async function review(options_: {
@@ -650,59 +692,27 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     signal?: AbortSignal | undefined
     target: ReviewThreadTarget
   }): Promise<CodexStepResult> {
-    const capture: TurnCapture = { diagnostics: [], providerEvents: [] }
-    let threadId: string
-    try {
-      threadId = await startThread({
-        capture,
-        cwd: options_.cwd,
-        model: options_.model,
-        onEvent: options_.onEvent,
-        signal: options_.signal,
-      })
-    } catch (error) {
-      if (options_.signal?.aborted && isAbortError(error)) {
-        await close()
-        return interruptedStepResult(capture)
-      }
-      throw normalizeError(error)
-    }
-
-    const params: ReviewStartParams = {
-      target: mapReviewTarget(options_.target),
-      threadId,
-    }
-    let turn: TurnResult
-    try {
-      turn = await executeTurn({
-        capture,
-        interactionHandler: options_.interactionHandler,
-        method: "review/start",
-        onEvent: options_.onEvent,
-        params,
-        signal: options_.signal,
+    return await executeThreadTurn({
+      cwd: options_.cwd,
+      finalizeCompletedTurn: (turn) => ({
+        exitCode: 0,
+        providerEvents: [...turn.providerEvents],
+        result: parseReviewText(turn.reviewText ?? turn.text),
+        stderr: turn.diagnostics.join("\n"),
+        stdout: turn.reviewText ?? turn.text,
+        termination: "completed",
+      }),
+      interactionHandler: options_.interactionHandler,
+      method: "review/start",
+      model: options_.model,
+      onEvent: options_.onEvent,
+      signal: options_.signal,
+      startThreadModel: options_.model,
+      turnParams: async (threadId) => ({
+        target: mapReviewTarget(options_.target),
         threadId,
-      })
-    } catch (error) {
-      if (options_.signal?.aborted && isAbortError(error)) {
-        await close()
-        return interruptedStepResult(capture)
-      }
-      throw normalizeError(error)
-    }
-    if (turn.status !== "completed") {
-      return finalizeFailedTurn(turn)
-    }
-
-    const reviewResult = parseReviewText(turn.reviewText ?? turn.text)
-    return {
-      exitCode: 0,
-      providerEvents: [...turn.providerEvents],
-      result: reviewResult,
-      stderr: turn.diagnostics.join("\n"),
-      stdout: turn.reviewText ?? turn.text,
-      termination: "completed",
-    }
+      }),
+    })
   }
 
   async function interruptTurn(input: { threadId: string; turnId: string }): Promise<void> {
@@ -725,6 +735,236 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     await rpc.close()
   }
 
+  async function handleApprovalRequest(
+    execution: TurnExecution,
+    input: {
+      id: string | number
+      params: unknown
+      requestId: string
+      requestKind: "command_execution" | "file_change" | "permissions"
+    },
+  ): Promise<void> {
+    if (execution.interactionHandler === undefined) {
+      throw new Error("codex app-server requested approval, but no interaction handler is configured")
+    }
+
+    const request = parseApprovalRequest(input.requestKind, input.requestId, input.params)
+    const resolution = await execution.interactionHandler(request)
+    assertResolutionKind("approval", resolution)
+    assertApprovalDecision(request, resolution.decision)
+
+    if (input.requestKind === "permissions") {
+      const approvedDecision = findApprovalDecisionByIntent(request, "approve")
+      rpc.respond(input.id, {
+        permissions: approvedDecision?.value === resolution.decision ? readPermissionsPayload(input.params) : {},
+        scope: "turn",
+      })
+      return
+    }
+
+    rpc.respond(input.id, { decision: resolution.decision })
+  }
+
+  async function handleUserInputRequest(
+    execution: TurnExecution,
+    input: { id: string | number; params: unknown; requestId: string },
+  ): Promise<void> {
+    if (execution.interactionHandler === undefined) {
+      throw new Error("codex app-server requested user input, but no interaction handler is configured")
+    }
+
+    const request = parseUserInputRequest(input.requestId, input.params)
+    const resolution = await execution.interactionHandler(request)
+    assertResolutionKind("user_input", resolution)
+    rpc.respond(input.id, { answers: resolution.answers })
+  }
+
+  async function handleElicitationRequest(
+    execution: TurnExecution,
+    input: { id: string | number; params: unknown; requestId: string },
+  ): Promise<void> {
+    if (execution.interactionHandler === undefined) {
+      throw new Error("codex app-server requested elicitation, but no interaction handler is configured")
+    }
+
+    const request = parseElicitationRequest(input.requestId, input.params)
+    const resolution = await execution.interactionHandler(request)
+    assertResolutionKind("elicitation", resolution)
+    rpc.respond(input.id, {
+      _meta: resolution._meta ?? null,
+      action: resolution.action,
+      content: resolution.content ?? null,
+    })
+  }
+
+  const requestHandlers: Record<
+    RuntimeRequestMethod,
+    (execution: TurnExecution, input: { id: string | number; params: unknown; requestId: string }) => Promise<void>
+  > = {
+    "item/commandExecution/requestApproval": async (execution, input) => {
+      await handleApprovalRequest(execution, { ...input, requestKind: "command_execution" })
+    },
+    "item/fileChange/requestApproval": async (execution, input) => {
+      await handleApprovalRequest(execution, { ...input, requestKind: "file_change" })
+    },
+    "item/permissions/requestApproval": async (execution, input) => {
+      await handleApprovalRequest(execution, { ...input, requestKind: "permissions" })
+    },
+    "item/tool/requestUserInput": handleUserInputRequest,
+    "mcpServer/elicitation/request": handleElicitationRequest,
+  }
+
+  async function handleErrorNotification(params: unknown): Promise<void> {
+    if (isStaleTurnMessage({ kind: "notification", method: "error", params })) {
+      return
+    }
+
+    const notification = parseErrorNotification(params)
+    const execution = executionFromParams(params, false)
+    if (execution === undefined) {
+      return
+    }
+
+    execution.errorMessage = notification.message
+    await captureEvent(
+      execution.capture,
+      {
+        kind: "error",
+        message: notification.message,
+        provider: "codex",
+        threadId: notification.threadId,
+        turnId: notification.turnId,
+      },
+      execution.onEvent,
+    )
+  }
+
+  async function handleMessageDeltaNotification(params: unknown): Promise<void> {
+    const executionLookup = lookupExecution({ kind: "notification", method: "item/agentMessage/delta", params })
+    if (executionLookup.kind === "deferred" || executionLookup.kind === "stale") {
+      return
+    }
+    if (executionLookup.kind === "missing") {
+      throw new Error("codex app-server referenced an unknown turn")
+    }
+
+    const { execution } = executionLookup
+    const notification = parseMessageDeltaNotification(params)
+    if (notification.text === null || notification.text.length === 0) {
+      return
+    }
+
+    appendAssistantMessageDelta(execution.assistantTranscript, {
+      itemId: notification.itemId,
+      text: notification.text,
+    })
+    await captureEvent(
+      execution.capture,
+      {
+        itemId: notification.itemId,
+        kind: "message_delta",
+        provider: "codex",
+        text: notification.text,
+        threadId: execution.threadId,
+        turnId: execution.turnId,
+      },
+      execution.onEvent,
+    )
+  }
+
+  async function handleItemNotification(method: "item/started" | "item/completed", params: unknown): Promise<void> {
+    const executionLookup = lookupExecution({ kind: "notification", method, params })
+    if (executionLookup.kind === "deferred" || executionLookup.kind === "stale") {
+      return
+    }
+    if (executionLookup.kind === "missing") {
+      throw new Error("codex app-server referenced an unknown turn")
+    }
+
+    const { execution } = executionLookup
+    const { item } = parseItemNotification(params)
+
+    if (method === "item/completed") {
+      const assistantMessage = parseCompletedAssistantMessage(item)
+      if (assistantMessage !== null) {
+        const text = completeAssistantMessage(execution.assistantTranscript, assistantMessage)
+        await captureEvent(
+          execution.capture,
+          {
+            itemId: assistantMessage.itemId,
+            kind: "message_completed",
+            provider: "codex",
+            text,
+            threadId: execution.threadId,
+            turnId: execution.turnId,
+          },
+          execution.onEvent,
+        )
+        return
+      }
+    }
+
+    const reviewText = parseReviewItem(item)
+    if (reviewText !== null) {
+      execution.reviewText = reviewText
+      return
+    }
+
+    const toolEvent = parseToolEvent(item, {
+      itemId: typeof item["id"] === "string" ? item["id"] : null,
+      kind: method === "item/started" ? "tool_started" : "tool_completed",
+      threadId: execution.threadId,
+      turnId: execution.turnId,
+    })
+    if (toolEvent !== undefined) {
+      await captureEvent(execution.capture, toolEvent, execution.onEvent)
+    }
+  }
+
+  async function handleTurnCompletedNotification(params: unknown): Promise<void> {
+    if (isStaleTurnMessage({ kind: "notification", method: "turn/completed", params })) {
+      return
+    }
+
+    const notification = parseTurnCompletedNotification(params)
+    const execution = executions.get(notification.turnId)
+    if (execution === undefined) {
+      if (deferTurnMessage({ kind: "notification", method: "turn/completed", params })) {
+        return
+      }
+      throw new Error("received turn/completed without an active turn")
+    }
+
+    await captureEvent(
+      execution.capture,
+      {
+        kind: "turn_completed",
+        provider: "codex",
+        status: notification.status,
+        threadId: execution.threadId,
+        turnId: execution.turnId,
+      },
+      execution.onEvent,
+    )
+
+    execution.errorMessage = notification.errorMessage ?? execution.errorMessage
+    settleExecution(execution, buildTurnResult(execution, notification.status))
+  }
+
+  const notificationHandlers: Record<RuntimeNotificationMethod, (params: unknown) => Promise<void>> = {
+    error: handleErrorNotification,
+    "item/agentMessage/delta": handleMessageDeltaNotification,
+    "item/completed": async (params) => {
+      await handleItemNotification("item/completed", params)
+    },
+    "item/started": async (params) => {
+      await handleItemNotification("item/started", params)
+    },
+    "thread/started": async () => {},
+    "turn/completed": handleTurnCompletedNotification,
+    "turn/started": async () => {},
+  }
+
   async function handleRequest(id: string | number, method: string, params: unknown): Promise<void> {
     const requestId = String(id)
     const executionLookup = lookupExecution({ id, kind: "request", method, params })
@@ -739,54 +979,9 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     }
 
     const { execution } = executionLookup
-    if (execution.interactionHandler === undefined) {
-      throw new Error(`codex app-server requested ${method}, but no interaction handler is configured`)
-    }
-
-    if (method === "item/commandExecution/requestApproval") {
-      const request = parseApprovalRequest("command_execution", requestId, params)
-      const resolution = await execution.interactionHandler(request)
-      assertResolutionKind("approval", resolution)
-      assertApprovalDecision(request, resolution.decision)
-      rpc.respond(id, { decision: resolution.decision })
-      return
-    }
-    if (method === "item/fileChange/requestApproval") {
-      const request = parseApprovalRequest("file_change", requestId, params)
-      const resolution = await execution.interactionHandler(request)
-      assertResolutionKind("approval", resolution)
-      assertApprovalDecision(request, resolution.decision)
-      rpc.respond(id, { decision: resolution.decision })
-      return
-    }
-    if (method === "item/permissions/requestApproval") {
-      const request = parseApprovalRequest("permissions", requestId, params)
-      const resolution = await execution.interactionHandler(request)
-      assertResolutionKind("approval", resolution)
-      assertApprovalDecision(request, resolution.decision)
-      const approvedDecision = findApprovalDecisionByIntent(request, "approve")
-      rpc.respond(id, {
-        permissions: approvedDecision?.value === resolution.decision ? readPermissionsPayload(params) : {},
-        scope: "turn",
-      })
-      return
-    }
-    if (method === "item/tool/requestUserInput") {
-      const request = parseUserInputRequest(requestId, params)
-      const resolution = await execution.interactionHandler(request)
-      assertResolutionKind("user_input", resolution)
-      rpc.respond(id, { answers: resolution.answers })
-      return
-    }
-    if (method === "mcpServer/elicitation/request") {
-      const request = parseElicitationRequest(requestId, params)
-      const resolution = await execution.interactionHandler(request)
-      assertResolutionKind("elicitation", resolution)
-      rpc.respond(id, {
-        _meta: resolution._meta ?? null,
-        action: resolution.action,
-        content: resolution.content ?? null,
-      })
+    const handler = requestHandlers[method as RuntimeRequestMethod]
+    if (handler !== undefined) {
+      await handler(execution, { id, params, requestId })
       return
     }
 
@@ -794,155 +989,10 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
   }
 
   async function handleNotification(method: string, params: unknown): Promise<void> {
-    if (method === "thread/started" || method === "turn/started") {
-      return
+    const handler = notificationHandlers[method as RuntimeNotificationMethod]
+    if (handler !== undefined) {
+      await handler(params)
     }
-
-    if (method === "error") {
-      if (isStaleTurnMessage({ kind: "notification", method, params })) {
-        return
-      }
-
-      const notification = parseErrorNotification(params)
-      const execution = executionFromParams(params, false)
-      if (execution === undefined) {
-        return
-      }
-
-      execution.errorMessage = notification.message
-      await captureEvent(
-        execution.capture,
-        {
-          kind: "error",
-          message: notification.message,
-          provider: "codex",
-          threadId: notification.threadId,
-          turnId: notification.turnId,
-        },
-        execution.onEvent,
-      )
-      return
-    }
-
-    if (method === "item/agentMessage/delta") {
-      const executionLookup = lookupExecution({ kind: "notification", method, params })
-      if (executionLookup.kind === "deferred") {
-        return
-      }
-      if (executionLookup.kind === "stale") {
-        return
-      }
-      if (executionLookup.kind === "missing") {
-        throw new Error("codex app-server referenced an unknown turn")
-      }
-
-      const { execution } = executionLookup
-      const notification = parseMessageDeltaNotification(params)
-      if (notification.text !== null && notification.text.length > 0) {
-        appendAssistantMessageDelta(execution.assistantTranscript, {
-          itemId: notification.itemId,
-          text: notification.text,
-        })
-        await captureEvent(
-          execution.capture,
-          {
-            itemId: notification.itemId,
-            kind: "message_delta",
-            provider: "codex",
-            text: notification.text,
-            threadId: execution.threadId,
-            turnId: execution.turnId,
-          },
-          execution.onEvent,
-        )
-      }
-      return
-    }
-
-    if (method === "item/started" || method === "item/completed") {
-      const executionLookup = lookupExecution({ kind: "notification", method, params })
-      if (executionLookup.kind === "deferred") {
-        return
-      }
-      if (executionLookup.kind === "stale") {
-        return
-      }
-      if (executionLookup.kind === "missing") {
-        throw new Error("codex app-server referenced an unknown turn")
-      }
-
-      const { execution } = executionLookup
-      const { item } = parseItemNotification(params)
-
-      if (method === "item/completed") {
-        const assistantMessage = parseCompletedAssistantMessage(item)
-        if (assistantMessage !== null) {
-          const text = completeAssistantMessage(execution.assistantTranscript, assistantMessage)
-          await captureEvent(
-            execution.capture,
-            {
-              itemId: assistantMessage.itemId,
-              kind: "message_completed",
-              provider: "codex",
-              text,
-              threadId: execution.threadId,
-              turnId: execution.turnId,
-            },
-            execution.onEvent,
-          )
-          return
-        }
-      }
-
-      const reviewText = parseReviewItem(item)
-      if (reviewText !== null) {
-        execution.reviewText = reviewText
-        return
-      }
-
-      const toolEvent = parseToolEvent(item, {
-        itemId: typeof item["id"] === "string" ? item["id"] : null,
-        kind: method === "item/started" ? "tool_started" : "tool_completed",
-        threadId: execution.threadId,
-        turnId: execution.turnId,
-      })
-      if (toolEvent !== undefined) {
-        await captureEvent(execution.capture, toolEvent, execution.onEvent)
-      }
-      return
-    }
-
-    if (method === "turn/completed") {
-      if (isStaleTurnMessage({ kind: "notification", method, params })) {
-        return
-      }
-
-      const notification = parseTurnCompletedNotification(params)
-      const execution = executions.get(notification.turnId)
-      if (execution === undefined) {
-        if (deferTurnMessage({ kind: "notification", method, params })) {
-          return
-        }
-        throw new Error("received turn/completed without an active turn")
-      }
-      await captureEvent(
-        execution.capture,
-        {
-          kind: "turn_completed",
-          provider: "codex",
-          status: notification.status,
-          threadId: execution.threadId,
-          turnId: execution.turnId,
-        },
-        execution.onEvent,
-      )
-
-      execution.errorMessage = notification.errorMessage ?? execution.errorMessage
-      settleExecution(execution, buildTurnResult(execution, notification.status))
-      return
-    }
-
-    return
   }
 
   function executionFromParams(params: unknown, allowSingleFallback = true): TurnExecution | undefined {

@@ -518,6 +518,16 @@ export function shapeFromSchema(schema: SchemaShapeFields): ResultShape {
   }
 }
 
+export function descendResultShape(shape: ResultShape, segment: string): ResultShape {
+  if (shape.kind === "object") {
+    return shape.fields[segment] ?? AnyJsonShape
+  }
+  if (shape.kind === "array") {
+    return shape.items ?? AnyJsonShape
+  }
+  return AnyJsonShape
+}
+
 export function resolveInputPathShape(
   schema: InputDefinition,
   path: string,
@@ -556,6 +566,76 @@ export function resolveInputPathShape(
         return { kind: "ok", shape: AnyJsonShape }
       }
       return resolveInputPathShape(schema.items, `${path}.${segment}`, rest)
+    }
+  }
+}
+
+export function areResultShapesCompatible(left: ResultShape, right: ResultShape): boolean {
+  if (deepEqual(left, right)) {
+    return true
+  }
+
+  if ((left.kind === "integer" && right.kind === "number") || (left.kind === "number" && right.kind === "integer")) {
+    return true
+  }
+
+  if (left.kind === "array" && right.kind === "array") {
+    if (left.items === undefined || right.items === undefined) {
+      return left.items === undefined && right.items === undefined
+    }
+    return areResultShapesCompatible(left.items, right.items)
+  }
+
+  if (left.kind === "object" && right.kind === "object") {
+    const leftKeys = Object.keys(left.fields)
+    const rightKeys = Object.keys(right.fields)
+    if (leftKeys.length !== rightKeys.length || leftKeys.some((key) => !(key in right.fields))) {
+      return false
+    }
+
+    return leftKeys.every((key) =>
+      areResultShapesCompatible(left.fields[key] ?? AnyJsonShape, right.fields[key] ?? AnyJsonShape),
+    )
+  }
+
+  return false
+}
+
+export function validateResultShapePath(stepId: string, shape: ResultShape, segments: string[]): string | undefined {
+  if (segments.length === 0) {
+    return shape.kind === "none" ? `\`steps.${stepId}.result\` is not available for this node` : undefined
+  }
+
+  switch (shape.kind) {
+    case "none":
+      return `\`steps.${stepId}.result\` is not available for this node`
+    case "string":
+    case "integer":
+    case "number":
+    case "boolean":
+      return `\`steps.${stepId}.result\` does not support nested field access`
+    case "any_json":
+      return undefined
+    case "object": {
+      const [segment, ...rest] = segments
+      if (segment === undefined) {
+        return undefined
+      }
+      const child = shape.fields[segment]
+      if (child === undefined) {
+        return `\`steps.${stepId}.result.${segment}\` is not declared`
+      }
+      return validateResultShapePath(stepId, child, rest)
+    }
+    case "array": {
+      const [segment, ...rest] = segments
+      if (segment === undefined) {
+        return undefined
+      }
+      if (!/^\d+$/.test(segment)) {
+        return `\`steps.${stepId}.result\` array access must use a numeric index`
+      }
+      return shape.items === undefined ? undefined : validateResultShapePath(stepId, shape.items, rest)
     }
   }
 }

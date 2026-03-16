@@ -50,21 +50,37 @@ export function createTerminalRunSession(input: NodeJS.ReadStream, output: NodeJ
     terminal: Boolean(output.isTTY),
   })
   const state = createTerminalUiState()
-
-  function render(options: RenderOptions = {}): void {
-    const frame = renderTerminalFrame(state, options)
-    if (output.isTTY) {
-      output.write(CLEAR_SCREEN)
-    }
-    output.write(frame)
-  }
+  const render = createTerminalRenderer(state, output)
+  const handle = createInteractiveRunHandler(readline, state, render)
 
   function emit(event: RunEvent): void {
     applyRunEvent(state, event)
     render()
   }
 
-  async function handle(request: Parameters<RunControlHandler>[0]): Promise<RunControlResolution> {
+  return {
+    close: () => readline.close(),
+    emit,
+    handle,
+  }
+}
+
+function createTerminalRenderer(state: TerminalUiState, output: NodeJS.WriteStream): (options?: RenderOptions) => void {
+  return (options: RenderOptions = {}) => {
+    const frame = renderTerminalFrame(state, options)
+    if (output.isTTY) {
+      output.write(CLEAR_SCREEN)
+    }
+    output.write(frame)
+  }
+}
+
+function createInteractiveRunHandler(
+  readline: ReturnType<typeof createInterface>,
+  state: TerminalUiState,
+  render: (options?: RenderOptions) => void,
+): RunControlHandler {
+  return async (request) => {
     state.snapshot = request.snapshot
 
     if (request.kind === "step_barrier") {
@@ -83,12 +99,6 @@ export function createTerminalRunSession(input: NodeJS.ReadStream, output: NodeJ
 
     render()
     return await handleInteraction(readline, render, request.interaction, request.signal)
-  }
-
-  return {
-    close: () => readline.close(),
-    emit,
-    handle,
   }
 }
 

@@ -40,45 +40,49 @@ type ExecutableFrontierPlan = {
 export type PreparedStep =
   | {
       env: Record<string, string | undefined>
+      frontier: FrontierNode[]
       kind: "action"
       step: ActionNode
     }
   | {
       env: Record<string, string | undefined>
+      frontier: []
       kind: "branch"
       selection: BranchSelection | null
       step: BranchNode
     }
   | {
       env: Record<string, string | undefined>
+      frontier: []
       kind: "group"
       step: GroupNode
     }
   | {
       env: Record<string, string | undefined>
       kind: "loop"
+      frontier: []
       step: LoopNode
     }
   | {
       branchReleasedFrontierNodePaths: NodePath[][]
       env: Record<string, string | undefined>
+      frontier: FrontierNode[]
       kind: "parallel"
       step: ParallelNode
     }
   | {
+      frontier: []
       kind: "skipped"
       step: WorkflowStep
     }
 
 export function prepareStep(step: WorkflowStep, nodePath: NodePath, scope: PlannerScope, cwd: string): PreparedStep {
-  const context = createRenderContext(scope.env, scope.inputs, scope.run, scope.steps)
-  if (step.if !== undefined && !Boolean(evaluateExpression(step.if, context))) {
-    return { kind: "skipped", step }
+  const preparedContext = prepareStepContext(scope, step)
+  if (preparedContext.kind === "skipped") {
+    return { frontier: [], kind: "skipped", step }
   }
 
-  const stepEnv = renderEnvironment(step.env ?? {}, context)
-  const env = { ...scope.env, ...stepEnv }
-  const mergedContext = createRenderContext(env, scope.inputs, scope.run, scope.steps)
+  const { context, env } = preparedContext
 
   switch (step.type) {
     case "shell":
@@ -86,37 +90,53 @@ export function prepareStep(step: WorkflowStep, nodePath: NodePath, scope: Plann
     case "write_file":
       return {
         env,
+        frontier: [
+          createFrontierNode(
+            step,
+            nodePath,
+            scope.frameId,
+            context.env,
+            context.inputs,
+            context.run,
+            context.steps,
+            cwd,
+          ),
+        ],
         kind: "action",
         step,
       }
     case "group":
       return {
         env,
+        frontier: [],
         kind: "group",
         step,
       }
     case "loop":
       return {
         env,
+        frontier: [],
         kind: "loop",
         step,
       }
     case "branch":
       return {
         env,
+        frontier: [],
         kind: "branch",
-        selection: selectBranchCase(step, mergedContext) ?? null,
+        selection: selectBranchCase(step, context) ?? null,
         step,
       }
-    case "parallel":
+    case "parallel": {
+      const frontierPlans = planParallelFrontier(step, nodePath, scope.frameId, context, cwd)
       return {
-        branchReleasedFrontierNodePaths: planParallelFrontier(step, nodePath, scope.frameId, mergedContext, cwd).map(
-          (plan) => plan.nodes.map((node) => node.node_path),
-        ),
+        branchReleasedFrontierNodePaths: frontierPlans.map((plan) => plan.nodes.map((node) => node.node_path)),
         env,
+        frontier: frontierPlans.flatMap((plan) => plan.nodes),
         kind: "parallel",
         step,
       }
+    }
   }
 }
 
@@ -128,31 +148,14 @@ export function frontierForPreparedStep(
 ): FrontierNode[] {
   switch (prepared.kind) {
     case "action":
-      return [
-        createFrontierNode(
-          prepared.step,
-          nodePath,
-          scope.frameId,
-          prepared.env,
-          scope.inputs,
-          scope.run,
-          scope.steps,
-          cwd,
-        ),
-      ]
+      return prepared.frontier
     case "parallel":
-      return planParallelFrontier(
-        prepared.step,
-        nodePath,
-        scope.frameId,
-        createRenderContext(prepared.env, scope.inputs, scope.run, scope.steps),
-        cwd,
-      ).flatMap((plan) => plan.nodes)
+      return prepared.frontier
     case "branch":
     case "group":
     case "loop":
     case "skipped":
-      return []
+      return prepared.frontier
   }
 }
 
@@ -225,55 +228,71 @@ function planStepFrontier(
   cwd: string,
   detailOverride?: string,
 ): FrontierNode[] {
-  if (step.if !== undefined && !Boolean(evaluateExpression(step.if, context))) {
-    return []
-  }
+  const prepared = prepareStep(
+    step,
+    nodePath,
+    {
+      env: context.env,
+      frameId,
+      inputs: context.inputs,
+      run: context.run,
+      steps: context.steps,
+    },
+    cwd,
+  )
 
-  const stepEnv = renderEnvironment(step.env ?? {}, context)
-  const mergedContext = createRenderContext({ ...context.env, ...stepEnv }, context.inputs, context.run, context.steps)
-
-  switch (step.type) {
-    case "shell":
-    case "codex":
-    case "write_file":
+  switch (prepared.kind) {
+    case "skipped":
+      return []
+    case "action":
+      if (detailOverride === undefined) {
+        return prepared.frontier
+      }
       return [
         createFrontierNode(
-          step,
+          prepared.step,
           nodePath,
           frameId,
-          mergedContext.env,
-          mergedContext.inputs,
-          mergedContext.run,
-          mergedContext.steps,
+          prepared.env,
+          context.inputs,
+          context.run,
+          context.steps,
           cwd,
           detailOverride,
         ),
       ]
     case "group":
-      return planBlockFrontier(step.steps, nodePath, frameId, mergedContext, cwd, detailOverride)
+      return planBlockFrontier(
+        prepared.step.steps,
+        nodePath,
+        frameId,
+        createRenderContext(prepared.env, context.inputs, context.run, context.steps),
+        cwd,
+        detailOverride,
+      )
     case "loop": {
       const iterationFrameId = loopIterationFrameId(childLoopScope(frameId, nodePath), 1)
       return planBlockFrontier(
-        step.steps,
+        prepared.step.steps,
         nodePath,
         iterationFrameId,
         createRenderContext(
-          mergedContext.env,
-          mergedContext.inputs,
+          prepared.env,
+          context.inputs,
           {
             iteration: 1,
-            max_iterations: step.max,
+            max_iterations: prepared.step.max,
             node_path: nodePath,
           },
-          mergedContext.steps,
+          context.steps,
         ),
         cwd,
         detailOverride,
       )
     }
     case "branch": {
-      const selection = selectBranchCase(step, mergedContext)
-      if (selection === undefined) {
+      const selection = prepared.selection
+      if (selection === null) {
         return []
       }
 
@@ -281,13 +300,39 @@ function planStepFrontier(
         selection.caseNode.steps,
         `${nodePath}/${selection.index}`,
         frameId,
-        mergedContext,
+        createRenderContext(prepared.env, context.inputs, context.run, context.steps),
         cwd,
         detailOverride,
       )
     }
     case "parallel":
-      return planParallelFrontier(step, nodePath, frameId, mergedContext, cwd).flatMap((plan) => plan.nodes)
+      return detailOverride === undefined
+        ? prepared.frontier
+        : planParallelFrontier(
+            prepared.step,
+            nodePath,
+            frameId,
+            createRenderContext(prepared.env, context.inputs, context.run, context.steps),
+            cwd,
+          ).flatMap((plan) => plan.nodes)
+  }
+}
+
+function prepareStepContext(
+  scope: PlannerScope,
+  step: WorkflowStep,
+): { kind: "skipped" } | { context: RenderContext; env: Record<string, string | undefined>; kind: "ready" } {
+  const context = createRenderContext(scope.env, scope.inputs, scope.run, scope.steps)
+  if (step.if !== undefined && !Boolean(evaluateExpression(step.if, context))) {
+    return { kind: "skipped" }
+  }
+
+  const stepEnv = renderEnvironment(step.env ?? {}, context)
+  const env = { ...scope.env, ...stepEnv }
+  return {
+    context: createRenderContext(env, scope.inputs, scope.run, scope.steps),
+    env,
+    kind: "ready",
   }
 }
 

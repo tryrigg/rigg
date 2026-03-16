@@ -10,7 +10,7 @@ steps:
   - id: draft
     type: codex
     with:
-      action: run
+      action: plan
       model: gpt-5.4
       prompt: |
         Draft a detailed implementation plan from the requirements below.

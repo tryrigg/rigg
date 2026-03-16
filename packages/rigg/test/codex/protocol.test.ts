@@ -7,13 +7,13 @@ describe("codex/protocol", () => {
     expect(
       parseCollaborationModeListResponse({
         data: [
-          { name: "Plan", mode: "plan", model: "gpt-5.4", reasoning_effort: "medium" },
-          { name: "Default", mode: "default", model: "gpt-5.4", reasoning_effort: null },
+          { name: "Plan", mode: "plan", model: null, reasoning_effort: "medium" },
+          { name: "Default", mode: "default", model: null, reasoning_effort: null },
         ],
       }),
     ).toEqual([
-      { name: "Plan", mode: "plan", model: "gpt-5.4", reasoning_effort: "medium" },
-      { name: "Default", mode: "default", model: "gpt-5.4", reasoning_effort: null },
+      { name: "Plan", mode: "plan", model: null, reasoning_effort: "medium" },
+      { name: "Default", mode: "default", model: null, reasoning_effort: null },
     ])
   })
 

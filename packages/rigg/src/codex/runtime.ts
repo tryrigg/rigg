@@ -49,7 +49,9 @@ import {
 type CodexRuntimeOptions = CodexProcessOptions & { signal?: AbortSignal | undefined }
 
 type InitializeParams = {
-  capabilities: null
+  capabilities: {
+    experimentalApi: boolean
+  }
   clientInfo: {
     name: string
     title: string
@@ -69,6 +71,14 @@ type CollaborationMode = {
   settings: {
     developer_instructions: null
     model: string
+    reasoning_effort: "high" | "low" | "medium" | "minimal" | "xhigh" | null
+  }
+}
+
+type CollaborationModePreset = {
+  mode: CollaborationModeKind
+  settings: {
+    model: string | null
     reasoning_effort: "high" | "low" | "medium" | "minimal" | "xhigh" | null
   }
 }
@@ -178,8 +188,8 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
   const deferredTurnMessages = new Map<string, DeferredTurnMessage[]>()
   const executions = new Map<string, TurnExecution>()
   const staleTurnIds = new Set<string>()
-  const collaborationModesByKind = new Map<CollaborationModeKind, CollaborationMode>()
-  let collaborationModesPromise: Promise<Map<CollaborationModeKind, CollaborationMode>> | undefined
+  const collaborationModesByKind = new Map<CollaborationModeKind, CollaborationModePreset>()
+  let collaborationModesPromise: Promise<Map<CollaborationModeKind, CollaborationModePreset>> | undefined
   let closed = false
   let pendingTurnStarts = 0
 
@@ -379,7 +389,9 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
   })
 
   const initializeParams: InitializeParams = {
-    capabilities: null,
+    capabilities: {
+      experimentalApi: true,
+    },
     clientInfo: {
       name: "@tryrigg/rigg",
       title: "Rigg",
@@ -422,7 +434,7 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
 
   async function loadCollaborationModes(
     signal?: AbortSignal | undefined,
-  ): Promise<Map<CollaborationModeKind, CollaborationMode>> {
+  ): Promise<Map<CollaborationModeKind, CollaborationModePreset>> {
     if (collaborationModesPromise !== undefined) {
       return await collaborationModesPromise
     }
@@ -430,17 +442,16 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     collaborationModesPromise = (async () => {
       const response = await rpc.request("collaborationMode/list", {}, { signal })
       const masks = parseCollaborationModeListResponse(response)
-      const modes = new Map<CollaborationModeKind, CollaborationMode>()
+      const modes = new Map<CollaborationModeKind, CollaborationModePreset>()
 
       for (const mask of masks) {
-        if (mask.mode === null || mask.model === null) {
+        if (mask.mode === null) {
           continue
         }
 
         modes.set(mask.mode, {
           mode: mask.mode,
           settings: {
-            developer_instructions: null,
             model: mask.model,
             reasoning_effort: mask.reasoning_effort,
           },
@@ -474,12 +485,18 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     if (preset === undefined) {
       throw new Error(`codex app-server does not expose collaboration mode \`${kind}\``)
     }
+    const model = modelOverride ?? preset.settings.model
+    if (model === null) {
+      throw new Error(
+        `codex app-server collaboration mode \`${kind}\` did not include a default model; specify a model explicitly`,
+      )
+    }
 
     return {
       mode: kind,
       settings: {
         developer_instructions: null,
-        model: modelOverride ?? preset.settings.model,
+        model,
         reasoning_effort: preset.settings.reasoning_effort,
       },
     }

@@ -40,6 +40,7 @@ export type FakeCodexScenario = {
         }>
       }
     | undefined
+  initializeExpectParams?: Record<string, unknown> | undefined
   initializeDelayMs?: number | undefined
   reviewStart?: {
     dispatch?: "deferred" | "immediate" | undefined
@@ -154,6 +155,13 @@ rl.on("line", async (line) => {
   if (message.method === "initialize") {
     if ((scenario.initializeDelayMs ?? 0) > 0) {
       await new Promise((resolve) => setTimeout(resolve, scenario.initializeDelayMs));
+    }
+    if (scenario.initializeExpectParams !== undefined) {
+      const expected = stableStringify(scenario.initializeExpectParams);
+      const actual = stableStringify(message.params ?? null);
+      if (expected !== actual) {
+        throw new Error("unexpected initialize params: " + actual + " !== " + expected);
+      }
     }
     respond(message.id, { userAgent: "fake-codex/0.0.0 rigg-test/0.0.0" });
     return;

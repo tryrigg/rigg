@@ -7,6 +7,7 @@ import { tmpdir } from "node:os"
 import type { ActionNode } from "../../src/compile/schema"
 import type { CodexProviderEvent } from "../../src/codex/event"
 import { createCodexRuntimeSession } from "../../src/codex/runtime"
+import { RIGG_VERSION } from "../../src/version"
 import { runActionStep } from "../../src/run/adapters"
 import { renderContext } from "../fixture/builders"
 import { installFakeCodex } from "../fixture/fake-codex"
@@ -487,6 +488,16 @@ describe("run/adapters", () => {
     const root = await mkdtemp(join(tmpdir(), "rigg-codex-plan-app-server-"))
     try {
       const binDir = await installFakeCodex(root, {
+        initializeExpectParams: {
+          capabilities: {
+            experimentalApi: true,
+          },
+          clientInfo: {
+            name: "@tryrigg/rigg",
+            title: "Rigg",
+            version: RIGG_VERSION,
+          },
+        },
         threadStartExpectParams: {
           cwd: root,
           experimentalRawEvents: false,
@@ -495,8 +506,8 @@ describe("run/adapters", () => {
         },
         collaborationModeListResult: {
           data: [
-            { name: "Plan", mode: "plan", model: "gpt-5.4", reasoning_effort: "medium" },
-            { name: "Default", mode: "default", model: "gpt-5.4", reasoning_effort: null },
+            { name: "Plan", mode: "plan", model: null, reasoning_effort: "medium" },
+            { name: "Default", mode: "default", model: null, reasoning_effort: null },
           ],
         },
         turnStart: {

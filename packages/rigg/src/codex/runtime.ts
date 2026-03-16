@@ -18,6 +18,7 @@ import {
   ensureAuthenticatedAccount,
   mapReviewTarget,
   parseApprovalRequest,
+  parseCollaborationModeListResponse,
   parseCompletedAssistantMessage,
   parseElicitationRequest,
   parseErrorNotification,
@@ -33,6 +34,7 @@ import {
   readPermissionsPayload,
   readTurnCompletedNotificationTurnId,
   readTurnIdFromParams,
+  type CollaborationModeKind,
   type ReviewStartTarget,
   type ReviewThreadTarget,
 } from "./protocol"
@@ -44,9 +46,7 @@ import {
   type AssistantTranscript,
 } from "./transcript"
 
-type CodexRuntimeOptions = CodexProcessOptions & {
-  signal?: AbortSignal | undefined
-}
+type CodexRuntimeOptions = CodexProcessOptions & { signal?: AbortSignal | undefined }
 
 type InitializeParams = {
   capabilities: null
@@ -64,13 +64,23 @@ type ThreadStartParams = {
   persistExtendedHistory: boolean
 }
 
+type CollaborationMode = {
+  mode: CollaborationModeKind
+  settings: {
+    developer_instructions: null
+    model: string
+    reasoning_effort: "high" | "low" | "medium" | "minimal" | "xhigh" | null
+  }
+}
+
 type TurnStartParams = {
+  collaborationMode?: CollaborationMode
   input: Array<{
     text: string
     text_elements: []
     type: "text"
   }>
-  model: string | null
+  model?: string | null
   threadId: string
 }
 
@@ -147,6 +157,7 @@ export type CodexRuntimeSession = {
     target: ReviewThreadTarget
   }) => Promise<CodexStepResult>
   run: (options: {
+    collaborationMode?: CollaborationModeKind | undefined
     cwd: string
     interactionHandler?: CodexInteractionHandler | undefined
     model?: string | undefined
@@ -167,6 +178,8 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
   const deferredTurnMessages = new Map<string, DeferredTurnMessage[]>()
   const executions = new Map<string, TurnExecution>()
   const staleTurnIds = new Set<string>()
+  const collaborationModesByKind = new Map<CollaborationModeKind, CollaborationMode>()
+  let collaborationModesPromise: Promise<Map<CollaborationModeKind, CollaborationMode>> | undefined
   let closed = false
   let pendingTurnStarts = 0
 
@@ -407,6 +420,71 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     return threadId
   }
 
+  async function loadCollaborationModes(
+    signal?: AbortSignal | undefined,
+  ): Promise<Map<CollaborationModeKind, CollaborationMode>> {
+    if (collaborationModesPromise !== undefined) {
+      return await collaborationModesPromise
+    }
+
+    collaborationModesPromise = (async () => {
+      const response = await rpc.request("collaborationMode/list", {}, { signal })
+      const masks = parseCollaborationModeListResponse(response)
+      const modes = new Map<CollaborationModeKind, CollaborationMode>()
+
+      for (const mask of masks) {
+        if (mask.mode === null || mask.model === null) {
+          continue
+        }
+
+        modes.set(mask.mode, {
+          mode: mask.mode,
+          settings: {
+            developer_instructions: null,
+            model: mask.model,
+            reasoning_effort: mask.reasoning_effort,
+          },
+        })
+      }
+
+      if (modes.size === 0) {
+        throw new Error("codex app-server did not return any usable collaboration modes")
+      }
+
+      for (const [kind, mode] of modes) {
+        collaborationModesByKind.set(kind, mode)
+      }
+      return modes
+    })()
+
+    try {
+      return await collaborationModesPromise
+    } catch (error) {
+      collaborationModesPromise = undefined
+      throw error
+    }
+  }
+
+  async function resolveCollaborationMode(
+    kind: CollaborationModeKind,
+    modelOverride: string | undefined,
+    signal?: AbortSignal | undefined,
+  ): Promise<CollaborationMode> {
+    const preset = collaborationModesByKind.get(kind) ?? (await loadCollaborationModes(signal)).get(kind)
+    if (preset === undefined) {
+      throw new Error(`codex app-server does not expose collaboration mode \`${kind}\``)
+    }
+
+    return {
+      mode: kind,
+      settings: {
+        developer_instructions: null,
+        model: modelOverride ?? preset.settings.model,
+        reasoning_effort: preset.settings.reasoning_effort,
+      },
+    }
+  }
+
   async function executeTurn(input: {
     capture: TurnCapture
     interactionHandler?: CodexInteractionHandler | undefined
@@ -476,6 +554,7 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
   }
 
   async function run(options_: {
+    collaborationMode?: CollaborationModeKind | undefined
     cwd: string
     interactionHandler?: CodexInteractionHandler | undefined
     model?: string | undefined
@@ -489,7 +568,7 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
       threadId = await startThread({
         capture,
         cwd: options_.cwd,
-        model: options_.model,
+        model: options_.collaborationMode === undefined ? options_.model : undefined,
         onEvent: options_.onEvent,
         signal: options_.signal,
       })
@@ -502,8 +581,16 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     }
 
     const params: TurnStartParams = {
+      ...(options_.collaborationMode === undefined
+        ? { model: options_.model ?? null }
+        : {
+            collaborationMode: await resolveCollaborationMode(
+              options_.collaborationMode,
+              options_.model,
+              options_.signal,
+            ),
+          }),
       input: [{ text: options_.prompt, text_elements: [], type: "text" }],
-      model: options_.model ?? null,
       threadId,
     }
     let turn: TurnResult

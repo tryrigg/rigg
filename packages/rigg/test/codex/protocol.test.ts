@@ -1,8 +1,22 @@
 import { describe, expect, test } from "bun:test"
 
-import { parseReviewText } from "../../src/codex/protocol"
+import { parseCollaborationModeListResponse, parseReviewText } from "../../src/codex/protocol"
 
 describe("codex/protocol", () => {
+  test("parses collaboration mode presets from the app-server", () => {
+    expect(
+      parseCollaborationModeListResponse({
+        data: [
+          { name: "Plan", mode: "plan", model: "gpt-5.4", reasoning_effort: "medium" },
+          { name: "Default", mode: "default", model: "gpt-5.4", reasoning_effort: null },
+        ],
+      }),
+    ).toEqual([
+      { name: "Plan", mode: "plan", model: "gpt-5.4", reasoning_effort: "medium" },
+      { name: "Default", mode: "default", model: "gpt-5.4", reasoning_effort: null },
+    ])
+  })
+
   test("parses a canonical review finding", () => {
     const result = parseReviewText(
       [

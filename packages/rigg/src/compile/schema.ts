@@ -615,6 +615,14 @@ const CodexRunWithSchema = z
   })
   .strict()
 
+const CodexPlanWithSchema = z
+  .object({
+    action: z.literal("plan"),
+    model: z.string().min(1).optional(),
+    prompt: z.string().min(1),
+  })
+  .strict()
+
 const WriteFileWithSchema = z
   .object({
     content: z.string(),
@@ -640,7 +648,7 @@ export type ShellNode = BaseNode & {
 
 export type CodexNode = BaseNode & {
   type: "codex"
-  with: z.infer<typeof CodexReviewWithSchema> | z.infer<typeof CodexRunWithSchema>
+  with: z.infer<typeof CodexPlanWithSchema> | z.infer<typeof CodexReviewWithSchema> | z.infer<typeof CodexRunWithSchema>
 }
 
 export type WriteFileNode = BaseNode & {
@@ -723,7 +731,7 @@ const ShellNodeSchema: z.ZodType<ShellNode> = BaseNodeSchema.extend({
 
 const CodexNodeSchema: z.ZodType<CodexNode> = BaseNodeSchema.extend({
   type: z.literal("codex"),
-  with: z.union([CodexReviewWithSchema, CodexRunWithSchema]),
+  with: z.union([CodexReviewWithSchema, CodexRunWithSchema, CodexPlanWithSchema]),
 }).strict()
 
 const WriteFileNodeSchema: z.ZodType<WriteFileNode> = BaseNodeSchema.extend({

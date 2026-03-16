@@ -286,6 +286,14 @@ describe("compile/validate", () => {
               id: "review-targets",
               steps: [
                 {
+                  id: "plan",
+                  type: "codex",
+                  with: {
+                    action: "plan",
+                    prompt: "Clarify scope and propose a plan.",
+                  },
+                },
+                {
                   id: "uncommitted",
                   type: "codex",
                   with: {

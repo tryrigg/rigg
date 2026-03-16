@@ -124,6 +124,12 @@ describe("run/adapters", () => {
     const root = await mkdtemp(join(tmpdir(), "rigg-codex-run-app-server-"))
     try {
       const binDir = await installFakeCodex(root, {
+        threadStartExpectParams: {
+          cwd: root,
+          experimentalRawEvents: false,
+          model: null,
+          persistExtendedHistory: false,
+        },
         turnStart: {
           dispatch: "immediate",
           steps: [
@@ -392,6 +398,12 @@ describe("run/adapters", () => {
     const root = await mkdtemp(join(tmpdir(), "rigg-codex-review-app-server-"))
     try {
       const binDir = await installFakeCodex(root, {
+        threadStartExpectParams: {
+          cwd: root,
+          experimentalRawEvents: false,
+          model: null,
+          persistExtendedHistory: false,
+        },
         reviewStart: {
           steps: [
             {
@@ -466,6 +478,123 @@ describe("run/adapters", () => {
         overall_correctness: "unknown",
         overall_explanation: "Looks solid overall with minor polish suggested.",
       })
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("runs codex plan steps with the built-in collaboration mode preset", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-codex-plan-app-server-"))
+    try {
+      const binDir = await installFakeCodex(root, {
+        threadStartExpectParams: {
+          cwd: root,
+          experimentalRawEvents: false,
+          model: null,
+          persistExtendedHistory: false,
+        },
+        collaborationModeListResult: {
+          data: [
+            { name: "Plan", mode: "plan", model: "gpt-5.4", reasoning_effort: "medium" },
+            { name: "Default", mode: "default", model: "gpt-5.4", reasoning_effort: null },
+          ],
+        },
+        turnStart: {
+          expectParams: {
+            collaborationMode: {
+              mode: "plan",
+              settings: {
+                developer_instructions: null,
+                model: "gpt-5.5",
+                reasoning_effort: "medium",
+              },
+            },
+            input: [{ text: "Ask one clarifying question, then return the plan.", text_elements: [], type: "text" }],
+            threadId: "__THREAD_ID__",
+          },
+          steps: [
+            {
+              kind: "request",
+              method: "item/tool/requestUserInput",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                itemId: "input_1",
+                questions: [
+                  {
+                    id: "choice",
+                    header: "Choice",
+                    question: "Pick one",
+                    isOther: false,
+                    isSecret: false,
+                    options: [{ label: "A", description: "Pick A" }],
+                  },
+                ],
+              },
+              expectResult: {
+                answers: {
+                  choice: {
+                    answers: ["A"],
+                  },
+                },
+              },
+            },
+            {
+              kind: "notification",
+              method: "item/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                item: {
+                  type: "agentMessage",
+                  id: "msg_1",
+                  text: "plan ready",
+                  phase: null,
+                },
+              },
+            },
+            {
+              kind: "notification",
+              method: "turn/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turn: { id: "__TURN_ID__", items: [], status: "completed", error: null },
+              },
+            },
+          ],
+        },
+      })
+
+      const result = await runActionStep(
+        {
+          type: "codex",
+          with: {
+            action: "plan",
+            model: "gpt-5.5",
+            prompt: "Ask one clarifying question, then return the plan.",
+          },
+        },
+        renderContext(),
+        {
+          cwd: root,
+          env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+          interactionHandler: async (request) => {
+            if (request.kind !== "user_input") {
+              throw new Error(`unexpected interaction ${request.kind}`)
+            }
+
+            return {
+              answers: {
+                choice: { answers: ["A"] },
+              },
+              kind: "user_input",
+            }
+          },
+        },
+      )
+
+      expect(result.exitCode).toBe(0)
+      expect(result.result).toBe("plan ready")
     } finally {
       await rm(root, { force: true, recursive: true })
     }

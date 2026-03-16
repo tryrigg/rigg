@@ -30,6 +30,16 @@ type FakeRpcStep =
 export type FakeCodexScenario = {
   accountReadResult?: Record<string, unknown> | undefined
   accountReadDelayMs?: number | undefined
+  collaborationModeListResult?:
+    | {
+        data: Array<{
+          mode?: string | null | undefined
+          model?: string | null | undefined
+          name: string
+          reasoning_effort?: string | null | undefined
+        }>
+      }
+    | undefined
   initializeDelayMs?: number | undefined
   reviewStart?: {
     dispatch?: "deferred" | "immediate" | undefined
@@ -51,17 +61,20 @@ export type FakeCodexScenario = {
   }
   turnStart?: {
     dispatch?: "deferred" | "immediate" | undefined
+    expectParams?: Record<string, unknown> | undefined
     response?: Record<string, unknown> | undefined
     steps: FakeRpcStep[]
   }
   turnStarts?:
     | Array<{
         dispatch?: "deferred" | "immediate" | undefined
+        expectParams?: Record<string, unknown> | undefined
         response?: Record<string, unknown> | undefined
         steps: FakeRpcStep[]
       }>
     | undefined
   threadStartDelayMs?: number | undefined
+  threadStartExpectParams?: Record<string, unknown> | undefined
   versionOutput?: string | undefined
 }
 
@@ -162,9 +175,25 @@ rl.on("line", async (line) => {
     if ((scenario.threadStartDelayMs ?? 0) > 0) {
       await new Promise((resolve) => setTimeout(resolve, scenario.threadStartDelayMs));
     }
+    if (scenario.threadStartExpectParams !== undefined) {
+      const expected = stableStringify(scenario.threadStartExpectParams);
+      const actual = stableStringify(message.params ?? null);
+      if (expected !== actual) {
+        throw new Error("unexpected thread/start params: " + actual + " !== " + expected);
+      }
+    }
     const threadId = "thread_" + nextThreadId++;
     respond(message.id, { thread: { id: threadId } });
     notify("thread/started", { thread: { id: threadId } });
+    return;
+  }
+  if (message.method === "collaborationMode/list") {
+    respond(message.id, scenario.collaborationModeListResult ?? {
+      data: [
+        { name: "Plan", mode: "plan", model: "gpt-5.4", reasoning_effort: "medium" },
+        { name: "Default", mode: "default", model: "gpt-5.4", reasoning_effort: null },
+      ],
+    });
     return;
   }
   if (message.method === "turn/start") {
@@ -173,6 +202,13 @@ rl.on("line", async (line) => {
       : scenario.turnStart;
     const turnId = "turn_" + nextTurnId++;
     const context = { kind: "turn", threadId: message.params.threadId, turnId };
+    if (definition?.expectParams !== undefined) {
+      const expected = stableStringify(materialize(definition.expectParams, context));
+      const actual = stableStringify(message.params ?? null);
+      if (expected !== actual) {
+        throw new Error("unexpected turn/start params: " + actual + " !== " + expected);
+      }
+    }
     activeTurns.set(turnId, context);
     respond(message.id, definition?.response ?? { turn: { id: turnId, items: [], status: "inProgress", error: null } });
     const launch = () => {

@@ -35,6 +35,17 @@
 
 `codex run` returns plain text.
 
+## type: codex (action: plan)
+
+| Field         | Type     | Required |
+| ------------- | -------- | -------- |
+| `with.action` | `plan`   | Yes      |
+| `with.prompt` | template | Yes      |
+| `with.model`  | string   | No       |
+
+`codex plan` returns plain text and uses Codex's built-in Plan collaboration mode.
+Plan steps are planning-only and must not mutate repo-tracked files.
+
 ## type: codex (action: review)
 
 | Field                       | Type                                | Required  |

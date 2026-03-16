@@ -27,6 +27,22 @@ const TurnStartResponseSchema = z.object({
   }),
 })
 
+const CollaborationModeKindSchema = z.union([z.literal("default"), z.literal("plan")])
+
+const CollaborationModeMaskSchema = z.object({
+  mode: CollaborationModeKindSchema.nullable().optional(),
+  model: z.string().nullable().optional(),
+  name: z.string(),
+  reasoning_effort: z
+    .union([z.literal("minimal"), z.literal("low"), z.literal("medium"), z.literal("high"), z.literal("xhigh")])
+    .nullable()
+    .optional(),
+})
+
+const CollaborationModeListResponseSchema = z.object({
+  data: z.array(CollaborationModeMaskSchema),
+})
+
 const ErrorNotificationSchema = z.object({
   message: z.string().optional(),
   threadId: NullableStringSchema,
@@ -147,6 +163,15 @@ export type ReviewThreadTarget =
   | { type: "commit"; value: string }
   | { type: "uncommitted" }
 
+export type CollaborationModeKind = z.infer<typeof CollaborationModeKindSchema>
+
+export type CollaborationModeMask = {
+  mode: CollaborationModeKind | null
+  model: string | null
+  name: string
+  reasoning_effort: "minimal" | "low" | "medium" | "high" | "xhigh" | null
+}
+
 export type ReviewStartTarget =
   | { branch: string; type: "baseBranch" }
   | { sha: string; type: "commit" }
@@ -200,6 +225,21 @@ export function parseThreadStartResponse(response: unknown): string {
 
 export function parseTurnStartResponse(method: "review/start" | "turn/start", response: unknown): string {
   return parseWithSchema(TurnStartResponseSchema, response, `${method} response did not include a turn id`).turn.id
+}
+
+export function parseCollaborationModeListResponse(response: unknown): CollaborationModeMask[] {
+  const parsed = parseWithSchema(
+    CollaborationModeListResponseSchema,
+    response,
+    "collaborationMode/list response did not include collaboration modes",
+  )
+
+  return parsed.data.map((mask) => ({
+    mode: mask.mode ?? null,
+    model: mask.model ?? null,
+    name: mask.name,
+    reasoning_effort: mask.reasoning_effort ?? null,
+  }))
 }
 
 export function parseErrorNotification(params: unknown): ErrorNotification {

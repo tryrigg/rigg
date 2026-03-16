@@ -356,11 +356,18 @@ function summarizeFrontierDetail(step: ActionNode): string | null {
     return step.with.path
   }
 
-  return step.with.action === "review" ? "codex review" : "codex run"
+  if (step.with.action === "review") {
+    return "codex review"
+  }
+  if (step.with.action === "plan") {
+    return "codex plan"
+  }
+
+  return "codex run"
 }
 
 function frontierPromptPreview(step: ActionNode, context: RenderContext): string | null {
-  if (step.type === "codex" && step.with.action === "run") {
+  if (step.type === "codex" && step.with.action !== "review") {
     return preview(renderStringSafely(step.with.prompt, context))
   }
   if (step.type === "codex" && step.with.action === "review") {

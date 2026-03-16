@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import {
   InputSchema,
+  WorkflowDocumentSchema,
   childLoopScope,
   childNodePath,
   compareFrameId,
@@ -61,6 +62,36 @@ describe("compile/schema", () => {
       default: "draft",
       nullable: true,
       type: "string",
+    })
+  })
+
+  test("accepts codex plan steps in the workflow schema", () => {
+    expect(
+      WorkflowDocumentSchema.parse({
+        id: "plan-step",
+        steps: [
+          {
+            id: "draft_plan",
+            type: "codex",
+            with: {
+              action: "plan",
+              prompt: "Clarify requirements and produce a plan.",
+            },
+          },
+        ],
+      }),
+    ).toEqual({
+      id: "plan-step",
+      steps: [
+        {
+          id: "draft_plan",
+          type: "codex",
+          with: {
+            action: "plan",
+            prompt: "Clarify requirements and produce a plan.",
+          },
+        },
+      ],
     })
   })
 

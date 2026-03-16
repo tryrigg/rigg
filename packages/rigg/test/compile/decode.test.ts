@@ -127,15 +127,39 @@ steps:
       },
       "/workspace/.rigg/check.yaml",
     )
+    const invalidPlanCombination = decodeWorkflowFile(
+      {
+        id: "check",
+        steps: [
+          {
+            type: "codex",
+            with: {
+              action: "plan",
+              prompt: "hello",
+              review: {
+                target: {
+                  type: "uncommitted",
+                },
+              },
+            },
+          },
+        ],
+      },
+      "/workspace/.rigg/check.yaml",
+    )
 
     expect(invalidField.kind).toBe("invalid_workflow")
     expect(invalidAction.kind).toBe("invalid_workflow")
+    expect(invalidPlanCombination.kind).toBe("invalid_workflow")
 
     if (invalidField.kind === "invalid_workflow") {
       expect(invalidField.error.message).toContain("Workflow schema validation failed.")
     }
     if (invalidAction.kind === "invalid_workflow") {
       expect(invalidAction.error.message).toContain("Workflow schema validation failed.")
+    }
+    if (invalidPlanCombination.kind === "invalid_workflow") {
+      expect(invalidPlanCombination.error.message).toContain("Workflow schema validation failed.")
     }
   })
 

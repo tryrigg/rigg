@@ -42,9 +42,9 @@ steps:
   - id: draft
     type: codex
     with:
-      action: run
+      action: plan
       prompt: |
-        Draft an implementation plan.
+        Clarify anything missing, then draft an implementation plan.
         Requirements:
         ${{ inputs.requirements }}
 

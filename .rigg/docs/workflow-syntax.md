@@ -46,6 +46,14 @@ steps:
     prompt: Implement the feature.
     model: gpt-5.4
 
+# Plan mode
+- id: draft_plan
+  type: codex
+  with:
+    action: plan
+    prompt: Clarify the scope and produce an implementation plan.
+    model: gpt-5.4
+
 # Review mode
 - id: review
   type: codex
@@ -58,7 +66,9 @@ steps:
       title: Optional title
 ```
 
-`action: run` returns plain text.
+`action: run` and `action: plan` return plain text.
+`action: plan` uses Codex's built-in Plan collaboration mode and is planning-only.
+It must not mutate repo-tracked files.
 
 For `review.target`:
 
@@ -165,6 +175,7 @@ rigg run <workflow_id> --input key=value
 ## Key Rules
 
 1. Access step outputs via `steps.<id>.result`
-2. `codex` supports `action: run` and `action: review`
-3. `codex run` returns text, while `codex review` returns the built-in review object shape
-4. Unknown YAML keys cause validation errors
+2. `codex` supports `action: run`, `action: plan`, and `action: review`
+3. `codex run` and `codex plan` return text, while `codex review` returns the built-in review object shape
+4. `codex plan` is planning-only and must not mutate repo-tracked files
+5. Unknown YAML keys cause validation errors

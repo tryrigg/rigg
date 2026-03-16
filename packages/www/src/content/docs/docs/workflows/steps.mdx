@@ -21,7 +21,7 @@ Runs a shell command.
 
 ## codex
 
-Two actions are supported: `run` and `review`.
+Three actions are supported: `run`, `plan`, and `review`.
 
 ### run
 
@@ -37,6 +37,21 @@ Generates or modifies code.
 ```
 
 `steps.<id>.result` is always the final plain-text response.
+
+### plan
+
+Uses Codex's built-in Plan collaboration mode to gather context, ask clarifying questions when needed, and return a plan without mutating repo-tracked files.
+
+```yaml
+- id: draft_plan
+  type: codex
+  with:
+    action: plan
+    prompt: Clarify the scope and produce an implementation plan.
+    model: gpt-5.4
+```
+
+`steps.<id>.result` is the final plain-text planning response.
 
 ### review
 
@@ -93,4 +108,5 @@ Writes content to a file.
 ## Result access
 
 - `codex run`: `steps.draft.result`
+- `codex plan`: `steps.draft_plan.result`
 - `codex review`: `steps.review.result.findings`

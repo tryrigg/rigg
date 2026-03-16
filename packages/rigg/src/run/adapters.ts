@@ -135,44 +135,21 @@ async function runCodexStep(
   context: RenderContext,
   options: ActionExecutionOptions,
 ): Promise<ActionStepOutput> {
-  return step.with.action === "review"
-    ? runCodexReviewStep(step, context, options)
-    : runCodexRunStep(step, context, options)
-}
-
-async function runCodexRunStep(
-  step: CodexNode,
-  context: RenderContext,
-  options: ActionExecutionOptions,
-): Promise<ActionStepOutput> {
-  const runConfig = step.with
-  if (runConfig.action !== "run") {
-    throw new Error("expected codex run step")
+  switch (step.with.action) {
+    case "review":
+      return await runCodexReviewStep(step.with, context, options)
+    case "plan":
+      return await runCodexPromptStep(step.with, context, options)
+    case "run":
+      return await runCodexPromptStep(step.with, context, options)
   }
-
-  return await withCodexSession(options, async (session) => {
-    const result = await session.run({
-      cwd: options.cwd,
-      interactionHandler: options.interactionHandler,
-      model: runConfig.model,
-      onEvent: options.onProviderEvent,
-      prompt: renderString(runConfig.prompt, context),
-      signal: options.signal,
-    })
-    return result
-  })
 }
 
 async function runCodexReviewStep(
-  step: CodexNode,
+  reviewConfig: Extract<CodexNode["with"], { action: "review" }>,
   context: RenderContext,
   options: ActionExecutionOptions,
 ): Promise<ActionStepOutput> {
-  const reviewConfig = step.with
-  if (reviewConfig.action !== "review") {
-    throw new Error("expected codex review step")
-  }
-
   return await withCodexSession(options, async (session) => {
     const result = await session.review({
       cwd: options.cwd,
@@ -181,6 +158,25 @@ async function runCodexReviewStep(
       onEvent: options.onProviderEvent,
       signal: options.signal,
       target: inferReviewScope(reviewConfig.review, context),
+    })
+    return result
+  })
+}
+
+async function runCodexPromptStep(
+  config: Extract<CodexNode["with"], { action: "plan" | "run" }>,
+  context: RenderContext,
+  options: ActionExecutionOptions,
+): Promise<ActionStepOutput> {
+  return await withCodexSession(options, async (session) => {
+    const result = await session.run({
+      collaborationMode: config.action === "plan" ? "plan" : undefined,
+      cwd: options.cwd,
+      interactionHandler: options.interactionHandler,
+      model: config.model,
+      onEvent: options.onProviderEvent,
+      prompt: renderString(config.prompt, context),
+      signal: options.signal,
     })
     return result
   })

@@ -167,7 +167,6 @@ steps:
         target:
           type: commit
           sha: ${{ inputs.commit_sha }}
-        title: Review selected commit
 ```
 
 ## Common Pattern: Structured output

@@ -45,7 +45,6 @@
 | `with.review.target.type`   | `uncommitted` \| `base` \| `commit` | Yes       |
 | `with.review.target.branch` | template                            | if base   |
 | `with.review.target.sha`    | template                            | if commit |
-| `with.review.title`         | template                            | No        |
 
 Built-in review result shape:
 

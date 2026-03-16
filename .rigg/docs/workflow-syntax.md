@@ -166,8 +166,6 @@ Built-in functions: `format`, `toJSON`, `join`, `len`
 rigg init
 rigg validate
 rigg run <workflow_id> --input key=value
-rigg run <workflow_id> --json
-rigg run <workflow_id> --quiet
 ```
 
 ## Key Rules

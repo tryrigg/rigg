@@ -15,18 +15,29 @@ steps:
       action: run
       model: gpt-5.3-codex
       prompt: |
-        This run is intentionally for debugging Codex interaction handling inside Rigg.
+        This run is specifically for debugging Rigg's Codex user-input handling.
 
-        Follow this checklist in order:
+        You must use the `request_user_input` tool exactly once before doing anything else.
+        Do not ask the question in a normal assistant message.
+        Do not continue until the tool returns an answer.
+        If you ask in plain text instead of using `request_user_input`, that is a failure.
 
-        1. Ask the operator exactly one user-input question asking for a short debug label.
-           - If the operator gives no usable label, use `${{ inputs.fallback_label }}`.
-        2. Run exactly one harmless shell command: `pwd`
-        3. Write a small text file to `${{ inputs.artifact_path }}` with these lines:
+        Ask exactly one free-form question with:
+        - id: debug_label
+        - header: Debug Label
+        - question: What short debug label should I use for this run?
+
+        After the tool returns:
+        - If the answer is empty or unusable, use `${{ inputs.fallback_label }}`.
+        - Otherwise use the returned label.
+
+        Then follow this checklist in order:
+        1. Run exactly one harmless shell command: `pwd`
+        2. Write a small text file to `${{ inputs.artifact_path }}` with these lines:
            - purpose=debug-codex-interactions
            - label=<resolved label>
            - command=pwd
-        4. Return a short plain-text summary of what happened.
+        3. Return a short plain-text summary of what happened.
 
         Constraints:
         - Do not inspect unrelated files.

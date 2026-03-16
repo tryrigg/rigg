@@ -18,7 +18,6 @@ steps:
             target:
               type: base
               branch: ${{ inputs.base_branch }}
-            title: Review current branch diff
 
       - id: judge
         type: codex

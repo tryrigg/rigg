@@ -734,7 +734,6 @@ const CodexReviewTargetSchema = z.union([
 const CodexReviewSchema = z
   .object({
     target: CodexReviewTargetSchema,
-    title: z.string().min(1).optional(),
   })
   .strict()
 

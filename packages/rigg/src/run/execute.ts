@@ -1,5 +1,4 @@
-import { renderTemplate, renderTemplateString } from "../compile/expr"
-import { createCodexRuntimeSession, type CodexRuntimeSession } from "../codex/runtime"
+import { renderTemplate } from "../compile/expr"
 import {
   childLoopScope,
   childNodePath,
@@ -25,14 +24,11 @@ import {
   LoopExhaustedError,
   StepInterruptedError,
   createEvaluationError,
-  createStepFailedError,
   isStepInterrupted,
   normalizeExecutionError,
 } from "./error"
-import { describeFrontier, describeParallelFrontier, shouldPauseBeforeStep } from "./frontier"
 import {
   createNodeSnapshot,
-  currentNodeSnapshot,
   finishNode,
   finishThrownControlNode,
   markCaseSkipped,
@@ -40,32 +36,38 @@ import {
   startNode,
   statusForBinding,
   summarizeCompletedNode,
+  type NodeLifecycle,
 } from "./node"
+import { evaluateExpression, frontierForPreparedStep, prepareStep, renderEnvironment, type PreparedStep } from "./plan"
 import type { RunControlHandler, RunEvent } from "./progress"
+import { snapshotRunEvent } from "./snapshot"
 import type { BarrierReason, CompletedNodeSummary, RunReason, RunSnapshot } from "./schema"
 import type { RenderContext, StepBinding } from "./render"
 import { createInitialRunState, setRunFinished } from "./state"
+import { elapsedMs, timestampNow } from "../util/time"
 
 type ActionStepRunner = typeof runActionStep
+type ExecutionDisposition = "completed" | "failed" | "interrupted"
+type ControlNode = BranchNode | GroupNode | LoopNode | ParallelNode
 
 type ExecutionResult = {
+  barrierContext: BarrierContext
   bindings: Record<string, StepBinding>
-  disposition: "completed" | "failed" | "interrupted"
+  disposition: ExecutionDisposition
   reason: RunReason | undefined
 }
 
 type StepExecutionOutcome = {
   bindingStatus: StepBinding["status"] | null
   completed: CompletedNodeSummary
-  disposition: "completed" | "failed" | "interrupted"
+  disposition: ExecutionDisposition
   reason: RunReason | undefined
   result: unknown
 }
 
 type ExecutionEnvironment = {
-  codexSession?: CodexRuntimeSession | undefined
   controlBroker: ControlBroker
-  controlHandler?: RunControlHandler | undefined
+  controlHandler: RunControlHandler
   cwd: string
   emitEvent: (event: RunEvent) => void
   runActionStep: ActionStepRunner
@@ -73,43 +75,43 @@ type ExecutionEnvironment = {
 }
 
 type ExecutionScope = {
+  barrierMode: "default" | "suppressed"
+  barrierContext: BarrierContext
   env: Record<string, string | undefined>
   frameId: FrameId
   inputs: Record<string, unknown>
-  iterationFrameId: FrameId
-  loopScopeId: string | undefined
+  releasedFrontierNodePaths: Set<NodePath>
   run: Record<string, unknown>
   signal: AbortSignal | undefined
   steps: Record<string, StepBinding>
 }
 
+type BarrierContext = {
+  completed: CompletedNodeSummary | null
+  reason: BarrierReason
+}
+
 export async function executeWorkflow(options: {
-  controlHandler?: RunControlHandler | undefined
+  controlHandler: RunControlHandler
   internals?: { runActionStep?: ActionStepRunner } | undefined
   invocationInputs: Record<string, unknown>
   onEvent?: ((event: RunEvent) => void) | undefined
   parentEnv: Record<string, string | undefined>
   projectRoot: string
+  signal?: AbortSignal | undefined
   workflow: WorkflowDocument
 }): Promise<RunSnapshot> {
   const runId = uuidv7()
-  const startedAt = new Date().toISOString()
+  const startedAt = timestampNow()
   const runState = createInitialRunState(runId, options.workflow.id, startedAt)
   const resolvedRunActionStep = options.internals?.runActionStep ?? runActionStep
   const environment: ExecutionEnvironment = {
     controlHandler: options.controlHandler,
     controlBroker: createControlBroker(),
     cwd: options.projectRoot,
-    emitEvent: (event) => options.onEvent?.(event),
+    emitEvent: (event) => options.onEvent?.(snapshotRunEvent(event)),
     runActionStep: resolvedRunActionStep,
     runState,
-  }
-
-  if (resolvedRunActionStep === runActionStep && workflowContainsCodexStep(options.workflow.steps)) {
-    environment.codexSession = await createCodexRuntimeSession({
-      cwd: options.projectRoot,
-      env: options.parentEnv,
-    })
   }
 
   environment.emitEvent({ kind: "run_started", snapshot: runState })
@@ -124,41 +126,39 @@ export async function executeWorkflow(options: {
     const execution = await executeBlock(
       environment,
       {
+        barrierMode: "default",
+        barrierContext: { completed: null, reason: "run_started" },
         env: { ...options.parentEnv, ...workflowEnv },
         frameId: rootFrameId(),
         inputs: options.invocationInputs,
-        iterationFrameId: rootFrameId(),
-        loopScopeId: undefined,
+        releasedFrontierNodePaths: new Set(),
         run: {},
-        signal: undefined,
+        signal: options.signal,
         steps: {},
       },
       options.workflow.steps,
       "",
-      "run_started",
     )
 
-    const finishedAt = new Date().toISOString()
-    const status =
-      execution.disposition === "failed" ? "failed" : execution.disposition === "interrupted" ? "aborted" : "succeeded"
-    const reason =
-      execution.disposition === "failed"
-        ? (execution.reason ?? "step_failed")
-        : execution.disposition === "interrupted"
-          ? "aborted"
-          : "completed"
+    const finishedAt = timestampNow()
+    const { reason, status } = summarizeRunCompletion(execution)
     setRunFinished(runState, status, reason, finishedAt)
     environment.emitEvent({ kind: "run_finished", snapshot: runState })
     return runState
   } catch (error) {
+    if (isStepInterrupted(error)) {
+      const finishedAt = timestampNow()
+      setRunFinished(runState, "aborted", "aborted", finishedAt)
+      environment.emitEvent({ kind: "run_finished", snapshot: runState })
+      return runState
+    }
+
     const cause = normalizeExecutionError(error)
-    const finishedAt = new Date().toISOString()
+    const finishedAt = timestampNow()
     const status = cause.runReason === "aborted" ? "aborted" : "failed"
     setRunFinished(runState, status, cause.runReason, finishedAt)
     environment.emitEvent({ kind: "run_finished", snapshot: runState })
     throw cause
-  } finally {
-    await environment.codexSession?.close()
   }
 }
 
@@ -167,48 +167,78 @@ async function executeBlock(
   scope: ExecutionScope,
   steps: WorkflowStep[],
   pathPrefix: string,
-  initialBarrierReason: BarrierReason,
 ): Promise<ExecutionResult> {
   const localBindings: Record<string, StepBinding> = {}
-  let previousCompleted: CompletedNodeSummary | null = null
-  let barrierReason = initialBarrierReason
+  let barrierContext = scope.barrierContext
 
   for (const [index, step] of steps.entries()) {
     throwIfAborted(scope.signal)
 
     const nodePath = pathPrefix.length === 0 ? rootNodePath(index) : childNodePath(pathPrefix, index)
     const bindings = { ...scope.steps, ...localBindings }
-    const renderContext: RenderContext = {
-      env: scope.env,
-      inputs: scope.inputs,
-      run: scope.run,
-      steps: bindings,
-    }
-
-    if (shouldPauseBeforeStep(step)) {
-      const frontier = describeFrontier(step, nodePath, scope.frameId, renderContext, environment.cwd)
-      if (frontier.length > 0) {
-        await waitForBarrier(environment, {
-          completed: previousCompleted,
-          frameId: scope.frameId,
-          next: frontier,
-          reason: previousCompleted === null ? barrierReason : "step_completed",
-        })
+    const prepared = prepareStep(
+      step,
+      nodePath,
+      {
+        env: scope.env,
+        frameId: scope.frameId,
+        inputs: scope.inputs,
+        run: scope.run,
+        steps: bindings,
+      },
+      environment.cwd,
+    )
+    const frontier = frontierForPreparedStep(
+      prepared,
+      nodePath,
+      {
+        env: scope.env,
+        frameId: scope.frameId,
+        inputs: scope.inputs,
+        run: scope.run,
+        steps: bindings,
+      },
+      environment.cwd,
+    )
+    if (frontier.length > 0) {
+      const frontierReleased = consumeReleasedFrontier(
+        scope.releasedFrontierNodePaths,
+        frontier.map((node) => node.node_path),
+      )
+      if (!frontierReleased && scope.barrierMode === "default") {
+        try {
+          await waitForBarrier(environment, {
+            completed: barrierContext.completed,
+            frameId: scope.frameId,
+            next: frontier,
+            reason: barrierContext.reason,
+            signal: scope.signal,
+          })
+        } catch (error) {
+          if (isStepInterrupted(error)) {
+            return {
+              barrierContext,
+              bindings: localBindings,
+              disposition: "interrupted",
+              reason: undefined,
+            }
+          }
+          throw error
+        }
       }
-      previousCompleted = null
-      barrierReason = "step_completed"
     }
 
-    const stepResult = await executeStep(
+    const stepResult = await executePreparedStep(
       environment,
       {
         ...scope,
+        barrierContext,
         steps: bindings,
       },
-      step,
+      prepared,
       nodePath,
     )
-    previousCompleted = stepResult.completed
+    barrierContext = nextBarrierContext(stepResult.completed)
 
     if (step.id !== undefined && stepResult.bindingStatus !== null) {
       localBindings[step.id] = {
@@ -219,6 +249,7 @@ async function executeBlock(
 
     if (stepResult.disposition !== "completed") {
       return {
+        barrierContext,
         bindings: localBindings,
         disposition: stepResult.disposition,
         reason: stepResult.reason,
@@ -226,28 +257,38 @@ async function executeBlock(
     }
   }
 
-  return { bindings: localBindings, disposition: "completed", reason: undefined }
+  return { barrierContext, bindings: localBindings, disposition: "completed", reason: undefined }
 }
 
-async function executeStep(
-  environment: ExecutionEnvironment,
-  scope: ExecutionScope,
-  step: WorkflowStep,
-  nodePath: NodePath,
-): Promise<StepExecutionOutcome> {
-  const renderContext: RenderContext = {
-    env: scope.env,
-    inputs: scope.inputs,
-    run: scope.run,
-    steps: scope.steps,
+function consumeReleasedFrontier(releasedFrontierNodePaths: Set<NodePath>, frontierNodePaths: NodePath[]): boolean {
+  if (frontierNodePaths.length === 0) {
+    return false
   }
 
-  if (step.if !== undefined) {
-    const condition = evaluateExpression(step.if, renderContext)
-    if (!condition) {
+  for (const nodePath of frontierNodePaths) {
+    if (!releasedFrontierNodePaths.has(nodePath)) {
+      return false
+    }
+  }
+
+  for (const nodePath of frontierNodePaths) {
+    releasedFrontierNodePaths.delete(nodePath)
+  }
+
+  return true
+}
+
+async function executePreparedStep(
+  environment: ExecutionEnvironment,
+  scope: ExecutionScope,
+  prepared: PreparedStep,
+  nodePath: NodePath,
+): Promise<StepExecutionOutcome> {
+  switch (prepared.kind) {
+    case "skipped": {
       const snapshot = recordSkippedStep(
         environment.runState,
-        step,
+        prepared.step,
         nodePath,
         "condition evaluated to false",
         environment.emitEvent,
@@ -260,24 +301,23 @@ async function executeStep(
         result: null,
       }
     }
-  }
-
-  const stepEnv = renderEnvironment(step.env ?? {}, renderContext)
-  const mergedEnv = { ...scope.env, ...stepEnv }
-
-  switch (step.type) {
-    case "shell":
-    case "codex":
-    case "write_file":
-      return executeAction(environment, scope, step, step, nodePath, mergedEnv)
+    case "action":
+      return executeAction(environment, scope, prepared.step, prepared.step, nodePath, prepared.env)
     case "group":
-      return executeGroup(environment, scope, step, nodePath, mergedEnv)
+      return executeGroup(environment, scope, prepared.step, nodePath, prepared.env)
     case "loop":
-      return executeLoop(environment, scope, step, nodePath, mergedEnv)
+      return executeLoop(environment, scope, prepared.step, nodePath, prepared.env)
     case "branch":
-      return executeBranch(environment, scope, step, nodePath, mergedEnv)
+      return executeBranch(environment, scope, prepared.step, nodePath, prepared.env, prepared.selection)
     case "parallel":
-      return executeParallel(environment, scope, step, nodePath, mergedEnv)
+      return executeParallel(
+        environment,
+        scope,
+        prepared.step,
+        nodePath,
+        prepared.env,
+        prepared.branchReleasedFrontierNodePaths,
+      )
   }
 }
 
@@ -298,11 +338,10 @@ async function executeAction(
       step,
       { env, inputs: scope.inputs, run: scope.run, steps: scope.steps },
       {
-        codexSession: environment.codexSession,
         cwd: environment.cwd,
         env,
         interactionHandler: async (request) =>
-          await resolveInteraction(environment, request, { nodePath, userId: step.id ?? null }),
+          await resolveInteraction(environment, request, { nodePath, userId: step.id ?? null }, scope.signal),
         onOutput: async (stream, chunk) => {
           environment.emitEvent({
             chunk,
@@ -327,7 +366,7 @@ async function executeAction(
     if (isStepInterrupted(error)) {
       const snapshot = createNodeSnapshot(originalStep.id, nodePath, step.type, "interrupted", lifecycle)
       snapshot.duration_ms = 0
-      snapshot.finished_at = new Date().toISOString()
+      snapshot.finished_at = timestampNow()
       snapshot.stderr = error.message
       finishNode(environment.runState, snapshot, environment.emitEvent)
       return {
@@ -341,13 +380,13 @@ async function executeAction(
     const cause = normalizeExecutionError(error)
     const snapshot = createNodeSnapshot(originalStep.id, nodePath, step.type, "failed", lifecycle)
     snapshot.duration_ms = 0
-    snapshot.finished_at = new Date().toISOString()
+    snapshot.finished_at = timestampNow()
     snapshot.stderr = cause.message
     finishNode(environment.runState, snapshot, environment.emitEvent)
     throw cause
   }
 
-  const finishedAt = new Date().toISOString()
+  const finishedAt = timestampNow()
   const interrupted = output.termination === "interrupted"
   const failed = !interrupted && output.exitCode !== 0
   const snapshot = createNodeSnapshot(
@@ -357,7 +396,7 @@ async function executeAction(
     interrupted ? "interrupted" : failed ? "failed" : "succeeded",
     lifecycle,
   )
-  snapshot.duration_ms = Date.parse(finishedAt) - Date.parse(lifecycle.startedAt)
+  snapshot.duration_ms = elapsedMs(lifecycle.startedAt, finishedAt)
   snapshot.exit_code = output.exitCode
   snapshot.finished_at = finishedAt
   snapshot.result = interrupted || failed ? null : output.result
@@ -384,7 +423,15 @@ async function executeGroup(
 ): Promise<StepExecutionOutcome> {
   const lifecycle = startNode(environment.runState, step, nodePath, step.type, environment.emitEvent)
   try {
-    const result = await executeBlock(environment, { ...scope, env }, step.steps, nodePath, "run_started")
+    const result = await executeBlock(
+      environment,
+      {
+        ...scope,
+        env,
+      },
+      step.steps,
+      nodePath,
+    )
     const exports =
       result.disposition !== "completed"
         ? null
@@ -394,45 +441,9 @@ async function executeGroup(
             run: scope.run,
             steps: { ...scope.steps, ...result.bindings },
           })
-
-    const snapshot = createNodeSnapshot(
-      step.id,
-      nodePath,
-      step.type,
-      result.disposition === "failed" ? "failed" : result.disposition === "interrupted" ? "interrupted" : "succeeded",
-      lifecycle,
-    )
-    snapshot.duration_ms = Date.now() - Date.parse(lifecycle.startedAt)
-    snapshot.finished_at = new Date().toISOString()
-    snapshot.result = exports
-    finishNode(environment.runState, snapshot, environment.emitEvent)
-
-    return {
-      bindingStatus: result.disposition === "interrupted" ? null : statusForBinding(snapshot.status),
-      completed: summarizeCompletedNode(snapshot),
-      disposition: result.disposition,
-      reason: result.reason,
-      result: exports,
-    }
+    return finishControlStep(environment, step, nodePath, lifecycle, result.disposition, result.reason, exports)
   } catch (error) {
-    const snapshot = finishThrownControlNode(
-      environment.runState,
-      step,
-      nodePath,
-      lifecycle,
-      error,
-      environment.emitEvent,
-    )
-    if (snapshot.status === "interrupted") {
-      return {
-        bindingStatus: null,
-        completed: summarizeCompletedNode(snapshot),
-        disposition: "interrupted",
-        reason: undefined,
-        result: null,
-      }
-    }
-    throw normalizeExecutionError(error, snapshot.status === "failed" ? "step_failed" : "engine_error")
+    return handleThrownControlStep(environment, step, nodePath, lifecycle, error)
   }
 }
 
@@ -446,6 +457,10 @@ async function executeLoop(
   const lifecycle = startNode(environment.runState, step, nodePath, step.type, environment.emitEvent)
   let lastBindings: Record<string, StepBinding> = {}
   const loopScopeId = childLoopScope(scope.frameId, nodePath)
+  let iterationBarrierContext = {
+    completed: scope.barrierContext.completed,
+    reason: "loop_iteration_started",
+  } satisfies BarrierContext
 
   try {
     for (let iteration = 1; iteration <= step.max; iteration += 1) {
@@ -459,38 +474,34 @@ async function executeLoop(
       const iterationResult = await executeBlock(
         environment,
         {
+          barrierMode: scope.barrierMode,
+          barrierContext: iterationBarrierContext,
           env,
           frameId: iterationFrameId,
           inputs: scope.inputs,
-          iterationFrameId,
-          loopScopeId,
+          releasedFrontierNodePaths: scope.releasedFrontierNodePaths,
           run: iterationRun,
           signal: scope.signal,
           steps: scope.steps,
         },
         step.steps,
         nodePath,
-        "loop_iteration_started",
       )
       lastBindings = iterationResult.bindings
+      iterationBarrierContext = {
+        completed: iterationResult.barrierContext.completed,
+        reason: "loop_iteration_started",
+      }
       if (iterationResult.disposition !== "completed") {
-        const snapshot = createNodeSnapshot(
-          step.id,
+        return finishControlStep(
+          environment,
+          step,
           nodePath,
-          step.type,
-          iterationResult.disposition === "interrupted" ? "interrupted" : "failed",
           lifecycle,
+          iterationResult.disposition,
+          iterationResult.reason,
+          null,
         )
-        snapshot.duration_ms = Date.now() - Date.parse(lifecycle.startedAt)
-        snapshot.finished_at = new Date().toISOString()
-        finishNode(environment.runState, snapshot, environment.emitEvent)
-        return {
-          bindingStatus: iterationResult.disposition === "interrupted" ? null : "failed",
-          completed: summarizeCompletedNode(snapshot),
-          disposition: iterationResult.disposition,
-          reason: iterationResult.reason,
-          result: null,
-        }
       }
 
       const condition = evaluateExpression(step.until, {
@@ -506,41 +517,13 @@ async function executeLoop(
           run: iterationRun,
           steps: { ...scope.steps, ...lastBindings },
         })
-        const snapshot = createNodeSnapshot(step.id, nodePath, step.type, "succeeded", lifecycle)
-        snapshot.duration_ms = Date.now() - Date.parse(lifecycle.startedAt)
-        snapshot.finished_at = new Date().toISOString()
-        snapshot.result = exports
-        finishNode(environment.runState, snapshot, environment.emitEvent)
-        return {
-          bindingStatus: "succeeded",
-          completed: summarizeCompletedNode(snapshot),
-          disposition: "completed",
-          reason: undefined,
-          result: exports,
-        }
+        return finishControlStep(environment, step, nodePath, lifecycle, "completed", undefined, exports)
       }
     }
 
     throw new LoopExhaustedError(step.id ?? nodePath, step.max)
   } catch (error) {
-    const snapshot = finishThrownControlNode(
-      environment.runState,
-      step,
-      nodePath,
-      lifecycle,
-      error,
-      environment.emitEvent,
-    )
-    if (snapshot.status === "interrupted") {
-      return {
-        bindingStatus: null,
-        completed: summarizeCompletedNode(snapshot),
-        disposition: "interrupted",
-        reason: undefined,
-        result: null,
-      }
-    }
-    throw normalizeExecutionError(error, snapshot.status === "failed" ? "step_failed" : "engine_error")
+    return handleThrownControlStep(environment, step, nodePath, lifecycle, error)
   }
 }
 
@@ -550,35 +533,15 @@ async function executeBranch(
   step: BranchNode,
   nodePath: NodePath,
   env: Record<string, string | undefined>,
+  selection: { caseNode: BranchCase; index: number } | null,
 ): Promise<StepExecutionOutcome> {
   const lifecycle = startNode(environment.runState, step, nodePath, step.type, environment.emitEvent)
 
   try {
-    let selectedCase: BranchCase | undefined
-    for (const caseNode of step.cases) {
-      if (caseNode.else === true) {
-        if (selectedCase === undefined) {
-          selectedCase = caseNode
-        }
-        continue
-      }
-
-      const condition = evaluateExpression(caseNode.if ?? "", {
-        env,
-        inputs: scope.inputs,
-        run: scope.run,
-        steps: scope.steps,
-      })
-      if (Boolean(condition)) {
-        selectedCase = caseNode
-        break
-      }
-    }
-
-    if (selectedCase === undefined) {
+    if (selection === null) {
       const snapshot = createNodeSnapshot(step.id, nodePath, step.type, "skipped", lifecycle)
       snapshot.duration_ms = 0
-      snapshot.finished_at = new Date().toISOString()
+      snapshot.finished_at = timestampNow()
       finishNode(environment.runState, snapshot, environment.emitEvent)
       return {
         bindingStatus: "skipped",
@@ -589,9 +552,8 @@ async function executeBranch(
       }
     }
 
-    const selectedIndex = step.cases.indexOf(selectedCase)
     for (const [index, caseNode] of step.cases.entries()) {
-      if (index === selectedIndex) {
+      if (index === selection.index) {
         continue
       }
       markCaseSkipped(environment.runState, caseNode, `${nodePath}/${index}`)
@@ -599,62 +561,37 @@ async function executeBranch(
 
     const branchResult = await executeBlock(
       environment,
-      { ...scope, env },
-      selectedCase.steps,
-      `${nodePath}/${selectedIndex}`,
-      "branch_selected",
+      {
+        ...scope,
+        barrierContext: {
+          completed: scope.barrierContext.completed,
+          reason: "branch_selected",
+        },
+        env,
+      },
+      selection.caseNode.steps,
+      `${nodePath}/${selection.index}`,
     )
     const exports =
       branchResult.disposition !== "completed"
         ? null
-        : evaluateExports(selectedCase.exports, {
+        : evaluateExports(selection.caseNode.exports, {
             env,
             inputs: scope.inputs,
             run: scope.run,
             steps: { ...scope.steps, ...branchResult.bindings },
           })
-
-    const snapshot = createNodeSnapshot(
-      step.id,
-      nodePath,
-      step.type,
-      branchResult.disposition === "failed"
-        ? "failed"
-        : branchResult.disposition === "interrupted"
-          ? "interrupted"
-          : "succeeded",
-      lifecycle,
-    )
-    snapshot.duration_ms = Date.now() - Date.parse(lifecycle.startedAt)
-    snapshot.finished_at = new Date().toISOString()
-    snapshot.result = exports
-    finishNode(environment.runState, snapshot, environment.emitEvent)
-    return {
-      bindingStatus: branchResult.disposition === "interrupted" ? null : statusForBinding(snapshot.status),
-      completed: summarizeCompletedNode(snapshot),
-      disposition: branchResult.disposition,
-      reason: branchResult.reason,
-      result: exports,
-    }
-  } catch (error) {
-    const snapshot = finishThrownControlNode(
-      environment.runState,
+    return finishControlStep(
+      environment,
       step,
       nodePath,
       lifecycle,
-      error,
-      environment.emitEvent,
+      branchResult.disposition,
+      branchResult.reason,
+      exports,
     )
-    if (snapshot.status === "interrupted") {
-      return {
-        bindingStatus: null,
-        completed: summarizeCompletedNode(snapshot),
-        disposition: "interrupted",
-        reason: undefined,
-        result: null,
-      }
-    }
-    throw normalizeExecutionError(error, snapshot.status === "failed" ? "step_failed" : "engine_error")
+  } catch (error) {
+    return handleThrownControlStep(environment, step, nodePath, lifecycle, error)
   }
 }
 
@@ -664,60 +601,47 @@ async function executeParallel(
   step: ParallelNode,
   nodePath: NodePath,
   env: Record<string, string | undefined>,
+  branchReleasedFrontierNodePaths: NodePath[][],
 ): Promise<StepExecutionOutcome> {
   throwIfAborted(scope.signal)
   const lifecycle = startNode(environment.runState, step, nodePath, step.type, environment.emitEvent)
 
   try {
-    const frontier = describeParallelFrontier(
-      step,
-      nodePath,
-      scope.frameId,
-      {
-        env,
-        inputs: scope.inputs,
-        run: scope.run,
-        steps: scope.steps,
-      },
-      environment.cwd,
-    )
-    if (frontier.length > 0) {
-      await waitForBarrier(environment, {
-        completed: summarizeCompletedNode(
-          currentNodeSnapshot(environment.runState, nodePath) ??
-            createNodeSnapshot(step.id, nodePath, step.type, "running", lifecycle),
-        ),
-        frameId: scope.frameId,
-        next: frontier,
-        reason: "parallel_frontier",
-      })
-    }
-
     const branchControllers = step.branches.map(() => createAbortController(scope.signal))
     let branchFailure: RunReason | undefined
     let thrownError: Error | undefined
 
     const branchResults = await Promise.all(
       step.branches.map(async (branch, index) => {
+        const branchController = branchControllers[index]
+        if (branchController === undefined) {
+          throw new Error(`parallel branch controller missing for index ${index}`)
+        }
+
         try {
           const result = await executeBlock(
             environment,
             {
               ...scope,
+              barrierMode: "suppressed",
+              barrierContext: {
+                completed: scope.barrierContext.completed,
+                reason: "parallel_frontier",
+              },
               env,
               frameId: parallelBranchFrameId(scope.frameId, nodePath, index),
-              signal: branchControllers[index]!.controller.signal,
+              releasedFrontierNodePaths: new Set(branchReleasedFrontierNodePaths[index] ?? []),
+              signal: branchController.controller.signal,
             },
             branch.steps,
             `${nodePath}/${index}`,
-            "parallel_frontier",
           )
           if (result.disposition === "failed") {
             branchFailure ??= result.reason ?? "step_failed"
             abortSiblingBranches(branchControllers, index)
           }
           return {
-            error: undefined,
+            kind: "completed" as const,
             result,
           }
         } catch (error) {
@@ -726,7 +650,7 @@ async function executeParallel(
           abortSiblingBranches(branchControllers, index)
           return {
             error: normalized,
-            result: undefined,
+            kind: "threw" as const,
           }
         }
       }),
@@ -740,15 +664,16 @@ async function executeParallel(
     let failed = false
     let interrupted = false
     for (const branchResult of branchResults) {
-      if (branchResult.result !== undefined) {
-        Object.assign(mergedBindings, branchResult.result.bindings)
-        if (branchResult.result.disposition === "failed") {
-          failed = true
-          branchFailure ??= branchResult.result.reason ?? "step_failed"
-        } else if (branchResult.result.disposition === "interrupted") {
-          interrupted = true
-        }
+      if (branchResult.kind === "threw") {
         continue
+      }
+
+      Object.assign(mergedBindings, branchResult.result.bindings)
+      if (branchResult.result.disposition === "failed") {
+        failed = true
+        branchFailure ??= branchResult.result.reason ?? "step_failed"
+      } else if (branchResult.result.disposition === "interrupted") {
+        interrupted = true
       }
     }
     if (thrownError !== undefined) {
@@ -764,57 +689,96 @@ async function executeParallel(
             run: scope.run,
             steps: { ...scope.steps, ...mergedBindings },
           })
-
-    const snapshot = createNodeSnapshot(
-      step.id,
-      nodePath,
-      step.type,
-      failed ? "failed" : interrupted ? "interrupted" : "succeeded",
-      lifecycle,
-    )
-    snapshot.duration_ms = Date.now() - Date.parse(lifecycle.startedAt)
-    snapshot.finished_at = new Date().toISOString()
-    snapshot.result = resultValue
-    finishNode(environment.runState, snapshot, environment.emitEvent)
-    return {
-      bindingStatus: interrupted ? null : statusForBinding(snapshot.status),
-      completed: summarizeCompletedNode(snapshot),
-      disposition: failed ? "failed" : interrupted ? "interrupted" : "completed",
-      reason: branchFailure,
-      result: resultValue,
-    }
-  } catch (error) {
-    const snapshot = finishThrownControlNode(
-      environment.runState,
+    return finishControlStep(
+      environment,
       step,
       nodePath,
       lifecycle,
-      error,
-      environment.emitEvent,
+      failed ? "failed" : interrupted ? "interrupted" : "completed",
+      branchFailure,
+      resultValue,
     )
-    if (snapshot.status === "interrupted") {
-      return {
-        bindingStatus: null,
-        completed: summarizeCompletedNode(snapshot),
-        disposition: "interrupted",
-        reason: undefined,
-        result: null,
-      }
-    }
-    throw normalizeExecutionError(error, snapshot.status === "failed" ? "step_failed" : "engine_error")
+  } catch (error) {
+    return handleThrownControlStep(environment, step, nodePath, lifecycle, error)
   }
 }
 
-function renderEnvironment(envMap: Record<string, string>, context: RenderContext): Record<string, string> {
-  const entries: Array<[string, string]> = []
-  for (const [key, value] of Object.entries(envMap)) {
-    try {
-      entries.push([key, renderTemplateString(value, context)])
-    } catch (error) {
-      throw createStepFailedError(error)
+function finishControlStep(
+  environment: ExecutionEnvironment,
+  step: ControlNode,
+  nodePath: NodePath,
+  lifecycle: NodeLifecycle,
+  disposition: ExecutionDisposition,
+  reason: RunReason | undefined,
+  result: unknown,
+): StepExecutionOutcome {
+  const finishedAt = timestampNow()
+  const snapshot = createNodeSnapshot(step.id, nodePath, step.type, nodeStatusForDisposition(disposition), lifecycle)
+  snapshot.duration_ms = elapsedMs(lifecycle.startedAt, finishedAt)
+  snapshot.finished_at = finishedAt
+  snapshot.result = result
+  finishNode(environment.runState, snapshot, environment.emitEvent)
+
+  return {
+    bindingStatus: disposition === "interrupted" ? null : statusForBinding(snapshot.status),
+    completed: summarizeCompletedNode(snapshot),
+    disposition,
+    reason,
+    result,
+  }
+}
+
+function handleThrownControlStep(
+  environment: ExecutionEnvironment,
+  step: ControlNode,
+  nodePath: NodePath,
+  lifecycle: NodeLifecycle,
+  error: unknown,
+): StepExecutionOutcome {
+  const snapshot = finishThrownControlNode(
+    environment.runState,
+    step,
+    nodePath,
+    lifecycle,
+    error,
+    environment.emitEvent,
+  )
+  if (snapshot.status === "interrupted") {
+    return {
+      bindingStatus: null,
+      completed: summarizeCompletedNode(snapshot),
+      disposition: "interrupted",
+      reason: undefined,
+      result: null,
     }
   }
-  return Object.fromEntries(entries)
+
+  throw normalizeExecutionError(error, snapshot.status === "failed" ? "step_failed" : "engine_error")
+}
+
+function summarizeRunCompletion(execution: Pick<ExecutionResult, "disposition" | "reason">): {
+  reason: RunReason
+  status: "aborted" | "failed" | "succeeded"
+} {
+  switch (execution.disposition) {
+    case "completed":
+      return { reason: "completed", status: "succeeded" }
+    case "failed":
+      return { reason: execution.reason ?? "step_failed", status: "failed" }
+    case "interrupted":
+      return { reason: "aborted", status: "aborted" }
+  }
+}
+
+function nodeStatusForDisposition(disposition: ExecutionDisposition): "failed" | "interrupted" | "succeeded" {
+  switch (disposition) {
+    case "completed":
+      return "succeeded"
+    case "failed":
+      return "failed"
+    case "interrupted":
+      return "interrupted"
+  }
 }
 
 function evaluateExports(exportsMap: Record<string, string> | undefined, context: RenderContext): unknown {
@@ -833,31 +797,11 @@ function evaluateExports(exportsMap: Record<string, string> | undefined, context
   return output
 }
 
-function evaluateExpression(template: string, context: RenderContext): unknown {
-  try {
-    return renderTemplate(template, context)
-  } catch (error) {
-    throw createEvaluationError(error)
+function nextBarrierContext(completed: CompletedNodeSummary): BarrierContext {
+  return {
+    completed,
+    reason: "step_completed",
   }
-}
-
-function workflowContainsCodexStep(steps: WorkflowStep[]): boolean {
-  return steps.some((step) => {
-    switch (step.type) {
-      case "codex":
-        return true
-      case "group":
-      case "loop":
-        return workflowContainsCodexStep(step.steps)
-      case "branch":
-        return step.cases.some((branchCase) => workflowContainsCodexStep(branchCase.steps))
-      case "parallel":
-        return step.branches.some((branch) => workflowContainsCodexStep(branch.steps))
-      case "shell":
-      case "write_file":
-        return false
-    }
-  })
 }
 
 function createAbortController(signal: AbortSignal | undefined): {

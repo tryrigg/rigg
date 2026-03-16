@@ -1,11 +1,16 @@
 import type { OutputDefinition } from "../compile/schema"
 import { validateOutputValue } from "../compile/schema"
 import { createStepFailedError } from "../run/error"
-import { normalizeError } from "../util/error"
+import { isAbortError, normalizeError } from "../util/error"
 import { stringifyJson } from "../util/json"
 import { RIGG_VERSION } from "../version"
 import type { CodexProviderEvent } from "./event"
-import type { CodexInteractionHandler, CodexInteractionRequest, CodexInteractionResolution } from "./interaction"
+import {
+  findApprovalDecisionByIntent,
+  type CodexInteractionHandler,
+  type CodexInteractionRequest,
+  type CodexInteractionResolution,
+} from "./interaction"
 import {
   startCodexAppServer,
   assertSupportedCodexVersion,
@@ -36,8 +41,17 @@ import {
   type ReviewStartTarget,
   type ReviewThreadTarget,
 } from "./protocol"
+import {
+  appendAssistantMessageDelta,
+  completeAssistantMessage,
+  createAssistantTranscript,
+  renderAssistantTranscript,
+  type AssistantTranscript,
+} from "./transcript"
 
-type CodexRuntimeOptions = CodexProcessOptions
+type CodexRuntimeOptions = CodexProcessOptions & {
+  signal?: AbortSignal | undefined
+}
 
 type InitializeParams = {
   capabilities: null
@@ -84,7 +98,7 @@ type TurnCapture = {
 }
 
 type TurnExecution = {
-  assistantMessages: string[]
+  assistantTranscript: AssistantTranscript
   capture: TurnCapture
   cleanup: () => void
   errorMessage: string | null
@@ -96,6 +110,12 @@ type TurnExecution = {
   threadId: string
   turnId: string
 }
+
+type DeferredTurnMessage =
+  | { kind: "notification"; method: string; params: unknown }
+  | { id: string | number; kind: "request"; method: string; params: unknown }
+
+type ExecutionLookup = { execution: TurnExecution; kind: "found" } | { kind: "deferred" } | { kind: "missing" }
 
 type TurnResult = {
   diagnostics: string[]
@@ -142,15 +162,10 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
 
   const appServer = startCodexAppServer(options)
   const rpc = createCodexRpcClient(appServer)
+  const deferredTurnMessages = new Map<string, DeferredTurnMessage[]>()
   const executions = new Map<string, TurnExecution>()
   let closed = false
-
-  const sigintHandler = () => {
-    for (const execution of executions.values()) {
-      void interruptTurn({ threadId: execution.threadId, turnId: execution.turnId })
-    }
-  }
-  globalThis.process.on("SIGINT", sigintHandler)
+  let pendingTurnStarts = 0
 
   function captureEvent(
     capture: TurnCapture,
@@ -162,19 +177,27 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
   }
 
   function appendDiagnostic(line: string): void {
-    let singleExecution: TurnExecution | undefined
-    for (const execution of executions.values()) {
-      execution.capture.diagnostics.push(line)
-      singleExecution = execution
+    if (pendingTurnStarts !== 0 || deferredTurnMessages.size !== 0 || executions.size !== 1) {
+      return
     }
 
-    if (executions.size === 1 && singleExecution !== undefined) {
-      void captureEvent(
-        singleExecution.capture,
-        { kind: "diagnostic", message: line, provider: "codex" },
-        singleExecution.onEvent,
-      )
+    const singleExecution = executions.values().next()
+    if (singleExecution.done) {
+      return
     }
+
+    singleExecution.value.capture.diagnostics.push(line)
+    void captureEvent(
+      singleExecution.value.capture,
+      {
+        kind: "diagnostic",
+        message: line,
+        provider: "codex",
+        threadId: singleExecution.value.threadId,
+        turnId: singleExecution.value.turnId,
+      },
+      singleExecution.value.onEvent,
+    )
   }
 
   function finalizeFailedTurn(turn: TurnResult): CodexStepResult {
@@ -189,6 +212,17 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     }
   }
 
+  function interruptedStepResult(capture: TurnCapture): CodexStepResult {
+    return {
+      exitCode: 130,
+      providerEvents: [...capture.providerEvents],
+      result: null,
+      stderr: capture.diagnostics.join("\n"),
+      stdout: "",
+      termination: "interrupted",
+    }
+  }
+
   function failAllTurns(error: Error): void {
     for (const execution of executions.values()) {
       execution.cleanup()
@@ -197,8 +231,28 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     executions.clear()
   }
 
-  appServer.child.once("exit", (code, signal) => {
-    failAllTurns(new Error(`codex app-server exited unexpectedly (code=${String(code)} signal=${String(signal)})`))
+  function trackExecution(execution: TurnExecution): void {
+    executions.set(execution.turnId, execution)
+  }
+
+  function untrackExecution(turnId: string): TurnExecution | undefined {
+    const execution = executions.get(turnId)
+    if (execution === undefined) {
+      return undefined
+    }
+
+    execution.cleanup()
+    executions.delete(turnId)
+    return execution
+  }
+
+  void appServer.exited.then((exit) => {
+    if (exit.expected) {
+      return
+    }
+    failAllTurns(
+      new Error(`codex app-server exited unexpectedly (code=${String(exit.code)} signal=${String(exit.signal)})`),
+    )
   })
   appServer.stderr.on("line", (line) => {
     if (isBenignCodexDiagnostic(line)) {
@@ -227,15 +281,26 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
       version: RIGG_VERSION,
     },
   }
-  await rpc.request("initialize", initializeParams)
-  rpc.notify("initialized")
-  ensureAuthenticatedAccount(await rpc.request("account/read", { refreshToken: false }))
+  try {
+    await rpc.request("initialize", initializeParams, { signal: options.signal })
+    rpc.notify("initialized")
+    ensureAuthenticatedAccount(await rpc.request("account/read", { refreshToken: false }, { signal: options.signal }))
+  } catch (error) {
+    const bootstrapError = normalizeError(error)
+    try {
+      await close()
+    } catch {
+      // Prefer surfacing the bootstrap failure; close() is best-effort here.
+    }
+    throw bootstrapError
+  }
 
   async function startThread(options_: {
     capture: TurnCapture
     cwd: string
     model?: string | undefined
     onEvent?: ((event: CodexProviderEvent) => Promise<void> | void) | undefined
+    signal?: AbortSignal | undefined
   }): Promise<string> {
     const params: ThreadStartParams = {
       cwd: options_.cwd,
@@ -243,7 +308,7 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
       model: options_.model ?? null,
       persistExtendedHistory: false,
     }
-    const threadId = parseThreadStartResponse(await rpc.request("thread/start", params))
+    const threadId = parseThreadStartResponse(await rpc.request("thread/start", params, { signal: options_.signal }))
     await captureEvent(options_.capture, { kind: "thread_started", provider: "codex", threadId }, options_.onEvent)
     return threadId
   }
@@ -257,27 +322,34 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     signal?: AbortSignal | undefined
     threadId: string
   }): Promise<TurnResult> {
-    const turnId = parseTurnStartResponse(input.method, await rpc.request(input.method, input.params))
-    return await new Promise<TurnResult>((resolve, reject) => {
+    const turnPromise = createPromiseKit<TurnResult>()
+
+    let turnId: string | undefined
+    pendingTurnStarts += 1
+    try {
+      turnId = parseTurnStartResponse(
+        input.method,
+        await rpc.request(input.method, input.params, { signal: input.signal }),
+      )
+      const activeTurnId = turnId
       const execution: TurnExecution = {
-        assistantMessages: [],
+        assistantTranscript: createAssistantTranscript(),
         capture: input.capture,
         cleanup: () => {},
         errorMessage: null,
         interactionHandler: input.interactionHandler,
         onEvent: input.onEvent,
-        reject,
-        resolve,
+        reject: turnPromise.reject,
+        resolve: turnPromise.resolve,
         reviewText: null,
         threadId: input.threadId,
-        turnId,
+        turnId: activeTurnId,
       }
 
       const abortListener = () => {
-        void interruptTurn({ threadId: input.threadId, turnId }).catch((error) => {
-          execution.cleanup()
-          executions.delete(turnId)
-          reject(normalizeError(error))
+        void interruptTurn({ threadId: input.threadId, turnId: activeTurnId }).catch((error) => {
+          untrackExecution(activeTurnId)
+          turnPromise.reject(normalizeError(error))
         })
       }
 
@@ -285,20 +357,29 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
         input.signal?.removeEventListener("abort", abortListener)
       }
 
-      executions.set(turnId, execution)
+      trackExecution(execution)
       void captureEvent(
         input.capture,
-        { kind: "turn_started", provider: "codex", threadId: input.threadId, turnId },
+        { kind: "turn_started", provider: "codex", threadId: input.threadId, turnId: activeTurnId },
         input.onEvent,
       )
 
       if (input.signal?.aborted) {
         abortListener()
-        return
+      } else {
+        input.signal?.addEventListener("abort", abortListener, { once: true })
       }
+    } catch (error) {
+      turnPromise.reject(normalizeError(error))
+    } finally {
+      pendingTurnStarts -= 1
+    }
 
-      input.signal?.addEventListener("abort", abortListener, { once: true })
-    })
+    if (turnId !== undefined) {
+      await flushDeferredTurnMessages(turnId)
+    }
+
+    return await turnPromise.promise
   }
 
   async function run(options_: {
@@ -311,12 +392,22 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     signal?: AbortSignal | undefined
   }): Promise<CodexStepResult> {
     const capture: TurnCapture = { diagnostics: [], providerEvents: [] }
-    const threadId = await startThread({
-      capture,
-      cwd: options_.cwd,
-      model: options_.model,
-      onEvent: options_.onEvent,
-    })
+    let threadId: string
+    try {
+      threadId = await startThread({
+        capture,
+        cwd: options_.cwd,
+        model: options_.model,
+        onEvent: options_.onEvent,
+        signal: options_.signal,
+      })
+    } catch (error) {
+      if (options_.signal?.aborted && isAbortError(error)) {
+        await close()
+        return interruptedStepResult(capture)
+      }
+      throw normalizeError(error)
+    }
 
     const prompt = buildRunPrompt(options_.prompt, options_.outputSchema)
     const params: TurnStartParams = {
@@ -325,15 +416,24 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
       outputSchema: null,
       threadId,
     }
-    const turn = await executeTurn({
-      capture,
-      interactionHandler: options_.interactionHandler,
-      method: "turn/start",
-      onEvent: options_.onEvent,
-      params,
-      signal: options_.signal,
-      threadId,
-    })
+    let turn: TurnResult
+    try {
+      turn = await executeTurn({
+        capture,
+        interactionHandler: options_.interactionHandler,
+        method: "turn/start",
+        onEvent: options_.onEvent,
+        params,
+        signal: options_.signal,
+        threadId,
+      })
+    } catch (error) {
+      if (options_.signal?.aborted && isAbortError(error)) {
+        await close()
+        return interruptedStepResult(capture)
+      }
+      throw normalizeError(error)
+    }
     if (turn.status !== "completed") {
       return finalizeFailedTurn(turn)
     }
@@ -374,26 +474,45 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     target: ReviewThreadTarget
   }): Promise<CodexStepResult> {
     const capture: TurnCapture = { diagnostics: [], providerEvents: [] }
-    const threadId = await startThread({
-      capture,
-      cwd: options_.cwd,
-      model: options_.model,
-      onEvent: options_.onEvent,
-    })
+    let threadId: string
+    try {
+      threadId = await startThread({
+        capture,
+        cwd: options_.cwd,
+        model: options_.model,
+        onEvent: options_.onEvent,
+        signal: options_.signal,
+      })
+    } catch (error) {
+      if (options_.signal?.aborted && isAbortError(error)) {
+        await close()
+        return interruptedStepResult(capture)
+      }
+      throw normalizeError(error)
+    }
 
     const params: ReviewStartParams = {
       target: mapReviewTarget(options_.target),
       threadId,
     }
-    const turn = await executeTurn({
-      capture,
-      interactionHandler: options_.interactionHandler,
-      method: "review/start",
-      onEvent: options_.onEvent,
-      params,
-      signal: options_.signal,
-      threadId,
-    })
+    let turn: TurnResult
+    try {
+      turn = await executeTurn({
+        capture,
+        interactionHandler: options_.interactionHandler,
+        method: "review/start",
+        onEvent: options_.onEvent,
+        params,
+        signal: options_.signal,
+        threadId,
+      })
+    } catch (error) {
+      if (options_.signal?.aborted && isAbortError(error)) {
+        await close()
+        return interruptedStepResult(capture)
+      }
+      throw normalizeError(error)
+    }
     if (turn.status !== "completed") {
       return finalizeFailedTurn(turn)
     }
@@ -425,14 +544,23 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
       return
     }
     closed = true
-    globalThis.process.off("SIGINT", sigintHandler)
+    deferredTurnMessages.clear()
+    failAllTurns(new Error("codex runtime session closed"))
     await rpc.close()
   }
 
   async function handleRequest(id: string | number, method: string, params: unknown): Promise<void> {
     const requestId = String(id)
-    const execution = executionFromParams(params)
-    if (execution?.interactionHandler === undefined) {
+    const executionLookup = lookupExecution({ id, kind: "request", method, params })
+    if (executionLookup.kind === "deferred") {
+      return
+    }
+    if (executionLookup.kind === "missing") {
+      throw new Error("codex app-server referenced an unknown turn")
+    }
+
+    const { execution } = executionLookup
+    if (execution.interactionHandler === undefined) {
       throw new Error(`codex app-server requested ${method}, but no interaction handler is configured`)
     }
 
@@ -440,6 +568,7 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
       const request = parseApprovalRequest("command_execution", requestId, params)
       const resolution = await execution.interactionHandler(request)
       assertResolutionKind("approval", resolution)
+      assertApprovalDecision(request, resolution.decision)
       rpc.respond(id, { decision: resolution.decision })
       return
     }
@@ -447,16 +576,19 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
       const request = parseApprovalRequest("file_change", requestId, params)
       const resolution = await execution.interactionHandler(request)
       assertResolutionKind("approval", resolution)
-      rpc.respond(id, { decision: resolution.decision === "accept" ? "accept" : resolution.decision })
+      assertApprovalDecision(request, resolution.decision)
+      rpc.respond(id, { decision: resolution.decision })
       return
     }
     if (method === "item/permissions/requestApproval") {
       const request = parseApprovalRequest("permissions", requestId, params)
       const resolution = await execution.interactionHandler(request)
       assertResolutionKind("approval", resolution)
+      assertApprovalDecision(request, resolution.decision)
+      const approvedDecision = findApprovalDecisionByIntent(request, "approve")
       rpc.respond(id, {
-        permissions: resolution.decision === "accept" ? readPermissionsPayload(params) : {},
-        scope: resolution.scope ?? "turn",
+        permissions: approvedDecision?.value === resolution.decision ? readPermissionsPayload(params) : {},
+        scope: "turn",
       })
       return
     }
@@ -510,9 +642,21 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     }
 
     if (method === "item/agentMessage/delta") {
-      const execution = requireExecution(params)
+      const executionLookup = lookupExecution({ kind: "notification", method, params })
+      if (executionLookup.kind === "deferred") {
+        return
+      }
+      if (executionLookup.kind === "missing") {
+        throw new Error("codex app-server referenced an unknown turn")
+      }
+
+      const { execution } = executionLookup
       const notification = parseMessageDeltaNotification(params)
       if (notification.text !== null && notification.text.length > 0) {
+        appendAssistantMessageDelta(execution.assistantTranscript, {
+          itemId: notification.itemId,
+          text: notification.text,
+        })
         await captureEvent(
           execution.capture,
           {
@@ -530,20 +674,28 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     }
 
     if (method === "item/started" || method === "item/completed") {
-      const execution = requireExecution(params)
+      const executionLookup = lookupExecution({ kind: "notification", method, params })
+      if (executionLookup.kind === "deferred") {
+        return
+      }
+      if (executionLookup.kind === "missing") {
+        throw new Error("codex app-server referenced an unknown turn")
+      }
+
+      const { execution } = executionLookup
       const { item } = parseItemNotification(params)
 
       if (method === "item/completed") {
         const assistantMessage = parseCompletedAssistantMessage(item)
         if (assistantMessage !== null) {
-          execution.assistantMessages.push(assistantMessage.text)
+          const text = completeAssistantMessage(execution.assistantTranscript, assistantMessage)
           await captureEvent(
             execution.capture,
             {
               itemId: assistantMessage.itemId,
               kind: "message_completed",
               provider: "codex",
-              text: assistantMessage.text,
+              text,
               threadId: execution.threadId,
               turnId: execution.turnId,
             },
@@ -575,6 +727,9 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
       const notification = parseTurnCompletedNotification(params)
       const execution = executions.get(notification.turnId)
       if (execution === undefined) {
+        if (deferTurnMessage({ kind: "notification", method, params })) {
+          return
+        }
         throw new Error("received turn/completed without an active turn")
       }
       await captureEvent(
@@ -595,11 +750,10 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
         providerEvents: execution.capture.providerEvents,
         reviewText: execution.reviewText,
         status: notification.status,
-        text: execution.assistantMessages.join("\n"),
+        text: renderAssistantTranscript(execution.assistantTranscript),
       }
 
-      execution.cleanup()
-      executions.delete(notification.turnId)
+      untrackExecution(notification.turnId)
       execution.resolve(result)
       return
     }
@@ -619,12 +773,66 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     return undefined
   }
 
-  function requireExecution(params: unknown): TurnExecution {
-    const execution = executionFromParams(params)
-    if (execution === undefined) {
-      throw new Error("codex app-server referenced an unknown turn")
+  function lookupExecution(message: DeferredTurnMessage, allowSingleFallback = true): ExecutionLookup {
+    const execution = executionFromParams(message.params, allowSingleFallback)
+    if (execution !== undefined) {
+      return { execution, kind: "found" }
     }
-    return execution
+    if (deferTurnMessage(message)) {
+      return { kind: "deferred" }
+    }
+    return { kind: "missing" }
+  }
+
+  function deferTurnMessage(message: DeferredTurnMessage): boolean {
+    const turnId = readDeferredTurnId(message)
+    if (turnId === undefined) {
+      return false
+    }
+    if (pendingTurnStarts === 0 && !deferredTurnMessages.has(turnId)) {
+      return false
+    }
+
+    const queued = deferredTurnMessages.get(turnId)
+    if (queued === undefined) {
+      deferredTurnMessages.set(turnId, [message])
+      return true
+    }
+
+    queued.push(message)
+    return true
+  }
+
+  function readDeferredTurnId(message: DeferredTurnMessage): string | undefined {
+    const turnId = readTurnIdFromParams(message.params)
+    if (turnId !== undefined) {
+      return turnId
+    }
+    if (message.kind === "notification" && message.method === "turn/completed") {
+      try {
+        return parseTurnCompletedNotification(message.params).turnId
+      } catch {
+        return undefined
+      }
+    }
+    return undefined
+  }
+
+  async function flushDeferredTurnMessages(turnId: string): Promise<void> {
+    const queued = deferredTurnMessages.get(turnId)
+    if (queued === undefined) {
+      return
+    }
+
+    deferredTurnMessages.delete(turnId)
+    for (const message of queued) {
+      if (message.kind === "notification") {
+        await handleNotification(message.method, message.params)
+        continue
+      }
+
+      await handleRequest(message.id, message.method, message.params)
+    }
   }
 
   return {
@@ -635,6 +843,25 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
   }
 }
 
+function createPromiseKit<T>(): {
+  promise: Promise<T>
+  reject: (error: Error) => void
+  resolve: (value: T) => void
+} {
+  let reject: ((error: Error) => void) | undefined
+  let resolve: ((value: T) => void) | undefined
+  const promise = new Promise<T>((innerResolve, innerReject) => {
+    resolve = innerResolve
+    reject = (error) => innerReject(error)
+  })
+
+  if (resolve === undefined || reject === undefined) {
+    throw new Error("failed to initialize promise kit")
+  }
+
+  return { promise, reject, resolve }
+}
+
 function assertResolutionKind<TKind extends CodexInteractionRequest["kind"]>(
   expected: TKind,
   resolution: CodexInteractionResolution,
@@ -642,4 +869,15 @@ function assertResolutionKind<TKind extends CodexInteractionRequest["kind"]>(
   if (resolution.kind !== expected) {
     throw new Error(`interaction handler returned ${resolution.kind} for ${expected}`)
   }
+}
+
+function assertApprovalDecision(
+  request: Extract<CodexInteractionRequest, { kind: "approval" }>,
+  decision: string,
+): void {
+  if (request.decisions.some((candidate) => candidate.value === decision)) {
+    return
+  }
+
+  throw new Error(`interaction handler returned invalid approval decision: ${decision}`)
 }

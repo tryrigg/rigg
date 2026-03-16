@@ -1,7 +1,14 @@
+export type CodexApprovalDecisionIntent = "approve" | "cancel" | "deny" | null
+
+export type CodexApprovalDecision = {
+  intent: CodexApprovalDecisionIntent
+  value: string
+}
+
 export type CodexApprovalRequest = {
-  availableDecisions: readonly string[]
   command?: string | null | undefined
   cwd?: string | null | undefined
+  decisions: ReadonlyArray<CodexApprovalDecision>
   itemId: string
   kind: "approval"
   message: string
@@ -56,9 +63,8 @@ export type CodexElicitationRequest =
 export type CodexInteractionRequest = CodexApprovalRequest | CodexUserInputRequest | CodexElicitationRequest
 
 export type CodexApprovalResolution = {
-  decision: "accept" | "cancel" | "decline"
+  decision: string
   kind: "approval"
-  scope?: "session" | "turn" | undefined
 }
 
 export type CodexUserInputResolution = {
@@ -78,3 +84,26 @@ export type CodexInteractionResolution = CodexApprovalResolution | CodexUserInpu
 export type CodexInteractionHandler = (
   request: CodexInteractionRequest,
 ) => Promise<CodexInteractionResolution> | CodexInteractionResolution
+
+export function findApprovalDecisionByIntent(
+  request: CodexApprovalRequest,
+  intent: Exclude<CodexApprovalDecisionIntent, null>,
+): CodexApprovalDecision | undefined {
+  return request.decisions.find((decision) => decision.intent === intent)
+}
+
+export function inferApprovalDecisionIntent(value: string): CodexApprovalDecisionIntent {
+  const normalized = value.trim().toLowerCase()
+
+  if (normalized === "accept" || normalized === "allow" || normalized === "approve" || normalized === "approved") {
+    return "approve"
+  }
+  if (normalized === "cancel") {
+    return "cancel"
+  }
+  if (normalized === "decline" || normalized === "deny" || normalized === "denied" || normalized === "reject") {
+    return "deny"
+  }
+
+  return null
+}

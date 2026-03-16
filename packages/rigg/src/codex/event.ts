@@ -62,4 +62,6 @@ export type CodexProviderEvent =
       kind: "diagnostic"
       message: string
       provider: "codex"
+      threadId: string
+      turnId: string
     }

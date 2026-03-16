@@ -5,11 +5,11 @@ import { renderTemplateString } from "../compile/expr"
 import type { ActionNode, CodexNode } from "../compile/schema"
 import type { CodexProviderEvent } from "../codex/event"
 import type { CodexInteractionHandler } from "../codex/interaction"
-import { createCodexRuntimeSession, type CodexRuntimeSession } from "../codex/runtime"
+import { createCodexRuntimeSession } from "../codex/runtime"
 import { filterEnv } from "../util/env"
-import { normalizeError } from "../util/error"
-import { parseJson } from "../util/json"
-import { createStepFailedError, createTimedOutError as createRunTimedOutError } from "./error"
+import { isAbortError } from "../util/error"
+import { parseJsonOutput } from "../codex/protocol"
+import { createStepFailedError, createTimedOutError as createRunTimedOutError, StepInterruptedError } from "./error"
 import type { RenderContext } from "./render"
 
 const PROVIDER_TERMINATE_GRACE_MS = 5 * 1000
@@ -28,7 +28,6 @@ export type ActionStepOutput = {
 }
 
 export type ActionExecutionOptions = {
-  codexSession?: CodexRuntimeSession | undefined
   cwd: string
   env: Record<string, string | undefined>
   interactionHandler?: CodexInteractionHandler | undefined
@@ -195,17 +194,13 @@ function inferReviewScope(
       : never
     : never,
   context: RenderContext,
-):
-  | { type: "base"; value: string }
-  | { title?: string | undefined; type: "commit"; value: string }
-  | { type: "uncommitted" } {
+): { type: "base"; value: string } | { type: "commit"; value: string } | { type: "uncommitted" } {
   const target = review.target
   if (target.type === "base") {
     return { type: "base", value: renderString(target.branch, context) }
   }
   if (target.type === "commit") {
     return {
-      title: review.title === undefined ? undefined : renderString(review.title, context),
       type: "commit",
       value: renderString(target.sha, context),
     }
@@ -413,15 +408,6 @@ async function forwardProcessChunk<TEvent>(
   }
 }
 
-function parseJsonOutput(text: string | undefined, source: "Shell"): unknown {
-  try {
-    return parseJson((text ?? "").trim())
-  } catch (error) {
-    const cause = normalizeError(error)
-    throw createStepFailedError(new Error(`${source} step returned invalid JSON: ${cause.message}`, { cause }))
-  }
-}
-
 function resolveShellInvocation(
   command: string,
   env: Record<string, string | undefined>,
@@ -459,16 +445,21 @@ function createProviderTimedOutError(timeoutMs: number): Error {
 
 async function withCodexSession(
   options: ActionExecutionOptions,
-  action: (session: CodexRuntimeSession) => Promise<ActionStepOutput>,
+  action: (session: Awaited<ReturnType<typeof createCodexRuntimeSession>>) => Promise<ActionStepOutput>,
 ): Promise<ActionStepOutput> {
-  if (options.codexSession !== undefined) {
-    return await action(options.codexSession)
+  let session: Awaited<ReturnType<typeof createCodexRuntimeSession>>
+  try {
+    session = await createCodexRuntimeSession({
+      cwd: options.cwd,
+      env: options.env,
+      signal: options.signal,
+    })
+  } catch (error) {
+    if (options.signal?.aborted && isAbortError(error)) {
+      throw new StepInterruptedError("step interrupted", { cause: error })
+    }
+    throw error
   }
-
-  const session = await createCodexRuntimeSession({
-    cwd: options.cwd,
-    env: options.env,
-  })
   try {
     return await action(session)
   } finally {

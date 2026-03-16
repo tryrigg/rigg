@@ -1,9 +1,10 @@
 import { childNodePath, type BranchCase, type NodePath, type WorkflowStep } from "../compile/schema"
+import { elapsedMs, timestampNow } from "../util/time"
 import { isStepInterrupted, normalizeExecutionError } from "./error"
 import type { RunEvent } from "./progress"
 import type { StepBinding } from "./render"
 import type { CompletedNodeSummary, NodeSnapshot, NodeStatus, RunSnapshot } from "./schema"
-import { nextNodeAttempt, upsertNodeSnapshot } from "./state"
+import { nextNodeAttempt, recalculateRunPhase, upsertNodeSnapshot } from "./state"
 
 export type NodeLifecycle = {
   attempt: number
@@ -25,7 +26,7 @@ export function recordSkippedStep(
 ): NodeSnapshot {
   const snapshot = createNodeSnapshot(step.id, nodePath, step.type, "skipped", {
     attempt: nextNodeAttempt(runState, nodePath),
-    startedAt: new Date().toISOString(),
+    startedAt: timestampNow(),
   })
   snapshot.duration_ms = 0
   snapshot.finished_at = snapshot.started_at
@@ -65,12 +66,11 @@ export function startNode(
 ): NodeLifecycle {
   const lifecycle = {
     attempt: nextNodeAttempt(runState, nodePath),
-    startedAt: new Date().toISOString(),
+    startedAt: timestampNow(),
   }
   const snapshot = createNodeSnapshot(step.id, nodePath, nodeKind, "running", lifecycle)
   upsertNodeSnapshot(runState, snapshot)
-  runState.active_node_path = nodePath
-  runState.phase = "running"
+  recalculateRunPhase(runState)
   emitEvent({
     kind: "node_started",
     node: snapshot,
@@ -82,10 +82,7 @@ export function startNode(
 
 export function finishNode(runState: RunSnapshot, snapshot: NodeSnapshot, emitEvent: EmitEvent): void {
   upsertNodeSnapshot(runState, snapshot)
-  if (runState.active_node_path === snapshot.node_path) {
-    runState.active_node_path = null
-  }
-  runState.phase = snapshot.status === "interrupted" ? "interrupted" : "running"
+  recalculateRunPhase(runState)
   emitEvent({
     kind: "node_completed",
     node: snapshot,
@@ -101,20 +98,14 @@ export function finishThrownControlNode(
   error: unknown,
   emitEvent: EmitEvent,
 ): NodeSnapshot {
-  if (isStepInterrupted(error)) {
-    const snapshot = createNodeSnapshot(step.id, nodePath, step.type, "interrupted", lifecycle)
-    snapshot.duration_ms = Date.now() - Date.parse(lifecycle.startedAt)
-    snapshot.finished_at = new Date().toISOString()
-    snapshot.stderr = error.message
-    finishNode(runState, snapshot, emitEvent)
-    return snapshot
-  }
-
-  const cause = normalizeExecutionError(error)
-  const snapshot = createNodeSnapshot(step.id, nodePath, step.type, "failed", lifecycle)
-  snapshot.duration_ms = Date.now() - Date.parse(lifecycle.startedAt)
-  snapshot.finished_at = new Date().toISOString()
-  snapshot.stderr = cause.message
+  const interrupted = isStepInterrupted(error)
+  const status: NodeStatus = interrupted ? "interrupted" : "failed"
+  const message = interrupted ? error.message : normalizeExecutionError(error).message
+  const finishedAt = timestampNow()
+  const snapshot = createNodeSnapshot(step.id, nodePath, step.type, status, lifecycle)
+  snapshot.duration_ms = elapsedMs(lifecycle.startedAt, finishedAt)
+  snapshot.finished_at = finishedAt
+  snapshot.stderr = message
   finishNode(runState, snapshot, emitEvent)
   return snapshot
 }
@@ -174,7 +165,7 @@ function markBlockSkipped(runState: RunSnapshot, steps: WorkflowStep[], pathPref
     const nodePath = childNodePath(pathPrefix, index)
     const snapshot = createNodeSnapshot(step.id, nodePath, step.type, "skipped", {
       attempt: nextNodeAttempt(runState, nodePath),
-      startedAt: new Date().toISOString(),
+      startedAt: timestampNow(),
     })
     snapshot.duration_ms = 0
     snapshot.finished_at = snapshot.started_at

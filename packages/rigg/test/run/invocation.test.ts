@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test"
 
-import { normalizeInvocationInputs } from "../../src/run/plan"
+import { normalizeInvocationInputs } from "../../src/run/invocation"
 import type { WorkflowDocument } from "../../src/compile/schema"
 
-describe("run/plan", () => {
+describe("run/invocation", () => {
   test("rejects missing required input", () => {
     const workflow: WorkflowDocument = {
       id: "review",

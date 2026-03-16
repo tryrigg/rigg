@@ -10,7 +10,8 @@ import { runWorkflow } from "../run/index"
 import { examplesDoc, schemaReferenceDoc, skillDoc, workflowSyntaxDoc } from "./docs"
 import { planTemplate, reviewBranchTemplate, reviewCommitTemplate, reviewUncommittedTemplate } from "./templates"
 import { renderCompileErrors } from "./output"
-import { createTerminalRunSession } from "./run"
+import { createNonInteractiveRunSession, createTerminalRunSession } from "./run"
+import { StepInterruptedError } from "../run/error"
 
 type CommandResult = {
   exitCode: number
@@ -115,6 +116,26 @@ function toPascalCase(value: string): string {
     .join("")
 }
 
+function createWorkflowInterruptController(): { controller: AbortController; dispose: () => void } {
+  const controller = new AbortController()
+
+  const handleSigint = () => {
+    if (!controller.signal.aborted) {
+      controller.abort(new StepInterruptedError("workflow interrupted by operator"))
+      return
+    }
+
+    process.off("SIGINT", handleSigint)
+    process.kill(process.pid, "SIGINT")
+  }
+
+  process.on("SIGINT", handleSigint)
+  return {
+    controller,
+    dispose: () => process.off("SIGINT", handleSigint),
+  }
+}
+
 export async function runInitCommand(cwd: string): Promise<CommandResult> {
   try {
     return success(await writeInitialWorkspace(cwd))
@@ -168,20 +189,25 @@ export async function runRunCommand(
       return failure([inputs.message])
     }
 
+    const interrupt = createWorkflowInterruptController()
     const runSession =
-      process.stdin.isTTY && process.stderr.isTTY ? createTerminalRunSession(process.stdin, process.stderr) : undefined
+      process.stdin.isTTY && process.stderr.isTTY
+        ? createTerminalRunSession(process.stdin, process.stderr)
+        : createNonInteractiveRunSession()
     const runResult = await (async () => {
       try {
         return await runWorkflow({
-          controlHandler: runSession?.handle,
+          controlHandler: runSession.handle,
           invocationInputs: inputs.inputs,
-          onEvent: runSession?.emit,
+          onEvent: runSession.emit,
           parentEnv: process.env,
           project: projectResult.project,
+          signal: interrupt.controller.signal,
           workflowId,
         })
       } finally {
-        runSession?.close()
+        interrupt.dispose()
+        runSession.close()
       }
     })()
 

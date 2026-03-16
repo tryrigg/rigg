@@ -3,6 +3,10 @@ import { join } from "node:path"
 
 type FakeRpcStep =
   | {
+      kind: "delay"
+      ms: number
+    }
+  | {
       kind: "notification"
       method: string
       params?: Record<string, unknown> | undefined
@@ -14,15 +18,27 @@ type FakeRpcStep =
       params?: Record<string, unknown> | undefined
       requestId?: string | number | undefined
     }
+  | {
+      kind: "stderr"
+      text: string
+    }
+  | {
+      kind: "stdout"
+      text: string
+    }
 
 export type FakeCodexScenario = {
   accountReadResult?: Record<string, unknown> | undefined
+  accountReadDelayMs?: number | undefined
+  initializeDelayMs?: number | undefined
   reviewStart?: {
+    dispatch?: "deferred" | "immediate" | undefined
     response?: Record<string, unknown> | undefined
     steps: FakeRpcStep[]
   }
   reviewStarts?:
     | Array<{
+        dispatch?: "deferred" | "immediate" | undefined
         response?: Record<string, unknown> | undefined
         steps: FakeRpcStep[]
       }>
@@ -32,15 +48,18 @@ export type FakeCodexScenario = {
     steps?: FakeRpcStep[] | undefined
   }
   turnStart?: {
+    dispatch?: "deferred" | "immediate" | undefined
     response?: Record<string, unknown> | undefined
     steps: FakeRpcStep[]
   }
   turnStarts?:
     | Array<{
+        dispatch?: "deferred" | "immediate" | undefined
         response?: Record<string, unknown> | undefined
         steps: FakeRpcStep[]
       }>
     | undefined
+  threadStartDelayMs?: number | undefined
   versionOutput?: string | undefined
 }
 
@@ -49,7 +68,7 @@ export async function installFakeCodex(root: string, scenario: FakeCodexScenario
   await mkdir(binDir, { recursive: true })
 
   const runnerPath = join(binDir, "fake-codex.mjs")
-  await writeFile(runnerPath, buildRunnerSource(scenario), "utf8")
+  await writeFile(runnerPath, buildRunnerSource(root, scenario), "utf8")
 
   const wrapperPath = join(binDir, "codex")
   await writeFile(
@@ -61,13 +80,18 @@ export async function installFakeCodex(root: string, scenario: FakeCodexScenario
   return binDir
 }
 
-function buildRunnerSource(scenario: FakeCodexScenario): string {
+function buildRunnerSource(root: string, scenario: FakeCodexScenario): string {
   return `#!/usr/bin/env node
-import { writeFileSync } from "node:fs";
+import { appendFileSync, writeFileSync } from "node:fs";
 import readline from "node:readline";
 
 const scenario = ${JSON.stringify(scenario)};
 const args = process.argv.slice(2);
+const lifecycleLogPath = ${JSON.stringify(join(root, ".fake-codex-app-server-events.log"))};
+
+function appendLifecycleEvent(kind) {
+  appendFileSync(lifecycleLogPath, kind + ":" + process.pid + "\\n");
+}
 
 if (args[0] === "--version") {
   process.stdout.write((scenario.versionOutput ?? "codex-cli 0.114.0") + "\\n");
@@ -78,6 +102,23 @@ if (args[0] !== "app-server") {
   process.stderr.write("unsupported fake codex invocation\\n");
   process.exit(1);
 }
+
+let didRecordExit = false;
+appendLifecycleEvent("started");
+process.on("SIGTERM", () => {
+  if (!didRecordExit) {
+    didRecordExit = true;
+    appendLifecycleEvent("exit");
+  }
+  process.exit(0);
+});
+process.on("exit", () => {
+  if (didRecordExit) {
+    return;
+  }
+  didRecordExit = true;
+  appendLifecycleEvent("exit");
+});
 
 let nextThreadId = 1;
 let nextTurnId = 1;
@@ -96,6 +137,9 @@ rl.on("line", async (line) => {
 
   const message = JSON.parse(line);
   if (message.method === "initialize") {
+    if ((scenario.initializeDelayMs ?? 0) > 0) {
+      await new Promise((resolve) => setTimeout(resolve, scenario.initializeDelayMs));
+    }
     respond(message.id, { userAgent: "fake-codex/0.0.0 rigg-test/0.0.0" });
     return;
   }
@@ -103,6 +147,9 @@ rl.on("line", async (line) => {
     return;
   }
   if (message.method === "account/read") {
+    if ((scenario.accountReadDelayMs ?? 0) > 0) {
+      await new Promise((resolve) => setTimeout(resolve, scenario.accountReadDelayMs));
+    }
     respond(
       message.id,
       scenario.accountReadResult ?? { account: { type: "apiKey" }, requiresOpenaiAuth: false },
@@ -110,6 +157,9 @@ rl.on("line", async (line) => {
     return;
   }
   if (message.method === "thread/start") {
+    if ((scenario.threadStartDelayMs ?? 0) > 0) {
+      await new Promise((resolve) => setTimeout(resolve, scenario.threadStartDelayMs));
+    }
     const threadId = "thread_" + nextThreadId++;
     respond(message.id, { thread: { id: threadId } });
     notify("thread/started", { thread: { id: threadId } });
@@ -123,9 +173,14 @@ rl.on("line", async (line) => {
     const context = { kind: "turn", threadId: message.params.threadId, turnId };
     activeTurns.set(turnId, context);
     respond(message.id, definition?.response ?? { turn: { id: turnId, items: [], status: "inProgress", error: null } });
-    setTimeout(() => {
+    const launch = () => {
       playSteps(definition?.steps ?? [], context).catch(fail);
-    }, 0);
+    };
+    if (definition?.dispatch === "immediate") {
+      launch();
+    } else {
+      setTimeout(launch, 0);
+    }
     return;
   }
   if (message.method === "review/start") {
@@ -142,9 +197,14 @@ rl.on("line", async (line) => {
         reviewThreadId: message.params.threadId,
       },
     );
-    setTimeout(() => {
+    const launch = () => {
       playSteps(definition?.steps ?? [], context).catch(fail);
-    }, 0);
+    };
+    if (definition?.dispatch === "immediate") {
+      launch();
+    } else {
+      setTimeout(launch, 0);
+    }
     return;
   }
   if (message.method === "turn/interrupt") {
@@ -185,8 +245,23 @@ const pendingResponses = new Map();
 
 async function playSteps(steps, context) {
   for (const step of steps) {
+    if (step.kind === "delay") {
+      await new Promise((resolve) => setTimeout(resolve, step.ms));
+      continue;
+    }
+
     if (step.kind === "notification") {
       notify(step.method, materialize(step.params ?? {}, context));
+      continue;
+    }
+
+    if (step.kind === "stderr") {
+      process.stderr.write(materialize(step.text, context) + "\\n");
+      continue;
+    }
+
+    if (step.kind === "stdout") {
+      process.stdout.write(materialize(step.text, context) + "\\n");
       continue;
     }
 

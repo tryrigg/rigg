@@ -3,7 +3,7 @@ import { workflowById } from "../compile/project"
 import type { RunControlHandler, RunEvent } from "./progress"
 import type { RunSnapshot } from "./schema"
 import { executeWorkflow } from "./execute"
-import { normalizeInvocationInputs } from "./plan"
+import { normalizeInvocationInputs } from "./invocation"
 
 export type RunWorkflowResult =
   | { kind: "completed"; snapshot: RunSnapshot }
@@ -11,11 +11,12 @@ export type RunWorkflowResult =
   | { kind: "invalid_input"; errors: string[] }
 
 export async function runWorkflowCommand(options: {
-  controlHandler?: RunControlHandler | undefined
+  controlHandler: RunControlHandler
   invocationInputs: Record<string, unknown>
   onEvent?: ((event: RunEvent) => void) | undefined
   parentEnv: Record<string, string | undefined>
   project: WorkflowProject
+  signal?: AbortSignal | undefined
   workflowId: string
 }): Promise<RunWorkflowResult> {
   const workflow = workflowById(options.project, options.workflowId)
@@ -39,6 +40,7 @@ export async function runWorkflowCommand(options: {
       onEvent: options.onEvent,
       parentEnv: options.parentEnv,
       projectRoot: options.project.workspace.rootDir,
+      signal: options.signal,
       workflow,
     }),
   }

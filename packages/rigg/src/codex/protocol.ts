@@ -5,7 +5,7 @@ import { createStepFailedError } from "../run/error"
 import { normalizeError } from "../util/error"
 import { parseJson, stringifyJson } from "../util/json"
 import type { CodexProviderEvent } from "./event"
-import type { CodexInteractionRequest } from "./interaction"
+import { inferApprovalDecisionIntent, type CodexInteractionRequest } from "./interaction"
 import type { CodexReviewResult } from "./review"
 
 const REVIEW_BULLET_PATTERN = /^- (?:\[[x ]\] )?(.+?) — (.+:\d+-\d+)$/
@@ -64,7 +64,7 @@ const TurnScopedParamsSchema = z.object({
 })
 
 const ApprovalRequestSchema = z.object({
-  availableDecisions: z.array(z.string()).optional(),
+  availableDecisions: z.array(z.string()),
   command: z.string().optional(),
   cwd: z.string().optional(),
   itemId: z.string(),
@@ -147,12 +147,12 @@ const ReviewItemSchema = z.object({
 
 export type ReviewThreadTarget =
   | { type: "base"; value: string }
-  | { type: "commit"; title?: string | undefined; value: string }
+  | { type: "commit"; value: string }
   | { type: "uncommitted" }
 
 export type ReviewStartTarget =
   | { branch: string; type: "baseBranch" }
-  | { sha: string; title: string | null; type: "commit" }
+  | { sha: string; type: "commit" }
   | { type: "uncommittedChanges" }
 
 export type ErrorNotification = {
@@ -264,9 +264,12 @@ export function parseApprovalRequest(
   )
 
   return {
-    availableDecisions: parsed.availableDecisions ?? [],
     command: parsed.command,
     cwd: parsed.cwd,
+    decisions: parsed.availableDecisions.map((value) => ({
+      intent: inferApprovalDecisionIntent(value),
+      value,
+    })),
     itemId: parsed.itemId,
     kind: "approval",
     message: parsed.reason ?? `${requestKind.replaceAll("_", " ")} approval requested`,
@@ -348,16 +351,16 @@ export function parseElicitationRequest(
 
 export function parseCompletedAssistantMessage(item: Record<string, unknown>): {
   itemId: string | null
-  text: string
+  text: string | null
 } | null {
   const result = AgentMessageItemSchema.safeParse(item)
-  if (!result.success || result.data.text === undefined) {
+  if (!result.success) {
     return null
   }
 
   return {
     itemId: result.data.id ?? null,
-    text: result.data.text,
+    text: result.data.text ?? null,
   }
 }
 
@@ -442,7 +445,6 @@ export function mapReviewTarget(target: ReviewThreadTarget): ReviewStartTarget {
 
   return {
     sha: target.value,
-    title: target.title ?? null,
     type: "commit",
   }
 }
@@ -457,9 +459,9 @@ export function buildRunPrompt(prompt: string, outputSchema: OutputDefinition | 
   )
 }
 
-export function parseJsonOutput(text: string, source: "Codex"): unknown {
+export function parseJsonOutput(text: string | undefined, source: string): unknown {
   try {
-    return parseJson(text.trim())
+    return parseJson((text ?? "").trim())
   } catch (error) {
     const cause = normalizeError(error)
     throw createStepFailedError(new Error(`${source} step returned invalid JSON: ${cause.message}`, { cause }))

@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
 
-import { applyRunEvent, createTerminalUiState, renderTerminalFrame } from "../../src/cli/run"
+import {
+  applyRunEvent,
+  createNonInteractiveRunSession,
+  createTerminalUiState,
+  renderTerminalFrame,
+} from "../../src/cli/run"
 import type { FrontierNode, NodeSnapshot } from "../../src/run/schema"
 import { runSnapshot } from "../fixture/builders"
 
@@ -61,7 +66,6 @@ function barrierSnapshot(
 describe("cli/run", () => {
   test("renders running output without pane or provider transcript UI", () => {
     const snapshot = runSnapshot({
-      active_node_path: "/0",
       nodes: [nodeSnapshot({ finished_at: null, status: "running", stdout: null, duration_ms: null, exit_code: null })],
     })
     const state = createTerminalUiState()
@@ -92,7 +96,6 @@ describe("cli/run", () => {
 
   test("renders codex provider activity inside the running view", () => {
     const snapshot = runSnapshot({
-      active_node_path: "/0",
       nodes: [
         nodeSnapshot({
           node_kind: "codex",
@@ -144,6 +147,8 @@ describe("cli/run", () => {
         kind: "diagnostic",
         message: "Waiting for tool output",
         provider: "codex",
+        threadId: "thread-1",
+        turnId: "turn-1",
       },
       kind: "provider_event",
       node_path: "/0",
@@ -168,6 +173,79 @@ describe("cli/run", () => {
     expect(frame).toContain("  > Reviewing the diff and checking TODO handling.")
     expect(frame).toContain("  > [codex] tool started: shell (rg TODO src)")
     expect(frame).toContain("  > [codex] diagnostic: Waiting for tool output")
+  })
+
+  test("keeps rendering surviving parallel nodes after a sibling completes", () => {
+    const leftRunning = nodeSnapshot({
+      duration_ms: null,
+      exit_code: null,
+      finished_at: null,
+      node_path: "/0/0/0",
+      stdout: null,
+      status: "running",
+      user_id: "left-step",
+    })
+    const rightRunning = nodeSnapshot({
+      duration_ms: null,
+      exit_code: null,
+      finished_at: null,
+      node_path: "/0/1/0",
+      stdout: null,
+      status: "running",
+      user_id: "right-step",
+    })
+    const rightCompleted = nodeSnapshot({
+      node_path: "/0/1/0",
+      status: "succeeded",
+      stdout: "right done\n",
+      user_id: "right-step",
+    })
+    const initialSnapshot = runSnapshot({
+      nodes: [leftRunning],
+    })
+    const parallelSnapshot = runSnapshot({
+      nodes: [leftRunning, rightRunning],
+    })
+    const afterRightCompletion = runSnapshot({
+      nodes: [leftRunning, rightCompleted],
+    })
+    const state = createTerminalUiState()
+
+    applyRunEvent(state, { kind: "run_started", snapshot: initialSnapshot })
+    applyRunEvent(state, {
+      kind: "node_started",
+      node: leftRunning,
+      snapshot: initialSnapshot,
+    })
+    applyRunEvent(state, {
+      chunk: "left branch still running\n",
+      kind: "step_output",
+      node_path: leftRunning.node_path,
+      stream: "stdout",
+      user_id: leftRunning.user_id ?? null,
+    })
+    applyRunEvent(state, {
+      kind: "node_started",
+      node: rightRunning,
+      snapshot: parallelSnapshot,
+    })
+    applyRunEvent(state, {
+      chunk: "right branch finishing\n",
+      kind: "step_output",
+      node_path: rightRunning.node_path,
+      stream: "stdout",
+      user_id: rightRunning.user_id ?? null,
+    })
+    applyRunEvent(state, {
+      kind: "node_completed",
+      node: rightCompleted,
+      snapshot: afterRightCompletion,
+    })
+
+    const frame = renderTerminalFrame(state)
+    expect(frame).toContain("Running: left-step [shell]")
+    expect(frame).toContain("  > left branch still running")
+    expect(frame).not.toContain("Running: right-step [shell]")
   })
 
   test("renders barrier with succeeded step output", () => {
@@ -214,8 +292,8 @@ describe("cli/run", () => {
     })
 
     const longFrame = renderTerminalFrame({
-      activeLiveOutput: null,
       lastCompletedNodePath: "/0",
+      liveOutputs: {},
       snapshot: longOutputSnapshot,
     })
     expect(longFrame).toContain("  1")
@@ -223,8 +301,8 @@ describe("cli/run", () => {
     expect(longFrame).toContain("  … +2 lines")
 
     const stderrFrame = renderTerminalFrame({
-      activeLiveOutput: null,
       lastCompletedNodePath: "/0",
+      liveOutputs: {},
       snapshot: stderrSnapshot,
     })
     expect(stderrFrame).toContain("  (no output)")
@@ -232,8 +310,8 @@ describe("cli/run", () => {
     expect(stderrFrame).toContain("    warning: retrying")
 
     const noOutputFrame = renderTerminalFrame({
-      activeLiveOutput: null,
       lastCompletedNodePath: "/0",
+      liveOutputs: {},
       snapshot: noOutputSnapshot,
     })
     expect(noOutputFrame).toContain("  (no output)")
@@ -250,8 +328,8 @@ describe("cli/run", () => {
     })
 
     const frame = renderTerminalFrame({
-      activeLiveOutput: null,
       lastCompletedNodePath: "/0",
+      liveOutputs: {},
       snapshot,
     })
 
@@ -285,8 +363,8 @@ describe("cli/run", () => {
     })
 
     const frame = renderTerminalFrame({
-      activeLiveOutput: null,
       lastCompletedNodePath: null,
+      liveOutputs: {},
       snapshot,
     })
 
@@ -302,9 +380,12 @@ describe("cli/run", () => {
         kind: "approval",
         node_path: "/1",
         request: {
-          availableDecisions: ["approve", "deny"],
           command: "rm -rf /tmp/build-cache",
           cwd: "/app",
+          decisions: [
+            { intent: "approve", value: "approve" },
+            { intent: "deny", value: "deny" },
+          ],
           itemId: "item-1",
           kind: "approval",
           message: "Clean stale build artifacts",
@@ -380,19 +461,19 @@ describe("cli/run", () => {
     })
 
     const approvalFrame = renderTerminalFrame({
-      activeLiveOutput: null,
       lastCompletedNodePath: null,
+      liveOutputs: {},
       snapshot: approvalSnapshot,
     })
     expect(approvalFrame).toContain("Status   : waiting (approval)")
     expect(approvalFrame).toContain("Approve: rm -rf /tmp/build-cache")
     expect(approvalFrame).toContain("  reason: Clean stale build artifacts")
-    expect(approvalFrame).toContain("[y]approve  [n]deny  [c]cancel")
+    expect(approvalFrame).toContain("[y]approve  [n]deny")
 
     const userInputFrame = renderTerminalFrame(
       {
-        activeLiveOutput: null,
         lastCompletedNodePath: null,
+        liveOutputs: {},
         snapshot: userInputSnapshot,
       },
       { userInputQuestionIndex: 1 },
@@ -404,8 +485,8 @@ describe("cli/run", () => {
     expect(userInputFrame).toContain("Answer:")
 
     const elicitationFrame = renderTerminalFrame({
-      activeLiveOutput: null,
       lastCompletedNodePath: null,
+      liveOutputs: {},
       snapshot: elicitationSnapshot,
     })
     expect(elicitationFrame).toContain("Request: Confirm deployment target")
@@ -451,5 +532,55 @@ describe("cli/run", () => {
     expect(frame).toContain("  Applied 3 migrations.")
     expect(frame).toContain("Run finished.")
     expect(frame).not.toContain("--- first-step")
+  })
+
+  test("uses an explicit non-interactive control policy", async () => {
+    const session = createNonInteractiveRunSession()
+    const snapshot = runSnapshot()
+
+    await expect(
+      session.handle({
+        barrier: {
+          barrier_id: "barrier-1",
+          completed: null,
+          created_at: "2026-03-15T10:01:00.000Z",
+          frame_id: "root",
+          next: [],
+          reason: "run_started",
+        },
+        kind: "step_barrier",
+        signal: new AbortController().signal,
+        snapshot,
+      }),
+    ).resolves.toEqual({ action: "continue", kind: "step_barrier" })
+
+    await expect(
+      session.handle({
+        interaction: {
+          created_at: "2026-03-15T10:01:00.000Z",
+          interaction_id: "approval-1",
+          kind: "approval",
+          node_path: "/1",
+          request: {
+            command: "git push",
+            cwd: "/app",
+            decisions: [
+              { intent: "approve", value: "approve" },
+              { intent: "deny", value: "deny" },
+            ],
+            itemId: "item-1",
+            kind: "approval",
+            message: "Ship the release",
+            requestId: "approval-1",
+            requestKind: "command_execution",
+            turnId: "turn-1",
+          },
+          user_id: "release",
+        },
+        kind: "interaction",
+        signal: new AbortController().signal,
+        snapshot,
+      }),
+    ).rejects.toThrow("workflow requires operator interaction (approval)")
   })
 })

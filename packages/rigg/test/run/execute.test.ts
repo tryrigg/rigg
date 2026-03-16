@@ -4,10 +4,25 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 
 import type { WorkflowDocument } from "../../src/compile/schema"
+import { createNonInteractiveRunSession } from "../../src/cli/run"
 import { StepInterruptedError } from "../../src/run/error"
 import type { RunEvent } from "../../src/run/progress"
 import { executeWorkflow } from "../../src/run/execute"
 import { installFakeCodex } from "../fixture/fake-codex"
+
+const defaultRunControl = createNonInteractiveRunSession()
+
+type ExecuteWorkflowInput = Parameters<typeof executeWorkflow>[0]
+
+function runWorkflow(
+  options: Omit<ExecuteWorkflowInput, "controlHandler"> & { controlHandler?: ExecuteWorkflowInput["controlHandler"] },
+) {
+  const { controlHandler = defaultRunControl.handle, ...rest } = options
+  return executeWorkflow({
+    controlHandler,
+    ...rest,
+  })
+}
 
 describe("run/execute", () => {
   test("uses project root as the execution cwd and write_file base path", async () => {
@@ -36,7 +51,7 @@ describe("run/execute", () => {
         ],
       }
 
-      const snapshot = await executeWorkflow({
+      const snapshot = await runWorkflow({
         invocationInputs: {},
         parentEnv: process.env,
         projectRoot: root,
@@ -57,7 +72,7 @@ describe("run/execute", () => {
     const root = await mkdtemp(join(tmpdir(), "rigg-execute-failed-action-"))
 
     try {
-      const snapshot = await executeWorkflow({
+      const snapshot = await runWorkflow({
         invocationInputs: {},
         parentEnv: process.env,
         projectRoot: root,
@@ -92,7 +107,7 @@ describe("run/execute", () => {
     const root = await mkdtemp(join(tmpdir(), "rigg-execute-failed-control-"))
 
     async function run(workflow: WorkflowDocument) {
-      return executeWorkflow({
+      return runWorkflow({
         invocationInputs: {},
         parentEnv: process.env,
         projectRoot: root,
@@ -203,7 +218,7 @@ describe("run/execute", () => {
 
     try {
       await expect(
-        executeWorkflow({
+        runWorkflow({
           internals: {
             runActionStep: async (step, _context, options) => {
               if (step.id === "slow") {
@@ -292,11 +307,79 @@ describe("run/execute", () => {
     }
   })
 
+  test("aborts the active workflow when the root signal is interrupted", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-root-interrupt-"))
+    const controller = new AbortController()
+    let notifyStepStarted: (() => void) | undefined
+
+    try {
+      const stepStarted = new Promise<void>((resolve) => {
+        notifyStepStarted = resolve
+      })
+
+      const execution = runWorkflow({
+        internals: {
+          runActionStep: async (step, _context, options) => {
+            if (step.id !== "wait") {
+              throw new Error(`unexpected step ${step.id ?? "<anonymous>"}`)
+            }
+
+            await new Promise<void>((resolve, reject) => {
+              const onAbort = () => reject(new StepInterruptedError("root signal interrupted step"))
+              if (options.signal?.aborted) {
+                onAbort()
+                return
+              }
+              options.signal?.addEventListener("abort", onAbort, { once: true })
+              notifyStepStarted?.()
+            })
+
+            return {
+              exitCode: 0,
+              providerEvents: [],
+              result: "finished",
+              stderr: "",
+              stdout: "finished",
+              termination: "completed",
+            }
+          },
+        },
+        invocationInputs: {},
+        parentEnv: process.env,
+        projectRoot: root,
+        signal: controller.signal,
+        workflow: {
+          id: "root-interrupt",
+          steps: [
+            {
+              id: "wait",
+              type: "shell",
+              with: {
+                command: "wait",
+                result: "text",
+              },
+            },
+          ],
+        },
+      })
+
+      await stepStarted
+      controller.abort(new StepInterruptedError("workflow interrupted by operator"))
+
+      const snapshot = await execution
+      expect(snapshot.status).toBe("aborted")
+      expect(snapshot.reason).toBe("aborted")
+      expect(snapshot.nodes.find((node) => node.user_id === "wait")?.status).toBe("interrupted")
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
   test("evaluates loop exports with the current iteration run context", async () => {
     const root = await mkdtemp(join(tmpdir(), "rigg-execute-loop-exports-"))
 
     try {
-      const snapshot = await executeWorkflow({
+      const snapshot = await runWorkflow({
         internals: {
           runActionStep: async () => ({
             exitCode: 0,
@@ -353,7 +436,7 @@ describe("run/execute", () => {
     const barriers: Array<{ next: string[]; reason: string }> = []
 
     try {
-      const snapshot = await executeWorkflow({
+      const snapshot = await runWorkflow({
         controlHandler: async (request) => {
           if (request.kind === "step_barrier") {
             barriers.push({
@@ -410,12 +493,226 @@ describe("run/execute", () => {
     }
   })
 
+  test("preserves completed context and control reason across nested blocks", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-nested-barrier-"))
+    const barriers: Array<{
+      completedKind: string | null
+      completedUserId: string | null
+      next: string[]
+      reason: string
+    }> = []
+
+    try {
+      const snapshot = await runWorkflow({
+        controlHandler: async (request) => {
+          if (request.kind !== "step_barrier") {
+            throw new Error(`unexpected control request ${request.kind}`)
+          }
+          barriers.push({
+            completedKind: request.barrier.completed?.node_kind ?? null,
+            completedUserId: request.barrier.completed?.user_id ?? null,
+            next: request.barrier.next.map((node) => node.user_id ?? node.node_path),
+            reason: request.barrier.reason,
+          })
+          return { action: "continue", kind: "step_barrier" }
+        },
+        internals: {
+          runActionStep: async (step) => ({
+            exitCode: 0,
+            providerEvents: [],
+            result: step.id ?? "ok",
+            stderr: "",
+            stdout: String(step.id ?? "ok"),
+            termination: "completed",
+          }),
+        },
+        invocationInputs: {},
+        parentEnv: process.env,
+        projectRoot: root,
+        workflow: {
+          id: "nested-barrier-context",
+          steps: [
+            {
+              id: "before_group",
+              type: "shell",
+              with: {
+                command: "before-group",
+                result: "text",
+              },
+            },
+            {
+              id: "group",
+              steps: [
+                {
+                  id: "inside_group",
+                  type: "shell",
+                  with: {
+                    command: "inside-group",
+                    result: "text",
+                  },
+                },
+              ],
+              type: "group",
+            },
+            {
+              cases: [
+                {
+                  if: "${{ true }}",
+                  steps: [
+                    {
+                      id: "inside_branch",
+                      type: "shell",
+                      with: {
+                        command: "inside-branch",
+                        result: "text",
+                      },
+                    },
+                  ],
+                },
+              ],
+              id: "branch",
+              type: "branch",
+            },
+            {
+              id: "loop",
+              max: 2,
+              steps: [
+                {
+                  id: "inside_loop",
+                  type: "shell",
+                  with: {
+                    command: "inside-loop",
+                    result: "text",
+                  },
+                },
+              ],
+              type: "loop",
+              until: "${{ run.iteration == 2 }}",
+            },
+          ],
+        },
+      })
+
+      expect(snapshot.status).toBe("succeeded")
+      expect(barriers).toEqual([
+        {
+          completedKind: null,
+          completedUserId: null,
+          next: ["before_group"],
+          reason: "run_started",
+        },
+        {
+          completedKind: "shell",
+          completedUserId: "before_group",
+          next: ["inside_group"],
+          reason: "step_completed",
+        },
+        {
+          completedKind: "group",
+          completedUserId: "group",
+          next: ["inside_branch"],
+          reason: "branch_selected",
+        },
+        {
+          completedKind: "branch",
+          completedUserId: "branch",
+          next: ["inside_loop"],
+          reason: "loop_iteration_started",
+        },
+        {
+          completedKind: "shell",
+          completedUserId: "inside_loop",
+          next: ["inside_loop"],
+          reason: "loop_iteration_started",
+        },
+      ])
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("does not raise barriers for steps that will be skipped", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-skip-barrier-"))
+    const barriers: string[][] = []
+
+    try {
+      await runWorkflow({
+        controlHandler: async (request) => {
+          if (request.kind !== "step_barrier") {
+            throw new Error(`unexpected control request ${request.kind}`)
+          }
+          barriers.push(request.barrier.next.map((node) => node.user_id ?? node.node_path))
+          return { action: "continue", kind: "step_barrier" }
+        },
+        internals: {
+          runActionStep: async () => ({
+            exitCode: 0,
+            providerEvents: [],
+            result: "ok",
+            stderr: "",
+            stdout: "ok",
+            termination: "completed",
+          }),
+        },
+        invocationInputs: {},
+        parentEnv: process.env,
+        projectRoot: root,
+        workflow: {
+          id: "skip-barrier",
+          steps: [
+            {
+              id: "skip_action",
+              if: "${{ false }}",
+              type: "shell",
+              with: {
+                command: "skip-action",
+                result: "text",
+              },
+            },
+            {
+              id: "skip_parallel",
+              if: "${{ false }}",
+              type: "parallel",
+              branches: [
+                {
+                  id: "left",
+                  steps: [
+                    {
+                      id: "left_inner",
+                      type: "shell",
+                      with: {
+                        command: "left-inner",
+                        result: "text",
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+            {
+              id: "run_now",
+              type: "shell",
+              with: {
+                command: "run-now",
+                result: "text",
+              },
+            },
+          ],
+        },
+      })
+
+      expect(barriers).toEqual([["run_now"]])
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
   test("surfaces parallel frontiers as a single barrier", async () => {
     const root = await mkdtemp(join(tmpdir(), "rigg-execute-parallel-barrier-"))
     const barrierNext: string[][] = []
 
     try {
-      await executeWorkflow({
+      await runWorkflow({
         controlHandler: async (request) => {
           if (request.kind === "step_barrier") {
             barrierNext.push(request.barrier.next.map((step) => step.user_id ?? step.node_path))
@@ -454,6 +751,14 @@ describe("run/execute", () => {
                         result: "text",
                       },
                     },
+                    {
+                      id: "left_after",
+                      type: "shell",
+                      with: {
+                        command: "left-after",
+                        result: "text",
+                      },
+                    },
                   ],
                 },
                 {
@@ -467,6 +772,14 @@ describe("run/execute", () => {
                         result: "text",
                       },
                     },
+                    {
+                      id: "right_after",
+                      type: "shell",
+                      with: {
+                        command: "right-after",
+                        result: "text",
+                      },
+                    },
                   ],
                 },
               ],
@@ -476,6 +789,261 @@ describe("run/execute", () => {
       })
 
       expect(barrierNext[0]).toEqual(["left_step", "right_step"])
+      expect(barrierNext).toHaveLength(1)
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("resolves actionable leaves for nested control steps inside parallel frontiers", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-parallel-nested-frontier-"))
+    const barrierNext: string[][] = []
+
+    try {
+      await runWorkflow({
+        controlHandler: async (request) => {
+          if (request.kind === "step_barrier") {
+            barrierNext.push(request.barrier.next.map((step) => step.user_id ?? step.node_path))
+            return { action: "continue", kind: "step_barrier" }
+          }
+          throw new Error(`unexpected control request ${request.kind}`)
+        },
+        internals: {
+          runActionStep: async () => ({
+            exitCode: 0,
+            providerEvents: [],
+            result: "ok",
+            stderr: "",
+            stdout: "ok",
+            termination: "completed",
+          }),
+        },
+        invocationInputs: {},
+        parentEnv: process.env,
+        projectRoot: root,
+        workflow: {
+          id: "parallel-nested-frontier",
+          env: {
+            TARGET_BRANCH: "selected",
+          },
+          steps: [
+            {
+              id: "fanout",
+              type: "parallel",
+              env: {
+                TARGET_BRANCH: "${{ env.TARGET_BRANCH }}",
+              },
+              branches: [
+                {
+                  id: "left",
+                  steps: [
+                    {
+                      id: "left_group",
+                      type: "group",
+                      steps: [
+                        {
+                          id: "left_leaf",
+                          type: "shell",
+                          with: {
+                            command: "left",
+                            result: "text",
+                          },
+                        },
+                      ],
+                    },
+                  ],
+                },
+                {
+                  id: "middle",
+                  steps: [
+                    {
+                      id: "loop_control",
+                      max: 1,
+                      steps: [
+                        {
+                          id: "loop_leaf",
+                          type: "shell",
+                          with: {
+                            command: "middle",
+                            result: "text",
+                          },
+                        },
+                      ],
+                      type: "loop",
+                      until: "${{ true }}",
+                    },
+                  ],
+                },
+                {
+                  id: "right",
+                  steps: [
+                    {
+                      id: "branch_control",
+                      type: "branch",
+                      cases: [
+                        {
+                          if: "${{ env.TARGET_BRANCH == 'selected' }}",
+                          steps: [
+                            {
+                              id: "branch_leaf",
+                              type: "shell",
+                              with: {
+                                command: "right",
+                                result: "text",
+                              },
+                            },
+                          ],
+                        },
+                        {
+                          else: true,
+                          steps: [
+                            {
+                              id: "branch_else_leaf",
+                              type: "shell",
+                              with: {
+                                command: "wrong-right",
+                                result: "text",
+                              },
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      })
+
+      expect(barrierNext[0]).toEqual(["left_leaf", "loop_leaf", "branch_leaf"])
+      expect(barrierNext).toHaveLength(1)
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("does not start codex for an untaken branch", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-branch-lazy-codex-"))
+
+    try {
+      const binDir = await installFakeCodex(root, {
+        versionOutput: "codex-cli 0.113.0",
+      })
+
+      const snapshot = await runWorkflow({
+        invocationInputs: {},
+        parentEnv: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+        projectRoot: root,
+        workflow: {
+          id: "lazy-codex-branch",
+          steps: [
+            {
+              id: "choose",
+              type: "branch",
+              cases: [
+                {
+                  if: "${{ true }}",
+                  steps: [
+                    {
+                      id: "shell_only",
+                      type: "shell",
+                      with: {
+                        command: "printf 'ok'",
+                        result: "text",
+                      },
+                    },
+                  ],
+                },
+                {
+                  else: true,
+                  steps: [
+                    {
+                      id: "never_run_codex",
+                      type: "codex",
+                      with: {
+                        action: "run",
+                        prompt: "Should never run",
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      })
+
+      expect(snapshot.status).toBe("succeeded")
+      expect(snapshot.nodes.find((node) => node.user_id === "shell_only")?.stdout).toBe("ok")
+      expect(snapshot.nodes.find((node) => node.user_id === "never_run_codex")?.status).toBe("skipped")
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("starts codex from the executing step environment", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-step-env-codex-"))
+
+    try {
+      const binDir = await installFakeCodex(root, {
+        turnStart: {
+          steps: [
+            {
+              kind: "notification",
+              method: "item/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                item: {
+                  type: "agentMessage",
+                  id: "msg_1",
+                  text: "done",
+                  phase: null,
+                },
+              },
+            },
+            {
+              kind: "notification",
+              method: "turn/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turn: { id: "__TURN_ID__", items: [], status: "completed", error: null },
+              },
+            },
+          ],
+        },
+      })
+
+      const snapshot = await runWorkflow({
+        invocationInputs: {},
+        parentEnv: {
+          ...process.env,
+          CODEX_BIN_DIR: binDir,
+          PATH: "",
+        },
+        projectRoot: root,
+        workflow: {
+          id: "step-env-codex",
+          steps: [
+            {
+              id: "agent",
+              env: {
+                PATH: "${{ env.CODEX_BIN_DIR }}",
+              },
+              type: "codex",
+              with: {
+                action: "run",
+                prompt: "Do the work",
+              },
+            },
+          ],
+        },
+      })
+
+      expect(snapshot.status).toBe("succeeded")
+      expect(snapshot.nodes.find((node) => node.user_id === "agent")?.stdout).toBe("done")
     } finally {
       await rm(root, { force: true, recursive: true })
     }
@@ -557,7 +1125,7 @@ describe("run/execute", () => {
         },
       })
 
-      const snapshot = await executeWorkflow({
+      const snapshot = await runWorkflow({
         controlHandler: async (request) => {
           if (request.kind === "step_barrier") {
             return { action: "continue", kind: "step_barrier" }
@@ -603,113 +1171,53 @@ describe("run/execute", () => {
 
     try {
       const binDir = await installFakeCodex(root, {
-        turnStarts: [
-          {
-            steps: [
-              {
-                kind: "request",
-                method: "item/tool/requestUserInput",
-                params: {
-                  threadId: "__THREAD_ID__",
-                  turnId: "__TURN_ID__",
-                  itemId: "input_left",
-                  questions: [
-                    {
-                      id: "left",
-                      header: "Left",
-                      question: "Answer left",
-                      isOther: false,
-                      isSecret: false,
-                    },
-                  ],
-                },
-                expectResult: {
-                  answers: {
-                    left: {
-                      answers: ["L"],
-                    },
+        turnStart: {
+          steps: [
+            {
+              kind: "request",
+              method: "item/tool/requestUserInput",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                itemId: "input_shared",
+                questions: [
+                  {
+                    id: "answer",
+                    header: "Answer",
+                    question: "Provide branch-local input",
+                    isOther: false,
+                    isSecret: false,
                   },
+                ],
+              },
+            },
+            {
+              kind: "notification",
+              method: "item/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                item: {
+                  type: "agentMessage",
+                  id: "msg_done",
+                  text: "done",
+                  phase: null,
                 },
               },
-              {
-                kind: "notification",
-                method: "item/completed",
-                params: {
-                  threadId: "__THREAD_ID__",
-                  turnId: "__TURN_ID__",
-                  item: {
-                    type: "agentMessage",
-                    id: "msg_left",
-                    text: "left done",
-                    phase: null,
-                  },
-                },
+            },
+            {
+              kind: "notification",
+              method: "turn/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turn: { id: "__TURN_ID__", items: [], status: "completed", error: null },
               },
-              {
-                kind: "notification",
-                method: "turn/completed",
-                params: {
-                  threadId: "__THREAD_ID__",
-                  turn: { id: "__TURN_ID__", items: [], status: "completed", error: null },
-                },
-              },
-            ],
-          },
-          {
-            steps: [
-              {
-                kind: "request",
-                method: "item/tool/requestUserInput",
-                params: {
-                  threadId: "__THREAD_ID__",
-                  turnId: "__TURN_ID__",
-                  itemId: "input_right",
-                  questions: [
-                    {
-                      id: "right",
-                      header: "Right",
-                      question: "Answer right",
-                      isOther: false,
-                      isSecret: false,
-                    },
-                  ],
-                },
-                expectResult: {
-                  answers: {
-                    right: {
-                      answers: ["R"],
-                    },
-                  },
-                },
-              },
-              {
-                kind: "notification",
-                method: "item/completed",
-                params: {
-                  threadId: "__THREAD_ID__",
-                  turnId: "__TURN_ID__",
-                  item: {
-                    type: "agentMessage",
-                    id: "msg_right",
-                    text: "right done",
-                    phase: null,
-                  },
-                },
-              },
-              {
-                kind: "notification",
-                method: "turn/completed",
-                params: {
-                  threadId: "__THREAD_ID__",
-                  turn: { id: "__TURN_ID__", items: [], status: "completed", error: null },
-                },
-              },
-            ],
-          },
-        ],
+            },
+          ],
+        },
       })
 
-      const snapshot = await executeWorkflow({
+      const snapshot = await runWorkflow({
         controlHandler: async (request) => {
           if (request.kind === "step_barrier") {
             return { action: "continue", kind: "step_barrier" }
@@ -718,9 +1226,14 @@ describe("run/execute", () => {
           if (request.interaction.kind !== "user_input") {
             throw new Error(`unexpected interaction ${request.interaction.kind}`)
           }
-          return request.interaction.user_id === "left_agent"
-            ? { answers: { left: { answers: ["L"] } }, kind: "user_input" }
-            : { answers: { right: { answers: ["R"] } }, kind: "user_input" }
+          return {
+            answers: {
+              answer: {
+                answers: [String(request.interaction.user_id)],
+              },
+            },
+            kind: "user_input",
+          }
         },
         invocationInputs: {},
         parentEnv: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
@@ -778,31 +1291,12 @@ describe("run/execute", () => {
 
     try {
       const binDir = await installFakeCodex(root, {
-        turnStarts: [
-          {
-            steps: [],
-          },
-          {
-            steps: [
-              {
-                kind: "notification",
-                method: "turn/completed",
-                params: {
-                  threadId: "__THREAD_ID__",
-                  turn: {
-                    id: "__TURN_ID__",
-                    items: [],
-                    status: "failed",
-                    error: { message: "boom" },
-                  },
-                },
-              },
-            ],
-          },
-        ],
+        turnStart: {
+          steps: [],
+        },
       })
 
-      const snapshot = await executeWorkflow({
+      const snapshot = await runWorkflow({
         controlHandler: async (request) => {
           if (request.kind === "step_barrier") {
             return { action: "continue", kind: "step_barrier" }
@@ -836,11 +1330,11 @@ describe("run/execute", () => {
                   id: "right",
                   steps: [
                     {
-                      id: "right_agent",
-                      type: "codex",
+                      id: "right_fail",
+                      type: "shell",
                       with: {
-                        action: "run",
-                        prompt: "right",
+                        command: "printf 'boom'; exit 1",
+                        result: "text",
                       },
                     },
                   ],
@@ -852,8 +1346,239 @@ describe("run/execute", () => {
       })
 
       expect(snapshot.status).toBe("failed")
-      expect(snapshot.nodes.find((node) => node.user_id === "right_agent")?.status).toBe("failed")
+      expect(snapshot.nodes.find((node) => node.user_id === "right_fail")?.status).toBe("failed")
       expect(snapshot.nodes.find((node) => node.user_id === "left_agent")?.status).toBe("interrupted")
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("does not surface branch-local barriers before parallel interactions", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-parallel-interaction-order-"))
+    let resolveLeftFirst: (() => void) | undefined
+    const leftFirstCompleted = new Promise<void>((resolve) => {
+      resolveLeftFirst = resolve
+    })
+    const controlRequests: string[] = []
+
+    try {
+      const snapshot = await runWorkflow({
+        controlHandler: async (request) => {
+          if (request.kind === "step_barrier") {
+            const nextUserIds = request.barrier.next.map((node) => node.user_id ?? node.node_path).join(",")
+            controlRequests.push(`barrier:${nextUserIds}`)
+            if (nextUserIds.includes("left_second")) {
+              throw new Error("unexpected branch-local barrier inside parallel execution")
+            }
+            return { action: "continue", kind: "step_barrier" }
+          }
+
+          controlRequests.push(`interaction:${request.interaction.kind}`)
+          return {
+            answers: {
+              answer: {
+                answers: ["ok"],
+              },
+            },
+            kind: "user_input",
+          }
+        },
+        internals: {
+          runActionStep: async (step, _context, options) => {
+            if (step.id === "left_first") {
+              resolveLeftFirst?.()
+            }
+            if (step.id === "right_ask") {
+              await leftFirstCompleted
+              await options.interactionHandler?.({
+                itemId: "input-right",
+                kind: "user_input",
+                questions: [
+                  {
+                    header: "Answer",
+                    id: "answer",
+                    isOther: false,
+                    isSecret: false,
+                    options: null,
+                    question: "Need input",
+                  },
+                ],
+                requestId: "req-right",
+                turnId: "turn-right",
+              })
+            }
+
+            return {
+              exitCode: 0,
+              providerEvents: [],
+              result: step.id,
+              stderr: "",
+              stdout: String(step.id ?? ""),
+              termination: "completed",
+            }
+          },
+        },
+        invocationInputs: {},
+        parentEnv: process.env,
+        projectRoot: root,
+        workflow: {
+          id: "parallel-interaction-order",
+          steps: [
+            {
+              id: "fanout",
+              type: "parallel",
+              branches: [
+                {
+                  id: "left",
+                  steps: [
+                    {
+                      id: "left_first",
+                      type: "shell",
+                      with: { command: "left-first", result: "text" },
+                    },
+                    {
+                      id: "left_second",
+                      type: "shell",
+                      with: { command: "left-second", result: "text" },
+                    },
+                  ],
+                },
+                {
+                  id: "right",
+                  steps: [
+                    {
+                      id: "right_ask",
+                      type: "shell",
+                      with: { command: "right-ask", result: "text" },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      })
+
+      expect(snapshot.status).toBe("succeeded")
+      expect(controlRequests).toEqual(["barrier:left_first,right_ask", "interaction:user_input"])
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("cancels an in-flight interaction after sibling failure in parallel", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-parallel-interaction-cancel-"))
+    let resolveInteractionReached: (() => void) | undefined
+    const interactionReached = new Promise<void>((resolve) => {
+      resolveInteractionReached = resolve
+    })
+    let interactionCancelled = false
+
+    try {
+      const snapshot = await runWorkflow({
+        controlHandler: async (request) => {
+          if (request.kind === "step_barrier") {
+            return { action: "continue", kind: "step_barrier" }
+          }
+
+          resolveInteractionReached?.()
+          await new Promise<never>((_resolve, reject) => {
+            request.signal.addEventListener(
+              "abort",
+              () => {
+                interactionCancelled = true
+                reject(new DOMException("interaction cancelled", "AbortError"))
+              },
+              { once: true },
+            )
+          })
+          throw new Error("cancelled interaction unexpectedly resolved")
+        },
+        internals: {
+          runActionStep: async (step, _context, options) => {
+            if (step.id === "left_wait") {
+              await options.interactionHandler?.({
+                itemId: "input-left",
+                kind: "user_input",
+                questions: [
+                  {
+                    header: "Left",
+                    id: "left",
+                    isOther: false,
+                    isSecret: false,
+                    options: null,
+                    question: "Answer left",
+                  },
+                ],
+                requestId: "req-left",
+                turnId: "turn-left",
+              })
+              return {
+                exitCode: 0,
+                providerEvents: [],
+                result: "left",
+                stderr: "",
+                stdout: "left",
+                termination: "completed",
+              }
+            }
+
+            if (step.id === "right_fail") {
+              await interactionReached
+              return {
+                exitCode: 1,
+                providerEvents: [],
+                result: null,
+                stderr: "boom",
+                stdout: "",
+                termination: "completed",
+              }
+            }
+
+            throw new Error(`unexpected step ${step.id ?? "<anonymous>"}`)
+          },
+        },
+        invocationInputs: {},
+        parentEnv: process.env,
+        projectRoot: root,
+        workflow: {
+          id: "parallel-interaction-cancel",
+          steps: [
+            {
+              id: "fanout",
+              type: "parallel",
+              branches: [
+                {
+                  id: "left",
+                  steps: [
+                    {
+                      id: "left_wait",
+                      type: "shell",
+                      with: { command: "left-wait", result: "text" },
+                    },
+                  ],
+                },
+                {
+                  id: "right",
+                  steps: [
+                    {
+                      id: "right_fail",
+                      type: "shell",
+                      with: { command: "right-fail", result: "text" },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      })
+
+      expect(snapshot.status).toBe("failed")
+      expect(snapshot.active_interaction).toBeNull()
+      expect(interactionCancelled).toBe(true)
+      expect(snapshot.nodes.find((node) => node.user_id === "left_wait")?.status).toBe("interrupted")
+      expect(snapshot.nodes.find((node) => node.user_id === "right_fail")?.status).toBe("failed")
     } finally {
       await rm(root, { force: true, recursive: true })
     }
@@ -864,7 +1589,7 @@ describe("run/execute", () => {
     const barriers: RunEvent[] = []
 
     try {
-      await executeWorkflow({
+      await runWorkflow({
         controlHandler: async (request) => {
           if (request.kind !== "step_barrier") {
             throw new Error(`unexpected control request ${request.kind}`)
@@ -893,12 +1618,15 @@ describe("run/execute", () => {
           id: "barrier-preview",
           steps: [
             {
+              env: {
+                BRANCH: "${{ inputs.branch }}",
+              },
               id: "review",
               type: "codex",
               with: {
                 action: "run",
                 model: "gpt-5.4",
-                prompt: "Review branch ${{ inputs.branch }}",
+                prompt: "Review branch ${{ env.BRANCH }}",
               },
             },
           ],
@@ -917,6 +1645,272 @@ describe("run/execute", () => {
         prompt_preview: "Review branch main",
         user_id: "review",
       })
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("detaches event and control snapshots from later state mutation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-detached-events-"))
+    let runStartedSnapshot: Extract<RunEvent, { kind: "run_started" }>["snapshot"] | undefined
+    let barrierEvent: Extract<RunEvent, { kind: "barrier_reached" }> | undefined
+    let barrierRequestSnapshot:
+      | {
+          barrierId: string
+          snapshot: Awaited<ReturnType<typeof executeWorkflow>>
+        }
+      | undefined
+
+    try {
+      const finalSnapshot = await runWorkflow({
+        controlHandler: async (request) => {
+          if (request.kind !== "step_barrier") {
+            throw new Error(`unexpected control request ${request.kind}`)
+          }
+          barrierRequestSnapshot = {
+            barrierId: request.barrier.barrier_id,
+            snapshot: request.snapshot,
+          }
+          return { action: "continue", kind: "step_barrier" }
+        },
+        internals: {
+          runActionStep: async () => ({
+            exitCode: 0,
+            providerEvents: [],
+            result: "ok",
+            stderr: "",
+            stdout: "ok",
+            termination: "completed",
+          }),
+        },
+        invocationInputs: {},
+        onEvent: (event) => {
+          if (event.kind === "run_started") {
+            runStartedSnapshot = event.snapshot
+          }
+          if (event.kind === "barrier_reached") {
+            barrierEvent = event
+          }
+        },
+        parentEnv: process.env,
+        projectRoot: root,
+        workflow: {
+          id: "detached-events",
+          steps: [
+            {
+              id: "first",
+              type: "shell",
+              with: {
+                command: "first",
+                result: "text",
+              },
+            },
+          ],
+        },
+      })
+
+      expect(finalSnapshot.status).toBe("succeeded")
+      expect(runStartedSnapshot).toMatchObject({
+        active_barrier: null,
+        nodes: [],
+        phase: "running",
+        status: "running",
+      })
+      expect(barrierEvent?.snapshot).toMatchObject({
+        phase: "waiting_for_barrier",
+        status: "running",
+      })
+      expect(barrierEvent?.snapshot.active_barrier?.barrier_id).toBe(barrierEvent?.barrier.barrier_id)
+      expect(barrierRequestSnapshot?.snapshot).toMatchObject({
+        phase: "waiting_for_barrier",
+        status: "running",
+      })
+      expect(barrierRequestSnapshot?.snapshot.active_barrier?.barrier_id).toBe(barrierRequestSnapshot?.barrierId)
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("keeps run phase running while sibling branches continue in parallel", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-waiting-phase-"))
+    let resolveLeftSecondStarted: (() => void) | undefined
+    const leftSecondStarted = new Promise<void>((resolve) => {
+      resolveLeftSecondStarted = resolve
+    })
+    let resolveRightFinish: (() => void) | undefined
+    const rightFinished = new Promise<void>((resolve) => {
+      resolveRightFinish = resolve
+    })
+    const completedPhases = new Map<string, string>()
+
+    try {
+      await runWorkflow({
+        controlHandler: async (request) => {
+          if (request.kind === "step_barrier") {
+            return { action: "continue", kind: "step_barrier" }
+          }
+          throw new Error(`unexpected control request ${request.kind}`)
+        },
+        internals: {
+          runActionStep: async (step) => {
+            if (step.id === "left_second") {
+              resolveLeftSecondStarted?.()
+              await rightFinished
+            }
+            if (step.id === "right_first") {
+              await leftSecondStarted
+              resolveRightFinish?.()
+            }
+
+            return {
+              exitCode: 0,
+              providerEvents: [],
+              result: step.id,
+              stderr: "",
+              stdout: String(step.id ?? ""),
+              termination: "completed",
+            }
+          },
+        },
+        invocationInputs: {},
+        onEvent: (event) => {
+          if (event.kind === "node_completed" && event.node.user_id != null) {
+            completedPhases.set(event.node.user_id, event.snapshot.phase)
+          }
+        },
+        parentEnv: process.env,
+        projectRoot: root,
+        workflow: {
+          id: "waiting-phase",
+          steps: [
+            {
+              id: "fanout",
+              type: "parallel",
+              branches: [
+                {
+                  id: "left",
+                  steps: [
+                    {
+                      id: "left_first",
+                      type: "shell",
+                      with: { command: "left-first", result: "text" },
+                    },
+                    {
+                      id: "left_second",
+                      type: "shell",
+                      with: { command: "left-second", result: "text" },
+                    },
+                  ],
+                },
+                {
+                  id: "right",
+                  steps: [
+                    {
+                      id: "right_first",
+                      type: "shell",
+                      with: { command: "right-first", result: "text" },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      })
+
+      expect(completedPhases.get("right_first")).toBe("running")
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("does not queue branch-local barriers after the parallel fanout", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-abort-barrier-"))
+    const barrierEvents: Array<Extract<RunEvent, { kind: "barrier_reached" }>> = []
+
+    try {
+      await runWorkflow({
+        controlHandler: async (request) => {
+          if (request.kind !== "step_barrier") {
+            throw new Error(`unexpected control request ${request.kind}`)
+          }
+          return { action: "continue", kind: "step_barrier" }
+        },
+        internals: {
+          runActionStep: async (step) => ({
+            exitCode: 0,
+            providerEvents: [],
+            result: step.id,
+            stderr: "",
+            stdout: String(step.id ?? ""),
+            termination: "completed",
+          }),
+        },
+        invocationInputs: {},
+        onEvent: (event) => {
+          if (event.kind === "barrier_reached") {
+            barrierEvents.push(event)
+          }
+        },
+        parentEnv: process.env,
+        projectRoot: root,
+        workflow: {
+          id: "parallel-single-barrier",
+          steps: [
+            {
+              branches: [
+                {
+                  id: "left",
+                  steps: [
+                    {
+                      id: "left_first",
+                      type: "shell",
+                      with: {
+                        command: "echo left-first",
+                        result: "text",
+                      },
+                    },
+                    {
+                      id: "left_second",
+                      type: "shell",
+                      with: {
+                        command: "echo left-second",
+                        result: "text",
+                      },
+                    },
+                  ],
+                },
+                {
+                  id: "right",
+                  steps: [
+                    {
+                      id: "right_first",
+                      type: "shell",
+                      with: {
+                        command: "echo right-first",
+                        result: "text",
+                      },
+                    },
+                    {
+                      id: "right_second",
+                      type: "shell",
+                      with: {
+                        command: "echo right-second",
+                        result: "text",
+                      },
+                    },
+                  ],
+                },
+              ],
+              id: "parallel",
+              type: "parallel",
+            },
+          ],
+        },
+      })
+
+      expect(barrierEvents).toHaveLength(1)
+      expect(barrierEvents[0]?.barrier.next.map((node) => node.user_id)).toEqual(["left_first", "right_first"])
     } finally {
       await rm(root, { force: true, recursive: true })
     }

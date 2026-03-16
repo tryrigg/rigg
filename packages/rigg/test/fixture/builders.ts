@@ -27,7 +27,6 @@ export function runSnapshot(overrides: Partial<RunSnapshot> = {}): RunSnapshot {
   return {
     active_barrier: overrides.active_barrier ?? null,
     active_interaction: overrides.active_interaction ?? null,
-    active_node_path: overrides.active_node_path ?? null,
     finished_at: overrides.finished_at ?? null,
     nodes: overrides.nodes ?? [],
     phase: overrides.phase ?? "running",

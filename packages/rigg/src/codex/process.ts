@@ -1,4 +1,4 @@
-import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process"
+import { spawn, spawnSync } from "node:child_process"
 import readline from "node:readline"
 
 import { filterEnv } from "../util/env"
@@ -16,8 +16,12 @@ export type CodexProcessOptions = {
 }
 
 export type CodexAppServerProcess = {
-  child: ChildProcessWithoutNullStreams
   close: () => Promise<void>
+  exited: Promise<{
+    code: number | null
+    expected: boolean
+    signal: NodeJS.Signals | null
+  }>
   stderr: readline.Interface
   stdout: readline.Interface
   write: (message: unknown) => void
@@ -59,26 +63,57 @@ export function startCodexAppServer(options: CodexProcessOptions): CodexAppServe
 
   const stdout = readline.createInterface({ input: child.stdout, crlfDelay: Number.POSITIVE_INFINITY })
   const stderr = readline.createInterface({ input: child.stderr, crlfDelay: Number.POSITIVE_INFINITY })
+  let closePromise: Promise<void> | undefined
+  let closing = false
 
-  return {
-    child,
-    close: async () => {
+  const exited = new Promise<{
+    code: number | null
+    expected: boolean
+    signal: NodeJS.Signals | null
+  }>((resolve) => {
+    child.once("exit", (code, signal) => {
       stdout.close()
       stderr.close()
-      child.stdin.end()
-      if (child.exitCode !== null) {
+      resolve({ code, expected: closing, signal })
+    })
+  })
+
+  return {
+    close: async () => {
+      if (closePromise !== undefined) {
+        await closePromise
         return
       }
-      await new Promise<void>((resolve) => {
-        child.once("exit", () => resolve())
+
+      closing = true
+      closePromise = (async () => {
+        if (!child.stdin.destroyed && !child.stdin.writableEnded) {
+          child.stdin.end()
+        }
+
+        if (child.exitCode !== null) {
+          await exited
+          return
+        }
+
         child.kill("SIGTERM")
-        setTimeout(() => {
+        const forceKillTimer = setTimeout(() => {
           if (child.exitCode === null) {
             child.kill("SIGKILL")
           }
         }, 1_000)
-      })
+        forceKillTimer.unref()
+
+        try {
+          await exited
+        } finally {
+          clearTimeout(forceKillTimer)
+        }
+      })()
+
+      await closePromise
     },
+    exited,
     stderr,
     stdout,
     write: (message) => {

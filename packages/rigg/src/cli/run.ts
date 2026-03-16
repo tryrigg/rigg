@@ -1,5 +1,6 @@
 import { createInterface } from "node:readline/promises"
 
+import type { CodexApprovalDecision } from "../codex/interaction"
 import type { CodexProviderEvent } from "../codex/event"
 import type { CodexInteractionRequest } from "../codex/interaction"
 import type { RunControlHandler, RunControlResolution, RunEvent } from "../run/progress"
@@ -10,7 +11,6 @@ const CLEAR_SCREEN = "\u001b[2J\u001b[H"
 
 type ActiveLiveOutput = {
   entries: LiveLogEntry[]
-  nodePath: string
 }
 
 type LiveLogEntry = {
@@ -24,12 +24,12 @@ type RenderOptions = {
 }
 
 export type TerminalUiState = {
-  activeLiveOutput: ActiveLiveOutput | null
   lastCompletedNodePath: string | null
+  liveOutputs: Record<string, ActiveLiveOutput>
   snapshot: RunSnapshot | null
 }
 
-export type TerminalRunSession = {
+export type RunSession = {
   close: () => void
   emit: (event: RunEvent) => void
   handle: RunControlHandler
@@ -37,13 +37,13 @@ export type TerminalRunSession = {
 
 export function createTerminalUiState(): TerminalUiState {
   return {
-    activeLiveOutput: null,
     lastCompletedNodePath: null,
+    liveOutputs: {},
     snapshot: null,
   }
 }
 
-export function createTerminalRunSession(input: NodeJS.ReadStream, output: NodeJS.WriteStream): TerminalRunSession {
+export function createTerminalRunSession(input: NodeJS.ReadStream, output: NodeJS.WriteStream): RunSession {
   const readline = createInterface({
     input,
     output,
@@ -69,15 +69,20 @@ export function createTerminalRunSession(input: NodeJS.ReadStream, output: NodeJ
 
     if (request.kind === "step_barrier") {
       render()
-      return await promptBarrier(readline)
+      return await promptBarrier(readline, request.signal)
     }
 
     if (request.interaction.kind === "user_input") {
-      return await promptUserInput(readline, render, requireInteractionRequest(request.interaction, "user_input"))
+      return await promptUserInput(
+        readline,
+        render,
+        requireInteractionRequest(request.interaction, "user_input"),
+        request.signal,
+      )
     }
 
     render()
-    return await handleInteraction(readline, render, request.interaction)
+    return await handleInteraction(readline, render, request.interaction, request.signal)
   }
 
   return {
@@ -87,26 +92,39 @@ export function createTerminalRunSession(input: NodeJS.ReadStream, output: NodeJ
   }
 }
 
+export function createNonInteractiveRunSession(): RunSession {
+  return {
+    close: () => {},
+    emit: () => {},
+    handle: async (request) => {
+      if (request.kind === "step_barrier") {
+        return { action: "continue", kind: "step_barrier" }
+      }
+
+      throw new Error(
+        `workflow requires operator interaction (${request.interaction.kind}), but rigg run is not attached to an interactive terminal`,
+      )
+    },
+  }
+}
+
 export function applyRunEvent(state: TerminalUiState, event: RunEvent): void {
   switch (event.kind) {
     case "run_started":
-      state.activeLiveOutput = null
+      state.liveOutputs = {}
       state.lastCompletedNodePath = null
       state.snapshot = event.snapshot
       return
     case "node_started":
       state.snapshot = event.snapshot
-      state.activeLiveOutput = {
+      state.liveOutputs[event.node.node_path] = {
         entries: [],
-        nodePath: event.node.node_path,
       }
       return
     case "node_completed":
       state.snapshot = event.snapshot
       state.lastCompletedNodePath = event.node.node_path
-      if (state.activeLiveOutput?.nodePath === event.node.node_path) {
-        state.activeLiveOutput = null
-      }
+      delete state.liveOutputs[event.node.node_path]
       return
     case "node_skipped":
       state.snapshot = event.snapshot
@@ -134,7 +152,7 @@ export function applyRunEvent(state: TerminalUiState, event: RunEvent): void {
       return
     case "run_finished":
       state.snapshot = event.snapshot
-      state.activeLiveOutput = null
+      state.liveOutputs = {}
       return
   }
 }
@@ -153,9 +171,10 @@ export function renderTerminalFrame(state: TerminalUiState, options: RenderOptio
 
 async function promptBarrier(
   readline: ReturnType<typeof createInterface>,
+  signal: AbortSignal,
 ): Promise<Extract<RunControlResolution, { kind: "step_barrier" }>> {
   while (true) {
-    const raw = (await readline.question("> ")).trim().toLowerCase()
+    const raw = (await readline.question("> ", { signal })).trim().toLowerCase()
     if (raw === "c" || raw === "continue") {
       return { action: "continue", kind: "step_barrier" }
     }
@@ -169,38 +188,38 @@ async function handleInteraction(
   readline: ReturnType<typeof createInterface>,
   render: (options?: RenderOptions) => void,
   interaction: PendingInteraction,
+  signal: AbortSignal,
 ): Promise<Exclude<RunControlResolution, { kind: "step_barrier" }>> {
   const request = requireInteractionRequest(interaction)
 
   switch (request.kind) {
     case "approval":
-      return await promptApproval(readline, request)
+      return await promptApproval(readline, request, signal)
     case "user_input":
-      return await promptUserInput(readline, render, request)
+      return await promptUserInput(readline, render, request, signal)
     case "elicitation":
-      return await promptElicitation(readline, request)
+      return await promptElicitation(readline, request, signal)
   }
 }
 
 async function promptApproval(
   readline: ReturnType<typeof createInterface>,
   request: Extract<CodexInteractionRequest, { kind: "approval" }>,
+  signal: AbortSignal,
 ): Promise<Extract<RunControlResolution, { kind: "approval" }>> {
+  const choices = buildApprovalPromptChoices(request.decisions)
+
   while (true) {
-    const raw = (await readline.question("> ")).trim().toLowerCase()
-
-    if (raw === "y" || raw === "approve") {
-      return { decision: "accept", kind: "approval" }
-    }
-    if (raw === "n" || raw === "deny") {
-      return { decision: "decline", kind: "approval" }
-    }
-    if (raw === "c" || raw === "cancel") {
-      return { decision: "cancel", kind: "approval" }
+    const raw = (await readline.question("> ", { signal })).trim().toLowerCase()
+    const choice = choices[raw]
+    if (choice !== undefined) {
+      return { decision: choice, kind: "approval" }
     }
 
-    if (request.availableDecisions.length > 0) {
-      process.stderr.write(`Available provider decisions: ${request.availableDecisions.join(", ")}\n`)
+    if (request.decisions.length > 0) {
+      process.stderr.write(
+        `Available provider decisions: ${request.decisions.map((decision) => decision.value).join(", ")}\n`,
+      )
     }
   }
 }
@@ -209,12 +228,13 @@ async function promptUserInput(
   readline: ReturnType<typeof createInterface>,
   render: (options?: RenderOptions) => void,
   request: Extract<CodexInteractionRequest, { kind: "user_input" }>,
+  signal: AbortSignal,
 ): Promise<Extract<RunControlResolution, { kind: "user_input" }>> {
   const answers: Record<string, { answers: string[] }> = {}
 
   for (const [index, question] of request.questions.entries()) {
     render({ userInputQuestionIndex: index })
-    const answer = await promptLine(readline, "> ")
+    const answer = await promptLine(readline, "> ", signal)
     answers[question.id] = {
       answers: [normalizeQuestionAnswer(answer, question.options)],
     }
@@ -226,8 +246,9 @@ async function promptUserInput(
 async function promptElicitation(
   readline: ReturnType<typeof createInterface>,
   request: Extract<CodexInteractionRequest, { kind: "elicitation" }>,
+  signal: AbortSignal,
 ): Promise<Extract<RunControlResolution, { kind: "elicitation" }>> {
-  const action = await promptChoice(readline, "> ", {
+  const action = await promptChoice(readline, "> ", signal, {
     a: "accept",
     accept: "accept",
     c: "cancel",
@@ -242,7 +263,7 @@ async function promptElicitation(
 
   return {
     action,
-    content: await promptJson(readline, "JSON response: "),
+    content: await promptJson(readline, "JSON response: ", signal),
     kind: "elicitation",
   }
 }
@@ -273,24 +294,33 @@ function renderBody(state: TerminalUiState, options: RenderOptions): string[] {
     return renderFinishedBody(state)
   }
 
-  if (snapshot.active_node_path != null) {
-    return renderRunningBody(state, snapshot.active_node_path)
+  const activeNodes = snapshot.nodes.filter((node) => node.status === "running")
+  if (activeNodes.length > 0) {
+    return renderRunningBody(state, activeNodes)
   }
 
   return []
 }
 
-function renderRunningBody(state: TerminalUiState, nodePath: string): string[] {
-  const node = state.snapshot?.nodes.find((n) => n.node_path === nodePath) ?? null
-  const label = node === null ? nodePath : (node.user_id ?? node.node_path)
-  const kind = node?.node_kind ?? "unknown"
-  const lines = [`Running: ${label} [${kind}]`]
+function renderRunningBody(state: TerminalUiState, nodes: NodeSnapshot[]): string[] {
+  const lines: string[] = []
 
-  if (state.activeLiveOutput?.nodePath !== nodePath) {
+  for (const node of nodes) {
+    appendSection(lines, renderRunningNode(state, node))
+  }
+
+  return lines
+}
+
+function renderRunningNode(state: TerminalUiState, node: NodeSnapshot): string[] {
+  const lines = [`Running: ${node.user_id ?? node.node_path} [${node.node_kind}]`]
+  const liveOutput = state.liveOutputs[node.node_path]
+
+  if (liveOutput === undefined) {
     return lines
   }
 
-  for (const entry of state.activeLiveOutput.entries) {
+  for (const entry of liveOutput.entries) {
     const renderedLines = splitLines(entry.text)
     if (renderedLines.length === 0) {
       lines.push(entry.variant === "event" ? "  > [codex]" : "  >")
@@ -340,7 +370,7 @@ function renderInteractionBody(
         lines.push(`  cwd: ${request.cwd}`)
       }
       lines.push("")
-      lines.push("[y]approve  [n]deny  [c]cancel")
+      lines.push(renderApprovalPrompt(request.decisions))
       return lines
     case "user_input": {
       const questionIndex = Math.min(options.userInputQuestionIndex ?? 0, Math.max(request.questions.length - 1, 0))
@@ -483,7 +513,7 @@ function formatUserInputHeader(header: string, index: number, total: number): st
 }
 
 function appendLiveStream(state: TerminalUiState, nodePath: string, chunk: string): void {
-  const liveOutput = ensureActiveLiveOutput(state, nodePath)
+  const liveOutput = ensureLiveOutput(state, nodePath)
   const lastEntry = liveOutput.entries.at(-1)
   if (lastEntry !== undefined && lastEntry.variant === "stream") {
     lastEntry.text += chunk
@@ -498,7 +528,7 @@ function appendLiveStream(state: TerminalUiState, nodePath: string, chunk: strin
 }
 
 function appendProviderEvent(state: TerminalUiState, nodePath: string, event: CodexProviderEvent): void {
-  const liveOutput = ensureActiveLiveOutput(state, nodePath)
+  const liveOutput = ensureLiveOutput(state, nodePath)
 
   switch (event.kind) {
     case "message_delta":
@@ -542,16 +572,15 @@ function appendProviderEvent(state: TerminalUiState, nodePath: string, event: Co
   }
 }
 
-function ensureActiveLiveOutput(state: TerminalUiState, nodePath: string): ActiveLiveOutput {
-  if (state.activeLiveOutput?.nodePath === nodePath) {
-    return state.activeLiveOutput
+function ensureLiveOutput(state: TerminalUiState, nodePath: string): ActiveLiveOutput {
+  const existing = state.liveOutputs[nodePath]
+  if (existing !== undefined) {
+    return existing
   }
 
-  state.activeLiveOutput = {
-    entries: [],
-    nodePath,
-  }
-  return state.activeLiveOutput
+  const liveOutput = { entries: [] }
+  state.liveOutputs[nodePath] = liveOutput
+  return liveOutput
 }
 
 function upsertAssistantEntry(liveOutput: ActiveLiveOutput, key: string, update: (current: string) => string): void {
@@ -575,6 +604,50 @@ function renderLiveLine(variant: LiveLogEntry["variant"], line: string): string 
     return line.length === 0 ? "  > [codex]" : `  > [codex] ${line}`
   }
   return line.length === 0 ? "  >" : `  > ${line}`
+}
+
+function renderApprovalPrompt(decisions: ReadonlyArray<CodexApprovalDecision>): string {
+  if (decisions.length === 0) {
+    return "Enter a provider decision."
+  }
+
+  return decisions
+    .map((decision, index) => {
+      const shortcut = approvalShortcut(decision, index)
+      return `[${shortcut}]${decision.value}`
+    })
+    .join("  ")
+}
+
+function buildApprovalPromptChoices(decisions: ReadonlyArray<CodexApprovalDecision>): Record<string, string> {
+  const choices: Record<string, string> = {}
+
+  for (const [index, decision] of decisions.entries()) {
+    const normalizedValue = decision.value.trim().toLowerCase()
+    if (normalizedValue.length > 0) {
+      choices[normalizedValue] = decision.value
+    }
+
+    choices[String(index + 1)] = decision.value
+
+    const shortcut = approvalShortcut(decision, index)
+    choices[shortcut] = decision.value
+  }
+
+  return choices
+}
+
+function approvalShortcut(decision: CodexApprovalDecision, index: number): string {
+  switch (decision.intent) {
+    case "approve":
+      return "y"
+    case "deny":
+      return "n"
+    case "cancel":
+      return "c"
+    case null:
+      return String(index + 1)
+  }
 }
 
 function normalizeQuestionAnswer(
@@ -646,10 +719,11 @@ function indentLines(lines: string[], prefix: string): string[] {
 async function promptChoice<TChoice extends string>(
   readline: ReturnType<typeof createInterface>,
   prompt: string,
+  signal: AbortSignal,
   map: Record<string, TChoice>,
 ): Promise<TChoice> {
   while (true) {
-    const raw = (await readline.question(prompt)).trim().toLowerCase()
+    const raw = (await readline.question(prompt, { signal })).trim().toLowerCase()
     const choice = map[raw]
     if (choice !== undefined) {
       return choice
@@ -657,18 +731,26 @@ async function promptChoice<TChoice extends string>(
   }
 }
 
-async function promptLine(readline: ReturnType<typeof createInterface>, prompt: string): Promise<string> {
+async function promptLine(
+  readline: ReturnType<typeof createInterface>,
+  prompt: string,
+  signal: AbortSignal,
+): Promise<string> {
   while (true) {
-    const value = (await readline.question(prompt)).trim()
+    const value = (await readline.question(prompt, { signal })).trim()
     if (value.length > 0) {
       return value
     }
   }
 }
 
-async function promptJson(readline: ReturnType<typeof createInterface>, prompt: string): Promise<unknown> {
+async function promptJson(
+  readline: ReturnType<typeof createInterface>,
+  prompt: string,
+  signal: AbortSignal,
+): Promise<unknown> {
   while (true) {
-    const value = await promptLine(readline, prompt)
+    const value = await promptLine(readline, prompt, signal)
     const parsed = tryParseJson(value)
     if (parsed !== undefined) {
       return parsed

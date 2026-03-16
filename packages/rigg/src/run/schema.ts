@@ -96,7 +96,6 @@ export const PendingInteractionSchema = z.object({
 export const RunSnapshotSchema = z.object({
   active_barrier: StepBarrierSchema.optional().nullable(),
   active_interaction: PendingInteractionSchema.optional().nullable(),
-  active_node_path: z.string().min(1).optional().nullable(),
   finished_at: z.string().min(1).optional().nullable(),
   nodes: z.array(NodeSnapshotSchema),
   phase: RunPhaseSchema,

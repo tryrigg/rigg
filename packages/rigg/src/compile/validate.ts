@@ -462,9 +462,6 @@ function validateCodex(
     if (step.with.review.target.type === "commit") {
       validateTemplate(step.with.review.target.sha, filePath, scope, errors)
     }
-    if (step.with.review.title !== undefined) {
-      validateTemplate(step.with.review.title, filePath, scope, errors)
-    }
 
     const reviewShape = shapeFromSchema(codexReviewOutputDefinition())
     return {

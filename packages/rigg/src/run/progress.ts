@@ -74,11 +74,13 @@ export type RunControlRequest =
   | {
       barrier: StepBarrier
       kind: "step_barrier"
+      signal: AbortSignal
       snapshot: RunSnapshot
     }
   | {
       interaction: PendingInteraction
       kind: "interaction"
+      signal: AbortSignal
       snapshot: RunSnapshot
     }
 

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 
-import { normalizeError } from "../util/error"
+import { createAbortError, normalizeError } from "../util/error"
 import { isJsonObject } from "../util/json"
 import type { CodexAppServerProcess } from "./process"
 
@@ -21,12 +21,18 @@ type JsonRpcResponse = {
 }
 
 type PendingRequest = {
+  dispose: () => void
   reject: (error: Error) => void
   resolve: (value: unknown) => void
   timeout: ReturnType<typeof setTimeout>
 }
 
-type ClientState = { kind: "closed" } | { kind: "failed" } | { kind: "open" }
+type ClientState = { kind: "closed" } | { error: Error; kind: "failed" } | { kind: "open" }
+
+type RequestOptions = {
+  signal?: AbortSignal | undefined
+  timeoutMs?: number | undefined
+}
 
 type RpcHandlers = {
   onError?: ((error: Error) => Promise<void> | void) | undefined
@@ -43,13 +49,14 @@ type ParsedMessage =
 export type CodexRpcClient = {
   close: () => Promise<void>
   notify: (method: string, params?: unknown) => void
-  request: (method: string, params?: unknown, timeoutMs?: number) => Promise<unknown>
+  request: (method: string, params?: unknown, options?: RequestOptions) => Promise<unknown>
   respond: (id: string | number, result: unknown) => void
   start: (handlers: RpcHandlers) => void
 }
 
 export function createCodexRpcClient(process: CodexAppServerProcess): CodexRpcClient {
   const pending = new Map<string | number, PendingRequest>()
+  const ignoredResponses = new Set<string | number>()
   let state: ClientState = { kind: "open" }
   let handlers: RpcHandlers | undefined
 
@@ -59,9 +66,12 @@ export function createCodexRpcClient(process: CodexAppServerProcess): CodexRpcCl
     process.stdout.on("line", (line) => {
       void handleStdoutLine(line)
     })
-    process.child.once("exit", (code, signal) => {
-      failPendingRequests(
-        new Error(`codex app-server exited unexpectedly (code=${String(code)} signal=${String(signal)})`),
+    void process.exited.then((exit) => {
+      if (exit.expected) {
+        return
+      }
+      void reportFatal(
+        new Error(`codex app-server exited unexpectedly (code=${String(exit.code)} signal=${String(exit.signal)})`),
       )
     })
   }
@@ -71,37 +81,71 @@ export function createCodexRpcClient(process: CodexAppServerProcess): CodexRpcCl
       return
     }
 
-    failPendingRequests(new Error("codex app-server closed"))
-    await process.close()
     state = { kind: "closed" }
+    rejectPending(new Error("codex app-server closed"))
+    ignoredResponses.clear()
+    await process.close()
   }
 
   function notify(method: string, params?: unknown): void {
+    if (state.kind !== "open") {
+      return
+    }
     process.write(params === undefined ? { method } : { method, params })
   }
 
-  function request(method: string, params?: unknown, timeoutMs = 30_000): Promise<unknown> {
-    if (state.kind !== "open") {
+  function request(method: string, params?: unknown, options: RequestOptions = {}): Promise<unknown> {
+    if (state.kind === "failed") {
+      throw state.error
+    }
+    if (state.kind === "closed") {
       throw new Error("codex app-server RPC client is closed")
     }
 
     const id = randomUUID()
+    const timeoutMs = options.timeoutMs ?? 30_000
     return new Promise<unknown>((resolve, reject) => {
+      if (options.signal?.aborted) {
+        reject(createAbortError(options.signal.reason))
+        return
+      }
+
+      const abortListener = () => {
+        clearTimeout(timeout)
+        pending.delete(id)
+        ignoredResponses.add(id)
+        reject(createAbortError(options.signal?.reason))
+      }
       const timeout = setTimeout(() => {
         pending.delete(id)
+        ignoredResponses.add(id)
+        options.signal?.removeEventListener("abort", abortListener)
         reject(new Error(`timed out waiting for codex app-server response to ${method}`))
       }, timeoutMs)
 
-      pending.set(id, { reject, resolve, timeout })
+      pending.set(id, {
+        dispose: () => options.signal?.removeEventListener("abort", abortListener),
+        reject,
+        resolve,
+        timeout,
+      })
+      options.signal?.addEventListener("abort", abortListener, { once: true })
       process.write(params === undefined ? { id, method } : { id, method, params })
     })
   }
 
   function respond(id: string | number, result: unknown): void {
+    if (state.kind !== "open") {
+      return
+    }
     process.write({ id, result })
   }
 
   async function handleStdoutLine(line: string): Promise<void> {
+    if (state.kind !== "open") {
+      return
+    }
+
     const trimmed = line.trim()
     if (trimmed.length === 0) {
       return
@@ -110,10 +154,10 @@ export function createCodexRpcClient(process: CodexAppServerProcess): CodexRpcCl
     const parsed = parseMessage(trimmed)
     switch (parsed.kind) {
       case "invalid":
-        failPendingRequests(parsed.error)
+        await reportFatal(parsed.error)
         return
       case "response":
-        handleResponse(parsed.message)
+        await handleResponse(parsed.message)
         return
       case "request":
         await dispatchRequest(parsed.message)
@@ -126,15 +170,19 @@ export function createCodexRpcClient(process: CodexAppServerProcess): CodexRpcCl
     }
   }
 
-  function handleResponse(message: JsonRpcResponse): void {
+  async function handleResponse(message: JsonRpcResponse): Promise<void> {
     const pendingRequest = pending.get(message.id)
     if (pendingRequest === undefined) {
-      failPendingRequests(new Error(`received unexpected codex app-server response for id ${String(message.id)}`))
+      if (ignoredResponses.delete(message.id)) {
+        return
+      }
+      await reportFatal(new Error(`received unexpected codex app-server response for id ${String(message.id)}`))
       return
     }
 
     clearTimeout(pendingRequest.timeout)
     pending.delete(message.id)
+    pendingRequest.dispose()
     if (message.error !== undefined) {
       pendingRequest.reject(new Error(message.error.message ?? `codex app-server request ${String(message.id)} failed`))
       return
@@ -159,23 +207,29 @@ export function createCodexRpcClient(process: CodexAppServerProcess): CodexRpcCl
     }
   }
 
-  function failPendingRequests(error: Error): void {
-    if (state.kind === "closed") {
-      return
-    }
-
-    state = { kind: "failed" }
+  function rejectPending(error: Error): void {
     for (const pendingRequest of pending.values()) {
       clearTimeout(pendingRequest.timeout)
+      pendingRequest.dispose()
       pendingRequest.reject(error)
     }
     pending.clear()
   }
 
-  async function reportError(error: unknown): Promise<void> {
+  async function reportFatal(error: unknown): Promise<void> {
     const normalized = normalizeError(error)
-    failPendingRequests(normalized)
+    if (state.kind !== "open") {
+      return
+    }
+
+    state = { error: normalized, kind: "failed" }
+    rejectPending(normalized)
+    ignoredResponses.clear()
     await handlers?.onError?.(normalized)
+  }
+
+  async function reportError(error: unknown): Promise<void> {
+    await reportFatal(error)
   }
 
   return {

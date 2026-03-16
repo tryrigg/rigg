@@ -119,7 +119,6 @@ steps:
           review:
             target:
               type: uncommitted
-            title: Review current uncommitted changes
 
       - id: judge
         type: codex
@@ -177,7 +176,6 @@ steps:
             target:
               type: base
               branch: \${{ inputs.base_branch }}
-            title: Review current branch diff
 
       - id: judge
         type: codex
@@ -235,7 +233,6 @@ steps:
             target:
               type: commit
               sha: \${{ inputs.commit_sha }}
-            title: Review selected commit
 
       - id: judge
         type: codex

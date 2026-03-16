@@ -13,7 +13,6 @@ steps:
           review:
             target:
               type: uncommitted
-            title: Review current uncommitted changes
 
       - id: judge
         type: codex

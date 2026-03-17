@@ -3,20 +3,100 @@ inputs:
   requirements:
     type: string
     description: Requirements for the implementation plan
-  output_path:
+  filename:
     type: string
-    description: Path to write the generated plan
+    description: Output filename (written to private/<filename>)
+    default: plan.md
+
 steps:
+  - id: context
+    type: shell
+    with:
+      command: |
+        echo "=== FILES ==="
+        find . -type f \
+          -not -path './.git/*' \
+          -not -path './node_modules/*' \
+          -not -path './dist/*' \
+          -not -path './.next/*' \
+          | sort | head -200
+        echo ""
+        echo "=== RECENT COMMITS ==="
+        git log --oneline -20
+
   - id: draft
     type: codex
     with:
       action: plan
       model: gpt-5.4
       prompt: |
-        Draft a detailed implementation plan from the requirements below.
+        You are a senior software architect creating an implementation plan.
 
-        Requirements:
+        # Project: Rigg
+
+        ## Tech stack
+        - Language: TypeScript 5.9 (strict, erasableSyntaxOnly)
+        - Runtime: Bun 1.3.10
+        - Monorepo:
+          - packages/rigg — workflow engine CLI (React 19, Ink 6, Zod 4, YAML 2.8)
+          - packages/www — documentation site (Astro 6, Starlight)
+        - Test: bun test (table-driven, mock only at I/O boundaries)
+        - Format: Prettier (no semicolons, printWidth 120)
+        - CI: GitHub Actions
+
+        ## Codebase
+        ${{ steps.context.result }}
+
+        ## Implementation guide
+        Read `private/typescript-implementation-guide.md` in full before drafting.
+        The plan MUST conform to its rules:
+        - Function-first, data-first design (no premature class/abstract/base)
+        - `unknown` at system boundaries, validate with Zod, `safeParse` preferred
+        - Discriminated unions for state, not nullable field combinations
+        - `type` by default, `interface` only for open extension
+        - No enum, namespace, const enum, or class-heavy patterns
+        - Error handling at I/O boundaries only; no global Result type
+        - Source of truth derives types (Zod → z.infer, not hand-duplicated)
+
+        ## Requirements
         ${{ inputs.requirements }}
+
+        ## Task
+        Produce an implementation plan in this exact structure:
+
+        ### 1. Summary
+        What this change does and why. One paragraph.
+
+        ### 2. Files
+        | Path | Action | Purpose |
+        |------|--------|---------|
+        Every file to create, modify, or delete.
+
+        ### 3. Implementation steps
+        Numbered list. Each step MUST include:
+        - Concrete action (e.g. "Add type WorkflowResult to packages/rigg/src/compile/schema.ts")
+        - Target file path(s)
+        - Key type signatures or data shapes being introduced
+        - Verification command (`bun test <path>`, `bunx tsc --noEmit`, or what to manually check)
+
+        ### 4. Testing strategy
+        Test files to create or update. Specific cases to cover.
+
+        ### 5. Risks and open questions
+        Potential issues, trade-offs, or questions to resolve before starting.
+
+        ## Rules
+        - Reference actual paths from the codebase listing above. Follow existing naming conventions for new files.
+        - Minimal scope — fewest files, simplest approach that satisfies the requirements.
+        - Every step must be independently verifiable.
+        - Do not propose abstractions the codebase does not already use.
+        - Do not propose config, env vars, or feature flags unless the requirements demand them.
+        - **External dependencies**: If the plan introduces a new package or upgrades an existing one, you MUST:
+          1. Search the web for the latest stable release of that package (npm registry, GitHub releases, or official site).
+          2. Pin the plan to that exact version (e.g. "install foo@3.2.1", not "install foo").
+          3. Fetch and read the official documentation or migration guide for that version.
+          4. Note the primary source URL in the plan so the implementer can verify.
+          Do NOT rely on your training data for version numbers — always search live.
 
   - id: critique
     type: codex
@@ -24,29 +104,96 @@ steps:
       action: run
       model: gpt-5.4
       prompt: |
-        Review this implementation plan critically.
-        Identify ambiguities, flawed assumptions, and missing edge cases.
+        You are auditing an implementation plan for the Rigg project (TypeScript 5.9, Bun 1.3.10).
 
-        Draft:
+        Read `private/typescript-implementation-guide.md` for the project's coding standards.
+
+        ## Target persona
+        The user of this feature is a senior/staff engineer who:
+        - Runs Rigg workflows from the terminal as part of their daily coding loop
+        - Expects CLI output to be scannable — no walls of text, no ambiguous states
+        - Treats YAML workflow files as code: they should be readable, diffable, composable
+        - Will hit edge cases fast — empty inputs, interrupted runs, large repos
+        - Values fast feedback loops: a 30-second workflow that fails clearly beats a 2-minute one that succeeds silently
+        - Has strong opinions on DX: error messages must be actionable, not "something went wrong"
+
+        ## Plan
         ${{ steps.draft.result }}
 
-  - id: refine
-    type: codex
-    with:
-      action: run
-      model: gpt-5.4
-      prompt: |
-        Improve the plan below using the critique.
-        Preserve concrete file paths, milestones, and validation steps.
+        ## Evaluation
+        Score each dimension PASS or FAIL with a one-line reason:
 
-        Draft:
-        ${{ steps.draft.result }}
+        **Implementation quality**
+        1. **Paths** — All referenced file paths exist in the repo or follow its naming conventions for new files.
+        2. **Ordering** — Steps respect dependencies; no step requires output of a later step.
+        3. **Completeness** — No missing steps to fully satisfy the requirements.
+        4. **Type design** — Proposed types conform to the implementation guide (discriminated unions, Zod-first, no enum).
+        5. **Error handling** — Error paths addressed at system boundaries per the guide.
+        6. **Tests** — Proposed tests are sufficient and follow bun test patterns (table-driven, no unnecessary mocks).
+        7. **Minimality** — No scope creep, over-engineering, or unnecessary abstractions.
 
-        Critique:
-        ${{ steps.critique.result }}
+        **External dependencies**
+        8. **Versions** — Every new or upgraded package specifies an exact latest-stable version confirmed via live search, not a guess or range.
+        9. **Primary sources** — Each dependency cites an official docs URL or migration guide for the pinned version.
 
-  - id: write
-    type: write_file
-    with:
-      path: ${{ inputs.output_path }}
-      content: ${{ steps.refine.result }}
+        **User experience (from the persona's perspective)**
+        10. **CLI output** — Will the user see clear, scannable feedback at each stage? No silent successes, no unstructured dumps.
+        11. **Failure modes** — Are invalid inputs, missing files, and interrupted runs handled with actionable messages?
+        12. **Workflow composability** — Does this change play well with existing .rigg workflows and not break the user's muscle memory?
+
+        If all items PASS, respond with exactly: LGTM
+
+        Otherwise, list only the FAILing items with specific, actionable fixes. Be concise — one fix per item.
+
+  - id: finalize
+    type: branch
+    cases:
+      - if: ${{ contains(steps.critique.result, 'LGTM') }}
+        steps:
+          - id: write_as_is
+            type: write_file
+            with:
+              path: private/${{ inputs.filename }}
+              content: ${{ steps.draft.result }}
+
+      - else:
+        steps:
+          - id: refine
+            type: codex
+            with:
+              action: run
+              model: gpt-5.4
+              prompt: |
+                You are revising an implementation plan. The review found issues that need fixing,
+                but the original plan contains important context, constraints, and design decisions
+                that MUST be preserved.
+
+                Read `private/typescript-implementation-guide.md` for the project's coding standards.
+
+                ## Original plan (this is the source of truth)
+                ${{ steps.draft.result }}
+
+                ## Review findings (fix only these)
+                ${{ steps.critique.result }}
+
+                ## Instructions
+                Your output is a COMPLETE, SELF-CONTAINED plan — not a patch, not a summary of changes.
+                A reader who never saw the original must be able to implement from your output alone.
+
+                Revision rules:
+                1. Start from a verbatim copy of the original plan. Only modify the parts that the FAILing items require.
+                2. Preserve ALL of the following from the original:
+                   - Summary context (the "what" and "why")
+                   - Every file entry, implementation step, and test case that was NOT flagged
+                   - Design decisions, constraints, and rationale
+                   - Specific type signatures, data shapes, and code-level details
+                3. For each FAILing item, make the minimum edit that resolves it. Do not rewrite surrounding content.
+                4. Do not add scope, features, or steps beyond what the findings require.
+                5. Keep the same structure: Summary → Files → Implementation steps → Testing strategy → Risks.
+                6. If the original plan has N implementation steps and only step 3 was flagged, the output must still have all N steps (with step 3 revised).
+
+          - id: write_refined
+            type: write_file
+            with:
+              path: private/${{ inputs.filename }}
+              content: ${{ steps.refine.result }}

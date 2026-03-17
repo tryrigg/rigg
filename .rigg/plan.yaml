@@ -32,6 +32,9 @@ steps:
       prompt: |
         You are a senior software architect creating an implementation plan.
 
+        CRITICAL: Your response is saved directly to a markdown file. Output ONLY the plan.
+        No investigation notes, no thinking, no preamble. Start with "### 1. Summary".
+
         # Project: Rigg
 
         ## Tech stack
@@ -98,6 +101,8 @@ steps:
           4. Note the primary source URL in the plan so the implementer can verify.
           Do NOT rely on your training data for version numbers — always search live.
 
+        REMINDER: Your entire response goes into a file as-is. No preamble. First line = "### 1. Summary".
+
   - id: critique
     type: codex
     with:
@@ -156,6 +161,17 @@ steps:
               path: private/${{ inputs.filename }}
               content: ${{ steps.draft.result }}
 
+          - id: strip_preamble_draft
+            type: shell
+            env:
+              TARGET: private/${{ inputs.filename }}
+            with:
+              command: |
+                if grep -q '^### 1\. Summary' "$TARGET"; then
+                  sed -n '/^### 1\. Summary/,$p' "$TARGET" > "$TARGET.tmp" && mv "$TARGET.tmp" "$TARGET"
+                fi
+              result: none
+
       - else:
         steps:
           - id: refine
@@ -167,6 +183,9 @@ steps:
                 You are revising an implementation plan. The review found issues that need fixing,
                 but the original plan contains important context, constraints, and design decisions
                 that MUST be preserved.
+
+                CRITICAL: Your response is saved directly to a markdown file. Output ONLY the revised plan.
+                No investigation notes, no thinking, no preamble. Start with "### 1. Summary".
 
                 Read `private/typescript-implementation-guide.md` for the project's coding standards.
 
@@ -192,8 +211,21 @@ steps:
                 5. Keep the same structure: Summary → Files → Implementation steps → Testing strategy → Risks.
                 6. If the original plan has N implementation steps and only step 3 was flagged, the output must still have all N steps (with step 3 revised).
 
+                REMINDER: Your entire response goes into a file as-is. No preamble. First line = "### 1. Summary".
+
           - id: write_refined
             type: write_file
             with:
               path: private/${{ inputs.filename }}
               content: ${{ steps.refine.result }}
+
+          - id: strip_preamble_refined
+            type: shell
+            env:
+              TARGET: private/${{ inputs.filename }}
+            with:
+              command: |
+                if grep -q '^### 1\. Summary' "$TARGET"; then
+                  sed -n '/^### 1\. Summary/,$p' "$TARGET" > "$TARGET.tmp" && mv "$TARGET.tmp" "$TARGET"
+                fi
+              result: none

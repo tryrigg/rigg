@@ -88,9 +88,6 @@ const result = await Bun.build({
   },
   define: {
     RIGG_BUILD_VERSION: JSON.stringify(version),
-    // Bun must see DEV as false at build time so Ink's optional React DevTools path
-    // is removed from the compiled standalone binary.
-    "process.env.DEV": JSON.stringify("false"),
   },
   env: "disable",
   autoloadDotenv: false,

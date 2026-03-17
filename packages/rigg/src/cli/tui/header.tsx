@@ -1,6 +1,7 @@
 import { Box, Text, useStdout } from "ink"
 
 import type { RunSnapshot, RunStatus } from "../../run/schema"
+import { layoutHeaderLine, renderRule } from "./layout"
 
 function statusColor(status: RunStatus | "waiting"): string {
   switch (status) {
@@ -28,40 +29,45 @@ export function Header({ snapshot, elapsed }: { snapshot: RunSnapshot | null; el
   const cols = stdout?.columns ?? 80
 
   if (snapshot === null) {
+    const layout = layoutHeaderLine({
+      cols,
+      elapsed: "",
+      status: "waiting",
+      workflowId: "",
+    })
+
     return (
       <Box flexDirection="column">
         <Text>
-          {"  "}
-          <Text bold>rigg</Text>
-          <Text dimColor>{"  waiting"}</Text>
+          {layout.left.length > 0 && <Text bold>{layout.left}</Text>}
+          {" ".repeat(layout.gap)}
+          <Text dimColor>{layout.statusText}</Text>
         </Text>
-        <Text dimColor>{"  " + "─".repeat(Math.max(0, cols - 4))}</Text>
+        <Text dimColor>{renderRule(cols)}</Text>
       </Box>
     )
   }
 
   const status = statusLabel(snapshot)
   const color = statusColor(status)
+  const layout = layoutHeaderLine({
+    cols,
+    elapsed,
+    status,
+    workflowId: snapshot.workflow_id,
+  })
 
   return (
     <Box flexDirection="column">
-      <Box>
-        <Box flexGrow={1}>
-          <Text>
-            {"  "}
-            <Text bold>rigg</Text>
-            {"  "}
-            {snapshot.workflow_id}
-          </Text>
-        </Box>
-        <Box flexShrink={0}>
-          <Text dimColor>{elapsed} </Text>
-          <Text bold color={color}>
-            ● {status}
-          </Text>
-        </Box>
-      </Box>
-      <Text dimColor>{"  " + "─".repeat(Math.max(0, cols - 4))}</Text>
+      <Text>
+        {layout.left.length > 0 && <Text bold>{layout.left}</Text>}
+        {" ".repeat(layout.gap)}
+        {layout.elapsedText.length > 0 && <Text dimColor>{layout.elapsedText} </Text>}
+        <Text bold color={color}>
+          {layout.statusText}
+        </Text>
+      </Text>
+      <Text dimColor>{renderRule(cols)}</Text>
     </Box>
   )
 }

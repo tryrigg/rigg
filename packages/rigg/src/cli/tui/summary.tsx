@@ -1,6 +1,7 @@
 import { Box, Text, useStdout } from "ink"
 
 import type { RunSnapshot } from "../../run/schema"
+import { renderRule } from "./layout"
 import { formatDuration, statusSymbol } from "./symbols"
 import { runDurationMs } from "./time"
 import { SUMMARY_KINDS, type TreeEntry } from "./tree"
@@ -60,7 +61,7 @@ export function Summary({ snapshot, entries }: { snapshot: RunSnapshot | null; e
   return (
     <Box flexDirection="column">
       <Text>{""}</Text>
-      <Text dimColor>{"  " + "─".repeat(Math.max(0, cols - 4))}</Text>
+      <Text dimColor>{renderRule(cols)}</Text>
       <Box>
         <Box flexGrow={1}>
           <Text>

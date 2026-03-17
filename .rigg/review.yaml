@@ -1,0 +1,61 @@
+id: review
+inputs:
+  greenfield:
+    type: boolean
+    description: Greenfield project — skip backward-compatibility findings
+    default: false
+
+steps:
+  - id: remediation
+    type: loop
+    max: 5
+    until: ${{ len(steps.review.result.findings) == 0 }}
+    steps:
+      - id: review
+        type: codex
+        with:
+          action: review
+          model: gpt-5.4
+          review:
+            target:
+              type: base
+              branch: main
+
+      - id: fix
+        if: ${{ len(steps.review.result.findings) > 0 }}
+        type: codex
+        with:
+          action: run
+          model: gpt-5.4
+          prompt: |
+            You are a senior engineer. Below are code review findings for the current branch (diff against main).
+
+            ## Findings
+            ${{ toJSON(steps.review.result) }}
+
+            ## Task
+            For each finding:
+            1. **Evaluate validity** — Determine whether the finding is a genuine issue or a false positive.
+               Discard false positives silently.
+            2. **Greenfield filter** — This project is in greenfield mode: ${{ inputs.greenfield }}.
+               If greenfield mode is true, also discard any finding that is purely about
+               backward compatibility, API stability, or migration concerns — these are not
+               relevant for a new project. Keep everything else (bugs, correctness, security,
+               performance, design).
+            3. **Apply root-cause fixes** — For each remaining valid finding, make the optimal
+               fix that addresses the root cause. Do NOT apply superficial workarounds,
+               suppress warnings, or add band-aid patches. If the right fix requires restructuring
+               code, do it.
+
+            If no findings survive the triage, make no changes.
+
+      - id: commit
+        if: ${{ len(steps.review.result.findings) > 0 }}
+        type: shell
+        with:
+          command: |
+            git add -A
+            if ! git diff --cached --quiet; then
+              git commit -m "fix"
+            fi
+          result: none

@@ -508,4 +508,130 @@ describe("cli/run", () => {
 
     session.close()
   })
+
+  test("ink run session renders a standalone pre-run interaction and clears it after resolution", async () => {
+    const workflow: WorkflowDocument = { id: "wf", steps: [] }
+    const terminal = {
+      stderr: { isTTY: true } as unknown as NodeJS.WriteStream,
+      stdin: { isTTY: true } as unknown as NodeJS.ReadStream,
+    }
+    let renderedTree: any
+
+    const session = createInkRunSession({
+      interrupt: () => {},
+      renderApp: ((tree: unknown) => {
+        renderedTree = tree
+        return { unmount: () => {} } as any
+      }) as any,
+      terminal,
+      workflow,
+    })
+
+    const pending = session.handle({
+      interaction: {
+        created_at: "2026-03-15T10:01:00.000Z",
+        interaction_id: "question-1",
+        kind: "user_input",
+        node_path: null,
+        request: {
+          itemId: "item-1",
+          kind: "user_input",
+          questions: [
+            {
+              header: "name",
+              id: "name",
+              isOther: false,
+              isSecret: false,
+              options: null,
+              question: "Input: name\nType: string",
+            },
+          ],
+          requestId: "question-1",
+          turnId: "turn-1",
+        },
+        user_id: null,
+      },
+      kind: "interaction",
+      signal: new AbortController().signal,
+      snapshot: runSnapshot(),
+    })
+
+    expect(renderedTree?.props.store.getSnapshot().state.snapshot?.active_interaction?.interaction_id).toBe(
+      "question-1",
+    )
+    expect(renderedTree?.props.store.getSnapshot().state.snapshot?.phase).toBe("waiting_for_question")
+
+    renderedTree?.props.onResolveInteraction("question-1", {
+      answers: { name: { answers: ["Rigg"] } },
+      kind: "user_input",
+    })
+
+    await expect(pending).resolves.toEqual({
+      answers: { name: { answers: ["Rigg"] } },
+      kind: "user_input",
+    })
+    expect(renderedTree?.props.store.getSnapshot().state.snapshot?.active_interaction).toBeNull()
+
+    session.close()
+  })
+
+  test("ink run session clears a standalone pre-run interaction when it aborts", async () => {
+    const workflow: WorkflowDocument = { id: "wf", steps: [] }
+    const terminal = {
+      stderr: { isTTY: true } as unknown as NodeJS.WriteStream,
+      stdin: { isTTY: true } as unknown as NodeJS.ReadStream,
+    }
+    let renderedTree: any
+
+    const session = createInkRunSession({
+      interrupt: () => {},
+      renderApp: ((tree: unknown) => {
+        renderedTree = tree
+        return { unmount: () => {} } as any
+      }) as any,
+      terminal,
+      workflow,
+    })
+
+    const controller = new AbortController()
+    const pending = session.handle({
+      interaction: {
+        created_at: "2026-03-15T10:01:00.000Z",
+        interaction_id: "question-1",
+        kind: "user_input",
+        node_path: null,
+        request: {
+          itemId: "item-1",
+          kind: "user_input",
+          questions: [
+            {
+              header: "name",
+              id: "name",
+              isOther: false,
+              isSecret: false,
+              options: null,
+              question: "Input: name\nType: string",
+            },
+          ],
+          requestId: "question-1",
+          turnId: "turn-1",
+        },
+        user_id: null,
+      },
+      kind: "interaction",
+      signal: controller.signal,
+      snapshot: runSnapshot(),
+    })
+
+    expect(renderedTree?.props.store.getSnapshot().state.snapshot?.active_interaction?.interaction_id).toBe(
+      "question-1",
+    )
+
+    controller.abort(new Error("pre-run prompt aborted"))
+
+    await expect(pending).rejects.toThrow("pre-run prompt aborted")
+    expect(renderedTree?.props.store.getSnapshot().state.snapshot?.active_interaction).toBeNull()
+
+    session.close()
+  })
 })

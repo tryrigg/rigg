@@ -89,11 +89,13 @@ const UserInputQuestionOptionSchema = z.object({
 })
 
 const UserInputQuestionSchema = z.object({
+  allowEmpty: z.boolean().optional(),
   header: z.string(),
   id: z.string(),
   isOther: z.boolean().optional(),
   isSecret: z.boolean().optional(),
   options: z.array(UserInputQuestionOptionSchema).nullable().optional(),
+  preserveWhitespace: z.boolean().optional(),
   question: z.string(),
 })
 
@@ -339,11 +341,13 @@ export function parseUserInputRequest(
     itemId: parsed.itemId,
     kind: "user_input",
     questions: parsed.questions.map((question) => ({
+      ...(question.allowEmpty === undefined ? {} : { allowEmpty: question.allowEmpty }),
       header: question.header,
       id: question.id,
       isOther: question.isOther ?? false,
       isSecret: question.isSecret ?? false,
       options: question.options ?? null,
+      ...(question.preserveWhitespace === undefined ? {} : { preserveWhitespace: question.preserveWhitespace }),
       question: question.question,
     })),
     requestId,

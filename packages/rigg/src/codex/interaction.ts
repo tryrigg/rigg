@@ -20,11 +20,14 @@ const CodexUserInputQuestionOptionSchema = z.object({
 })
 
 const CodexUserInputQuestionSchema = z.object({
+  allowEmpty: z.boolean().optional(),
   header: z.string(),
   id: z.string(),
+  initialValue: z.string().optional(),
   isOther: z.boolean(),
   isSecret: z.boolean(),
   options: z.array(CodexUserInputQuestionOptionSchema).nullable(),
+  preserveWhitespace: z.boolean().optional(),
   question: z.string(),
 })
 

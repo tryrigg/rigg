@@ -6,6 +6,8 @@ import type { CodexProviderEvent } from "../codex/event"
 import type { WorkflowDocument } from "../compile/schema"
 import type { RunControlHandler, RunControlRequest, RunControlResolution, RunEvent, StreamKind } from "../run/progress"
 import type { RunSnapshot } from "../run/schema"
+import { clonePendingInteraction, cloneRunSnapshot } from "../run/snapshot"
+import { setActiveInteraction } from "../run/state"
 import { onAbort } from "../util/abort"
 import { createAbortError } from "../util/error"
 import { App } from "./tui/app"
@@ -130,6 +132,23 @@ function resolveImmediateControlRequest(request: RunControlRequest): RunControlR
   }
 
   return null
+}
+
+function withSyntheticActiveInteraction(
+  snapshot: RunSnapshot,
+  request: RunControlRequest & { kind: "interaction" },
+): RunSnapshot {
+  const nextSnapshot = cloneRunSnapshot(snapshot)
+  setActiveInteraction(nextSnapshot, clonePendingInteraction(request.interaction))
+  return nextSnapshot
+}
+
+function withoutSyntheticActiveInteraction(snapshot: RunSnapshot, interactionId: string): RunSnapshot {
+  const nextSnapshot = cloneRunSnapshot(snapshot)
+  if (nextSnapshot.active_interaction?.interaction_id === interactionId) {
+    setActiveInteraction(nextSnapshot, null)
+  }
+  return nextSnapshot
 }
 
 export function createNonInteractiveRunSession(): RunSession {
@@ -272,7 +291,32 @@ export function createInkRunSession(options: {
         return immediateResolution
       }
 
-      return controlResolvers.register(request)
+      if (request.kind !== "interaction" || store.getSnapshot().state.snapshot !== null) {
+        return controlResolvers.register(request)
+      }
+
+      store.replaceSnapshot(withSyntheticActiveInteraction(request.snapshot, request))
+
+      return Promise.resolve(controlResolvers.register(request)).then(
+        (resolution) => {
+          const currentSnapshot = store.getSnapshot().state.snapshot
+          if (currentSnapshot !== null) {
+            store.replaceSnapshot(
+              withoutSyntheticActiveInteraction(currentSnapshot, request.interaction.interaction_id),
+            )
+          }
+          return resolution
+        },
+        (error) => {
+          const currentSnapshot = store.getSnapshot().state.snapshot
+          if (currentSnapshot !== null) {
+            store.replaceSnapshot(
+              withoutSyntheticActiveInteraction(currentSnapshot, request.interaction.interaction_id),
+            )
+          }
+          throw error
+        },
+      )
     },
   }
 }

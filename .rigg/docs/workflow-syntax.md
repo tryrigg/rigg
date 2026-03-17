@@ -3,6 +3,8 @@
 Rigg is a local-first workflow builder for coding. It orchestrates Codex and shell steps with structured control flow.
 
 Workflow files live in `.rigg/` and are run with `rigg run <workflow_id>`.
+If you omit a declared workflow input from `--input`, `rigg run` prompts for it before execution starts so you can confirm or override the default interactively.
+Enter JSON for non-string values such as booleans, numbers, arrays, and objects.
 
 For complete field-by-field details, see [schema-reference.md](schema-reference.md).
 For complete workflow examples, see [examples.md](examples.md).

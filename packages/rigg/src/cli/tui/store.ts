@@ -1,4 +1,5 @@
 import type { RunEvent } from "../../run/progress"
+import type { RunSnapshot } from "../../run/schema"
 import { applyRunEvent, createTerminalUiState, type TerminalUiState } from "../run"
 
 export type TuiStoreSnapshot = {
@@ -10,6 +11,7 @@ export type TuiStore = {
   getSnapshot: () => TuiStoreSnapshot
   subscribe: (listener: () => void) => () => void
   dispatch: (event: RunEvent) => void
+  replaceSnapshot: (snapshot: RunSnapshot | null) => void
   startTimer: () => void
   stopTimer: () => void
 }
@@ -50,6 +52,10 @@ export function createTuiStore(): TuiStore {
     },
     dispatch: (event) => {
       applyRunEvent(uiState, event)
+      notify()
+    },
+    replaceSnapshot: (snapshot) => {
+      uiState.snapshot = snapshot
       notify()
     },
     startTimer: () => {

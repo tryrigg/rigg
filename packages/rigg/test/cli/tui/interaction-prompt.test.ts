@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test"
 import {
   buildApprovalPromptChoices,
   resolveApprovalChoice,
+  resolveUserInputAnswer,
   shouldAutoSubmitApprovalChoice,
 } from "../../../src/cli/tui/interaction-prompt"
 
@@ -38,5 +39,38 @@ describe("approval prompt choices", () => {
 
     expect(shouldAutoSubmitApprovalChoice(choices, "approve")).toBe(false)
     expect(shouldAutoSubmitApprovalChoice(choices, "approved")).toBe(true)
+  })
+})
+
+describe("user input answers", () => {
+  test("trims generic free-form answers and rejects blank submissions", () => {
+    const question = {
+      header: "name",
+      id: "name",
+      isOther: false,
+      isSecret: false,
+      options: null,
+      question: "Enter a name",
+    } as const
+
+    expect(resolveUserInputAnswer(question, "  Rigg  ")).toBe("Rigg")
+    expect(resolveUserInputAnswer(question, "   ")).toBeUndefined()
+  })
+
+  test("preserves raw workflow input answers, including empty and whitespace-only strings", () => {
+    const question = {
+      allowEmpty: true,
+      header: "note",
+      id: "note",
+      isOther: false,
+      isSecret: false,
+      options: null,
+      preserveWhitespace: true,
+      question: "Enter a note",
+    } as const
+
+    expect(resolveUserInputAnswer(question, "")).toBe("")
+    expect(resolveUserInputAnswer(question, "   ")).toBe("   ")
+    expect(resolveUserInputAnswer(question, "  hello  ")).toBe("  hello  ")
   })
 })

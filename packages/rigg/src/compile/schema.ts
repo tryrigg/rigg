@@ -23,10 +23,6 @@ const JsonSchemaTypeValues = ["string", "integer", "number", "boolean", "object"
 export type JsonSchemaType = (typeof JsonSchemaTypeValues)[number]
 export const JsonSchemaType = z.enum(JsonSchemaTypeValues)
 
-function isJsonSchemaType(value: unknown): value is JsonSchemaType {
-  return typeof value === "string" && JsonSchemaType.safeParse(value).success
-}
-
 export function isValidIdentifier(value: string): boolean {
   return IDENTIFIER_PATTERN.test(value)
 }
@@ -150,7 +146,6 @@ export type InputDefinition = {
   minItems?: number | undefined
   minLength?: number | undefined
   minimum?: number | undefined
-  nullable?: boolean | undefined
   pattern?: string | undefined
   properties?: Record<string, InputDefinition> | undefined
   required?: string[] | undefined
@@ -167,31 +162,12 @@ export type OutputDefinition = {
 }
 
 const INPUT_ALLOWED_FIELDS: Record<JsonSchemaType, ReadonlySet<keyof InputDefinition>> = {
-  array: new Set([
-    "additionalProperties",
-    "default",
-    "description",
-    "enum",
-    "items",
-    "maxItems",
-    "minItems",
-    "nullable",
-    "type",
-  ]),
-  boolean: new Set(["default", "description", "enum", "nullable", "type"]),
-  integer: new Set(["default", "description", "enum", "maximum", "minimum", "nullable", "type"]),
-  number: new Set(["default", "description", "enum", "maximum", "minimum", "nullable", "type"]),
-  object: new Set([
-    "additionalProperties",
-    "default",
-    "description",
-    "enum",
-    "nullable",
-    "properties",
-    "required",
-    "type",
-  ]),
-  string: new Set(["default", "description", "enum", "maxLength", "minLength", "nullable", "pattern", "type"]),
+  array: new Set(["additionalProperties", "default", "description", "enum", "items", "maxItems", "minItems", "type"]),
+  boolean: new Set(["default", "description", "enum", "type"]),
+  integer: new Set(["default", "description", "enum", "maximum", "minimum", "type"]),
+  number: new Set(["default", "description", "enum", "maximum", "minimum", "type"]),
+  object: new Set(["additionalProperties", "default", "description", "enum", "properties", "required", "type"]),
+  string: new Set(["default", "description", "enum", "maxLength", "minLength", "pattern", "type"]),
 }
 
 const CODEX_REVIEW_OUTPUT_DEFINITION: OutputDefinition = {
@@ -236,36 +212,6 @@ const CODEX_REVIEW_OUTPUT_DEFINITION: OutputDefinition = {
   type: "object",
 }
 
-function parseJsonSchemaType(input: unknown): {
-  type: JsonSchemaType
-  nullable: boolean
-} {
-  if (isJsonSchemaType(input)) {
-    return { nullable: false, type: input }
-  }
-
-  if (Array.isArray(input) && input.length === 2) {
-    const values = new Set(input)
-    if (values.has("null")) {
-      for (const value of values) {
-        if (value !== "null" && isJsonSchemaType(value)) {
-          return { nullable: true, type: value }
-        }
-      }
-    }
-  }
-
-  throw new Error('type must be a supported JSON schema type or [type, "null"]')
-}
-
-const TypeFieldSchema = z.preprocess(
-  parseJsonSchemaType,
-  z.object({
-    nullable: z.boolean(),
-    type: JsonSchemaType,
-  }),
-)
-
 const InputSchemaBase = z
   .object({
     additionalProperties: z.boolean().optional(),
@@ -287,7 +233,7 @@ export const InputSchema: z.ZodType<InputDefinition> = z.lazy(() =>
   InputSchemaBase.extend({
     items: InputSchema.optional(),
     properties: z.record(z.string(), InputSchema).optional(),
-    type: TypeFieldSchema,
+    type: JsonSchemaType,
   })
     .transform((value) => ({
       additionalProperties: value.additionalProperties,
@@ -301,11 +247,10 @@ export const InputSchema: z.ZodType<InputDefinition> = z.lazy(() =>
       minItems: value.minItems,
       minLength: value.minLength,
       minimum: value.minimum,
-      nullable: value.type.nullable ? true : undefined,
       pattern: value.pattern,
       properties: value.properties,
       required: value.required,
-      type: value.type.type,
+      type: value.type,
     }))
     .superRefine((value, ctx) => {
       validateSchemaStructure(value, "input", ctx)
@@ -388,7 +333,7 @@ export function validateInputValue(schema: InputDefinition, value: unknown, path
   const errors: string[] = []
 
   if (value === null) {
-    return schema.nullable ? [] : [`${path} must not be null`]
+    return [`${path} must not be null`]
   }
 
   if (schema.enum !== undefined && !schema.enum.some((candidate) => deepEqual(candidate, value))) {

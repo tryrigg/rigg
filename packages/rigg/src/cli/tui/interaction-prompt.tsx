@@ -6,6 +6,7 @@ import type {
   CodexApprovalDecision,
   CodexInteractionRequest,
   CodexInteractionResolution,
+  CodexUserInputQuestion,
 } from "../../codex/interaction"
 import type { PendingInteraction } from "../../run/schema"
 import { stringifyJsonCompact, tryParseJson } from "../../util/json"
@@ -100,6 +101,15 @@ function normalizeQuestionAnswer(
   return answer
 }
 
+export function resolveUserInputAnswer(question: CodexUserInputQuestion, value: string): string | undefined {
+  if (!question.allowEmpty && value.trim().length === 0) {
+    return undefined
+  }
+
+  const answer = question.preserveWhitespace ? value : value.trim()
+  return normalizeQuestionAnswer(answer, question.options)
+}
+
 function ApprovalPrompt({
   request,
   onResolve,
@@ -191,7 +201,7 @@ function UserInputPrompt({
 }) {
   const [questionIndex, setQuestionIndex] = useState(0)
   const [answers, setAnswers] = useState<Record<string, { answers: string[] }>>({})
-  const [inputValue, setInputValue] = useState("")
+  const [inputValue, setInputValue] = useState(request.questions[0]?.initialValue ?? "")
 
   const question = request.questions[questionIndex]
   if (question === undefined) {
@@ -201,18 +211,19 @@ function UserInputPrompt({
   const total = request.questions.length
 
   const handleSubmit = (value: string) => {
-    if (value.trim().length === 0) {
+    const answer = resolveUserInputAnswer(question, value)
+    if (answer === undefined) {
       return
     }
-    const normalized = normalizeQuestionAnswer(value.trim(), question.options)
-    const newAnswers = { ...answers, [question.id]: { answers: [normalized] } }
+
+    const newAnswers = { ...answers, [question.id]: { answers: [answer] } }
 
     if (questionIndex + 1 >= total) {
       onResolve({ answers: newAnswers, kind: "user_input" })
     } else {
       setAnswers(newAnswers)
       setQuestionIndex(questionIndex + 1)
-      setInputValue("")
+      setInputValue(request.questions[questionIndex + 1]?.initialValue ?? "")
     }
   }
 

@@ -52,17 +52,13 @@ describe("compile/schema", () => {
     expect(loopIterationFrameId(loopScope, 3)).toBe(`${loopScope}.iter.3`)
   })
 
-  test("decodes nullable input schemas", () => {
-    expect(
-      InputSchema.parse({
-        default: "draft",
-        type: ["string", "null"],
-      }),
-    ).toEqual({
+  test("rejects nullable input schemas", () => {
+    const result = InputSchema.safeParse({
       default: "draft",
-      nullable: true,
-      type: "string",
+      type: ["string", "null"],
     })
+
+    expect(result.success).toBe(false)
   })
 
   test("accepts codex plan steps in the workflow schema", () => {
@@ -236,6 +232,8 @@ describe("compile/schema", () => {
       "inputs.config.retries must be >= 1",
       "inputs.config.tags.0 must be at least 2 characters",
     ])
+
+    expect(validateInputValue({ type: "string" }, null, "inputs.note")).toEqual(["inputs.note must not be null"])
   })
 
   test("collects input defaults using current JSON coercion behavior", () => {

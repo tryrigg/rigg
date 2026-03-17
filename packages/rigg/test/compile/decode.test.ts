@@ -147,10 +147,48 @@ steps:
       },
       "/workspace/.rigg/check.yaml",
     )
+    const invalidEffort = decodeWorkflowFile(
+      {
+        id: "check",
+        steps: [
+          {
+            type: "codex",
+            with: {
+              action: "run",
+              effort: "minimal",
+              prompt: "hello",
+            },
+          },
+        ],
+      },
+      "/workspace/.rigg/check.yaml",
+    )
+    const reviewEffort = decodeWorkflowFile(
+      {
+        id: "check",
+        steps: [
+          {
+            type: "codex",
+            with: {
+              action: "review",
+              effort: "high",
+              review: {
+                target: {
+                  type: "uncommitted",
+                },
+              },
+            },
+          },
+        ],
+      },
+      "/workspace/.rigg/check.yaml",
+    )
 
     expect(invalidField.kind).toBe("invalid_workflow")
     expect(invalidAction.kind).toBe("invalid_workflow")
     expect(invalidPlanCombination.kind).toBe("invalid_workflow")
+    expect(invalidEffort.kind).toBe("invalid_workflow")
+    expect(reviewEffort.kind).toBe("invalid_workflow")
 
     if (invalidField.kind === "invalid_workflow") {
       expect(invalidField.error.message).toContain("Workflow schema validation failed.")
@@ -160,6 +198,12 @@ steps:
     }
     if (invalidPlanCombination.kind === "invalid_workflow") {
       expect(invalidPlanCombination.error.message).toContain("Workflow schema validation failed.")
+    }
+    if (invalidEffort.kind === "invalid_workflow") {
+      expect(invalidEffort.error.message).toContain("Workflow schema validation failed.")
+    }
+    if (reviewEffort.kind === "invalid_workflow") {
+      expect(reviewEffort.error.message).toContain("Workflow schema validation failed.")
     }
   })
 

@@ -3,6 +3,7 @@ import { dirname, isAbsolute, join } from "node:path"
 
 import { renderTemplateString } from "../compile/expr"
 import type { ActionNode, CodexNode } from "../compile/schema"
+import type { CodexEffort } from "../codex/effort"
 import type { CodexProviderEvent } from "../codex/event"
 import type { CodexInteractionHandler } from "../codex/interaction"
 import { createCodexRuntimeSession } from "../codex/runtime"
@@ -165,7 +166,7 @@ async function runCodexReviewStep(
 }
 
 async function runCodexPromptStep(
-  config: Extract<CodexNode["with"], { action: "plan" | "run" }>,
+  config: PromptCodexConfig,
   context: RenderContext,
   options: ActionExecutionOptions,
 ): Promise<ActionStepOutput> {
@@ -173,6 +174,7 @@ async function runCodexPromptStep(
     const result = await session.run({
       collaborationMode: config.action === "plan" ? "plan" : undefined,
       cwd: options.cwd,
+      effort: config.effort,
       interactionHandler: options.interactionHandler,
       model: config.model,
       onEvent: options.onProviderEvent,
@@ -181,6 +183,10 @@ async function runCodexPromptStep(
     })
     return result
   })
+}
+
+type PromptCodexConfig = Extract<CodexNode["with"], { action: "plan" | "run" }> & {
+  effort?: CodexEffort | undefined
 }
 
 function inferReviewScope(

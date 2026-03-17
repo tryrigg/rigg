@@ -1,6 +1,7 @@
 import { onAbort } from "../util/abort"
 import { isAbortError, normalizeError } from "../util/error"
 import { RIGG_VERSION } from "../version"
+import { DEFAULT_CODEX_EFFORT, type CodexEffort } from "./effort"
 import type { CodexProviderEvent } from "./event"
 import {
   findApprovalDecisionByIntent,
@@ -72,7 +73,7 @@ type CollaborationMode = {
   settings: {
     developer_instructions: null
     model: string
-    reasoning_effort: "high" | "low" | "medium" | "minimal" | "xhigh" | null
+    reasoning_effort: CodexEffort | null
   }
 }
 
@@ -80,12 +81,13 @@ type CollaborationModePreset = {
   mode: CollaborationModeKind
   settings: {
     model: string | null
-    reasoning_effort: "high" | "low" | "medium" | "minimal" | "xhigh" | null
+    reasoning_effort: CodexEffort | null
   }
 }
 
 type TurnStartParams = {
   collaborationMode?: CollaborationMode
+  effort?: CodexEffort | null
   input: Array<{
     text: string
     text_elements: []
@@ -203,6 +205,7 @@ export type CodexRuntimeSession = {
   run: (options: {
     collaborationMode?: CollaborationModeKind | undefined
     cwd: string
+    effort?: CodexEffort | undefined
     interactionHandler?: CodexInteractionHandler | undefined
     model?: string | undefined
     onEvent?: ((event: CodexProviderEvent) => Promise<void> | void) | undefined
@@ -513,6 +516,7 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
   async function resolveCollaborationMode(
     kind: CollaborationModeKind,
     modelOverride: string | undefined,
+    effortOverride: CodexEffort | undefined,
     signal?: AbortSignal | undefined,
   ): Promise<CollaborationMode> {
     const preset = collaborationModesByKind.get(kind) ?? (await loadCollaborationModes(signal)).get(kind)
@@ -531,7 +535,7 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
       settings: {
         developer_instructions: null,
         model,
-        reasoning_effort: preset.settings.reasoning_effort,
+        reasoning_effort: effortOverride ?? preset.settings.reasoning_effort,
       },
     }
   }
@@ -660,14 +664,18 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
   async function run(options_: {
     collaborationMode?: CollaborationModeKind | undefined
     cwd: string
+    effort?: CodexEffort | undefined
     interactionHandler?: CodexInteractionHandler | undefined
     model?: string | undefined
     onEvent?: ((event: CodexProviderEvent) => Promise<void> | void) | undefined
     prompt: string
     signal?: AbortSignal | undefined
   }): Promise<CodexStepResult> {
+    const collaborationMode = options_.collaborationMode
+    const effectiveEffort = options_.effort ?? DEFAULT_CODEX_EFFORT
+
     return await executeThreadTurn({
-      collaborationMode: options_.collaborationMode,
+      collaborationMode,
       cwd: options_.cwd,
       finalizeCompletedTurn: (turn) => ({
         exitCode: 0,
@@ -682,14 +690,15 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
       model: options_.model,
       onEvent: options_.onEvent,
       signal: options_.signal,
-      startThreadModel: options_.collaborationMode === undefined ? options_.model : undefined,
+      startThreadModel: collaborationMode === undefined ? options_.model : undefined,
       turnParams: async (threadId) => ({
-        ...(options_.collaborationMode === undefined
-          ? { model: options_.model ?? null }
+        ...(collaborationMode === undefined
+          ? { effort: effectiveEffort, model: options_.model ?? null }
           : {
               collaborationMode: await resolveCollaborationMode(
-                options_.collaborationMode,
+                collaborationMode,
                 options_.model,
+                effectiveEffort,
                 options_.signal,
               ),
             }),

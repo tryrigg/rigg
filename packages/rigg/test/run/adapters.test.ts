@@ -132,6 +132,12 @@ describe("run/adapters", () => {
           persistExtendedHistory: false,
         },
         turnStart: {
+          expectParams: {
+            effort: "medium",
+            input: [{ text: "Summarize the change.", text_elements: [], type: "text" }],
+            model: null,
+            threadId: "__THREAD_ID__",
+          },
           dispatch: "immediate",
           steps: [
             {
@@ -395,6 +401,73 @@ describe("run/adapters", () => {
     }
   })
 
+  test("runs codex run steps with an effort override through direct turn/start overrides", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-codex-run-effort-app-server-"))
+    try {
+      const binDir = await installFakeCodex(root, {
+        threadStartExpectParams: {
+          cwd: root,
+          experimentalRawEvents: false,
+          model: null,
+          persistExtendedHistory: false,
+        },
+        turnStart: {
+          expectParams: {
+            effort: "high",
+            input: [{ text: "Summarize the change.", text_elements: [], type: "text" }],
+            model: null,
+            threadId: "__THREAD_ID__",
+          },
+          steps: [
+            {
+              kind: "notification",
+              method: "item/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                item: {
+                  type: "agentMessage",
+                  id: "msg_1",
+                  text: "done",
+                  phase: null,
+                },
+              },
+            },
+            {
+              kind: "notification",
+              method: "turn/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turn: { id: "__TURN_ID__", items: [], status: "completed", error: null },
+              },
+            },
+          ],
+        },
+      })
+
+      const result = await runActionStep(
+        {
+          type: "codex",
+          with: {
+            action: "run",
+            effort: "high",
+            prompt: "Summarize the change.",
+          },
+        },
+        renderContext(),
+        {
+          cwd: root,
+          env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+        },
+      )
+
+      expect(result.exitCode).toBe(0)
+      expect(result.result).toBe("done")
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
   test("maps codeReview text back into a review result", async () => {
     const root = await mkdtemp(join(tmpdir(), "rigg-codex-review-app-server-"))
     try {
@@ -484,7 +557,7 @@ describe("run/adapters", () => {
     }
   })
 
-  test("runs codex plan steps with the built-in collaboration mode preset", async () => {
+  test("runs codex plan steps with the built-in collaboration mode and default medium effort", async () => {
     const root = await mkdtemp(join(tmpdir(), "rigg-codex-plan-app-server-"))
     try {
       const binDir = await installFakeCodex(root, {
@@ -506,7 +579,7 @@ describe("run/adapters", () => {
         },
         collaborationModeListResult: {
           data: [
-            { name: "Plan", mode: "plan", model: null, reasoning_effort: "medium" },
+            { name: "Plan", mode: "plan", model: null, reasoning_effort: "high" },
             { name: "Default", mode: "default", model: null, reasoning_effort: null },
           ],
         },
@@ -601,6 +674,85 @@ describe("run/adapters", () => {
               kind: "user_input",
             }
           },
+        },
+      )
+
+      expect(result.exitCode).toBe(0)
+      expect(result.result).toBe("plan ready")
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("runs codex plan steps with an effort override", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-codex-plan-effort-app-server-"))
+    try {
+      const binDir = await installFakeCodex(root, {
+        threadStartExpectParams: {
+          cwd: root,
+          experimentalRawEvents: false,
+          model: null,
+          persistExtendedHistory: false,
+        },
+        collaborationModeListResult: {
+          data: [
+            { name: "Plan", mode: "plan", model: "gpt-5.4", reasoning_effort: "medium" },
+            { name: "Default", mode: "default", model: "gpt-5.4", reasoning_effort: null },
+          ],
+        },
+        turnStart: {
+          expectParams: {
+            collaborationMode: {
+              mode: "plan",
+              settings: {
+                developer_instructions: null,
+                model: "gpt-5.4",
+                reasoning_effort: "xhigh",
+              },
+            },
+            input: [{ text: "Return the plan.", text_elements: [], type: "text" }],
+            threadId: "__THREAD_ID__",
+          },
+          steps: [
+            {
+              kind: "notification",
+              method: "item/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                item: {
+                  type: "agentMessage",
+                  id: "msg_1",
+                  text: "plan ready",
+                  phase: null,
+                },
+              },
+            },
+            {
+              kind: "notification",
+              method: "turn/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turn: { id: "__TURN_ID__", items: [], status: "completed", error: null },
+              },
+            },
+          ],
+        },
+      })
+
+      const result = await runActionStep(
+        {
+          type: "codex",
+          with: {
+            action: "plan",
+            effort: "xhigh",
+            prompt: "Return the plan.",
+          },
+        },
+        renderContext(),
+        {
+          cwd: root,
+          env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
         },
       )
 

@@ -1,5 +1,6 @@
 import { z } from "zod"
 
+import { CodexEffortSchema } from "../codex/effort"
 import { createCompileError, CompileErrorCode, type CompileError } from "./diagnostics"
 import { AnyJsonShape, BooleanShape, IntegerShape, NumberShape, StringShape, type ResultShape } from "./expr"
 import { asJsonValue, deepEqual, isJsonObject, type JsonValue } from "../util/json"
@@ -690,6 +691,7 @@ const CodexReviewWithSchema = z
 const CodexRunWithSchema = z
   .object({
     action: z.literal("run"),
+    effort: CodexEffortSchema.optional(),
     model: z.string().min(1).optional(),
     prompt: z.string().min(1),
   })
@@ -698,6 +700,7 @@ const CodexRunWithSchema = z
 const CodexPlanWithSchema = z
   .object({
     action: z.literal("plan"),
+    effort: CodexEffortSchema.optional(),
     model: z.string().min(1).optional(),
     prompt: z.string().min(1),
   })

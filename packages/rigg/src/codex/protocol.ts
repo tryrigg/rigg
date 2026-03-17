@@ -3,6 +3,7 @@ import { z } from "zod"
 import { createStepFailedError } from "../run/error"
 import { normalizeError } from "../util/error"
 import { parseJson } from "../util/json"
+import { CodexEffortSchema, type CodexEffort } from "./effort"
 import type { CodexProviderEvent } from "./event"
 import { inferApprovalDecisionIntent, type CodexInteractionRequest } from "./interaction"
 import type { CodexReviewResult } from "./review"
@@ -33,10 +34,7 @@ const CollaborationModeMaskSchema = z.object({
   mode: CollaborationModeKindSchema.nullable().optional(),
   model: z.string().nullable().optional(),
   name: z.string(),
-  reasoning_effort: z
-    .union([z.literal("minimal"), z.literal("low"), z.literal("medium"), z.literal("high"), z.literal("xhigh")])
-    .nullable()
-    .optional(),
+  reasoning_effort: CodexEffortSchema.nullable().optional(),
 })
 
 const CollaborationModeListResponseSchema = z.object({
@@ -169,7 +167,7 @@ export type CollaborationModeMask = {
   mode: CollaborationModeKind | null
   model: string | null
   name: string
-  reasoning_effort: "minimal" | "low" | "medium" | "high" | "xhigh" | null
+  reasoning_effort: CodexEffort | null
 }
 
 export type ReviewStartTarget =

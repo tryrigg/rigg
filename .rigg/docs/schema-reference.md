@@ -27,23 +27,25 @@
 
 ## type: codex (action: run)
 
-| Field         | Type     | Required |
-| ------------- | -------- | -------- |
-| `with.action` | `run`    | Yes      |
-| `with.prompt` | template | Yes      |
-| `with.model`  | string   | No       |
+| Field         | Type                                   | Required |
+| ------------- | -------------------------------------- | -------- |
+| `with.action` | `run`                                  | Yes      |
+| `with.prompt` | template                               | Yes      |
+| `with.model`  | string                                 | No       |
+| `with.effort` | `low` \| `medium` \| `high` \| `xhigh` | No       |
 
-`codex run` returns plain text.
+`codex run` returns plain text. `with.effort` maps to Codex reasoning effort and defaults to `medium`.
 
 ## type: codex (action: plan)
 
-| Field         | Type     | Required |
-| ------------- | -------- | -------- |
-| `with.action` | `plan`   | Yes      |
-| `with.prompt` | template | Yes      |
-| `with.model`  | string   | No       |
+| Field         | Type                                   | Required |
+| ------------- | -------------------------------------- | -------- |
+| `with.action` | `plan`                                 | Yes      |
+| `with.prompt` | template                               | Yes      |
+| `with.model`  | string                                 | No       |
+| `with.effort` | `low` \| `medium` \| `high` \| `xhigh` | No       |
 
-`codex plan` returns plain text and uses Codex's built-in Plan collaboration mode.
+`codex plan` returns plain text, uses Codex's built-in Plan collaboration mode, and lets `with.effort` override Codex reasoning effort. The default is `medium`.
 Plan steps are planning-only and must not mutate repo-tracked files.
 
 ## type: codex (action: review)

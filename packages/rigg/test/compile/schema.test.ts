@@ -95,6 +95,56 @@ describe("compile/schema", () => {
     })
   })
 
+  test("accepts codex prompt steps with effort overrides", () => {
+    expect(
+      WorkflowDocumentSchema.parse({
+        id: "effort-step",
+        steps: [
+          {
+            id: "implement",
+            type: "codex",
+            with: {
+              action: "run",
+              effort: "high",
+              prompt: "Implement the feature.",
+            },
+          },
+          {
+            id: "draft_plan",
+            type: "codex",
+            with: {
+              action: "plan",
+              effort: "low",
+              prompt: "Produce a plan.",
+            },
+          },
+        ],
+      }),
+    ).toEqual({
+      id: "effort-step",
+      steps: [
+        {
+          id: "implement",
+          type: "codex",
+          with: {
+            action: "run",
+            effort: "high",
+            prompt: "Implement the feature.",
+          },
+        },
+        {
+          id: "draft_plan",
+          type: "codex",
+          with: {
+            action: "plan",
+            effort: "low",
+            prompt: "Produce a plan.",
+          },
+        },
+      ],
+    })
+  })
+
   test("rejects invalid schema structure", () => {
     const objectResult = InputSchema.safeParse({ type: "object" })
 

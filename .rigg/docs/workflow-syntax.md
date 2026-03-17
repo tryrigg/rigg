@@ -45,6 +45,7 @@ steps:
     action: run
     prompt: Implement the feature.
     model: gpt-5.4
+    effort: high
 
 # Plan mode
 - id: draft_plan
@@ -53,6 +54,7 @@ steps:
     action: plan
     prompt: Clarify the scope and produce an implementation plan.
     model: gpt-5.4
+    effort: low
 
 # Review mode
 - id: review
@@ -69,6 +71,9 @@ steps:
 `action: run` and `action: plan` return plain text.
 `action: plan` uses Codex's built-in Plan collaboration mode and is planning-only.
 It must not mutate repo-tracked files.
+`effort` is optional on `action: run` and `action: plan` and maps to Codex reasoning effort.
+Allowed values: `low | medium | high | xhigh`.
+If omitted, Rigg uses `medium`.
 
 For `review.target`:
 

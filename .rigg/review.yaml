@@ -49,6 +49,11 @@ steps:
 
             If no findings survive the triage, make no changes.
 
+            After applying fixes, run these commands in order and fix any errors they produce:
+            1. `bun run format`
+            2. `bun run check`
+            3. `bun test`
+
       - id: commit
         if: ${{ len(steps.review.result.findings) > 0 }}
         type: shell

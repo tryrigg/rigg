@@ -281,47 +281,52 @@ const teamExample = `<span class="hl-comment">your-project/</span>
 			<a href="/docs/">Docs</a>
 		</div>
 	</footer>
-<script>
-	document.querySelectorAll('.usecase-tab').forEach((tab) => {
-		tab.addEventListener('click', () => {
-			const idx = tab.getAttribute('data-tab');
-			document.querySelectorAll('.usecase-tab').forEach((t) => {
-				t.classList.remove('active');
-				t.setAttribute('aria-selected', 'false');
-			});
-			document.querySelectorAll('.usecase-panel').forEach((p) => {
-				p.classList.remove('active');
-			});
-			tab.classList.add('active');
-			tab.setAttribute('aria-selected', 'true');
-			document.querySelector(`.usecase-panel[data-panel="${idx}"]`)?.classList.add('active');
-		});
-	});
-
-	document.querySelectorAll('.copy-btn').forEach((btn) => {
-		btn.addEventListener('click', async () => {
-			const text = btn.getAttribute('data-copy');
-			if (!text) return;
+	<script>
+		const copyText = async (text: string) => {
+			if (!navigator.clipboard?.writeText) {
+				return false;
+			}
 
 			try {
 				await navigator.clipboard.writeText(text);
+				return true;
 			} catch {
-				const ta = document.createElement('textarea');
-				ta.value = text;
-				ta.style.position = 'fixed';
-				ta.style.opacity = '0';
-				document.body.appendChild(ta);
-				ta.select();
-				document.execCommand('copy');
-				document.body.removeChild(ta);
+				return false;
 			}
+		};
 
-			btn.classList.add('copied');
-
-			setTimeout(() => {
-				btn.classList.remove('copied');
-			}, 2000);
+		document.querySelectorAll('.usecase-tab').forEach((tab) => {
+			tab.addEventListener('click', () => {
+				const idx = tab.getAttribute('data-tab');
+				document.querySelectorAll('.usecase-tab').forEach((t) => {
+					t.classList.remove('active');
+					t.setAttribute('aria-selected', 'false');
+				});
+				document.querySelectorAll('.usecase-panel').forEach((p) => {
+					p.classList.remove('active');
+				});
+				tab.classList.add('active');
+				tab.setAttribute('aria-selected', 'true');
+				document.querySelector(`.usecase-panel[data-panel="${idx}"]`)?.classList.add('active');
+			});
 		});
-	});
-</script>
+
+		document.querySelectorAll('.copy-btn').forEach((btn) => {
+			btn.addEventListener('click', async () => {
+				const text = btn.getAttribute('data-copy');
+				if (!text) return;
+
+				const copied = await copyText(text);
+				if (!copied) {
+					return;
+					}
+
+					btn.classList.add('copied');
+
+					setTimeout(() => {
+						btn.classList.remove('copied');
+					}, 2000);
+				});
+			});
+	</script>
 </BaseLayout>

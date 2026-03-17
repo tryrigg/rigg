@@ -3,7 +3,7 @@ import { elapsedMs, timestampNow } from "../util/time"
 import { isStepInterrupted, normalizeExecutionError } from "./error"
 import type { RunEvent } from "./progress"
 import type { StepBinding } from "./render"
-import type { CompletedNodeSummary, NodeSnapshot, NodeStatus, RunSnapshot } from "./schema"
+import type { CompletedNodeSummary, NodeProgress, NodeSnapshot, NodeStatus, RunSnapshot } from "./schema"
 import { nextNodeAttempt, recalculateRunPhase, upsertNodeSnapshot } from "./state"
 
 export type NodeLifecycle = {
@@ -80,6 +80,29 @@ export function startNode(
   return lifecycle
 }
 
+export function startSyntheticNode(
+  runState: RunSnapshot,
+  nodePath: NodePath,
+  nodeKind: string,
+  emitEvent: EmitEvent,
+  userId?: string,
+): NodeLifecycle {
+  const lifecycle = {
+    attempt: nextNodeAttempt(runState, nodePath),
+    startedAt: timestampNow(),
+  }
+  const snapshot = createNodeSnapshot(userId, nodePath, nodeKind, "running", lifecycle)
+  upsertNodeSnapshot(runState, snapshot)
+  recalculateRunPhase(runState)
+  emitEvent({
+    kind: "node_started",
+    node: snapshot,
+    snapshot: runState,
+  })
+
+  return lifecycle
+}
+
 export function finishNode(runState: RunSnapshot, snapshot: NodeSnapshot, emitEvent: EmitEvent): void {
   upsertNodeSnapshot(runState, snapshot)
   recalculateRunPhase(runState)
@@ -105,6 +128,7 @@ export function finishThrownControlNode(
   const snapshot = createNodeSnapshot(step.id, nodePath, step.type, status, lifecycle)
   snapshot.duration_ms = elapsedMs(lifecycle.startedAt, finishedAt)
   snapshot.finished_at = finishedAt
+  snapshot.progress = currentNodeSnapshot(runState, nodePath)?.progress
   snapshot.stderr = message
   finishNode(runState, snapshot, emitEvent)
   return snapshot
@@ -124,6 +148,7 @@ export function createNodeSnapshot(
     finished_at: null,
     node_kind: nodeKind,
     node_path: nodePath,
+    progress: undefined,
     result: null,
     started_at: lifecycle.startedAt,
     status,
@@ -157,7 +182,24 @@ export function statusForBinding(status: NodeStatus): StepBinding["status"] {
 }
 
 export function markCaseSkipped(runState: RunSnapshot, caseNode: BranchCase, pathPrefix: string): void {
+  const snapshot = createNodeSnapshot(undefined, pathPrefix, "branch_case", "skipped", {
+    attempt: nextNodeAttempt(runState, pathPrefix),
+    startedAt: timestampNow(),
+  })
+  snapshot.duration_ms = 0
+  snapshot.finished_at = snapshot.started_at
+  upsertNodeSnapshot(runState, snapshot)
   markBlockSkipped(runState, caseNode.steps, pathPrefix)
+}
+
+export function setNodeProgress(runState: RunSnapshot, nodePath: NodePath, progress: NodeProgress | undefined): void {
+  const snapshot = currentNodeSnapshot(runState, nodePath)
+  if (snapshot === undefined) {
+    return
+  }
+
+  snapshot.progress = progress
+  upsertNodeSnapshot(runState, snapshot)
 }
 
 function markBlockSkipped(runState: RunSnapshot, steps: WorkflowStep[], pathPrefix: string): void {

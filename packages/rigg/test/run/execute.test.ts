@@ -375,6 +375,138 @@ describe("run/execute", () => {
     }
   })
 
+  test("aborts a pending barrier when its control signal fires", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-barrier-abort-"))
+    const controller = new AbortController()
+    const timeout = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error("timed out waiting for barrier abort")), 500)
+    })
+
+    try {
+      const snapshot = await Promise.race([
+        runWorkflow({
+          controlHandler: async (request) => {
+            if (request.kind !== "step_barrier") {
+              throw new Error(`unexpected control request ${request.kind}`)
+            }
+
+            queueMicrotask(() => controller.abort(new StepInterruptedError("workflow interrupted by operator")))
+            return await new Promise<never>(() => {})
+          },
+          internals: {
+            runActionStep: async () => ({
+              exitCode: 0,
+              providerEvents: [],
+              result: "ok",
+              stderr: "",
+              stdout: "ok",
+              termination: "completed",
+            }),
+          },
+          invocationInputs: {},
+          parentEnv: process.env,
+          projectRoot: root,
+          signal: controller.signal,
+          workflow: {
+            id: "barrier-abort",
+            steps: [
+              {
+                id: "first",
+                type: "shell",
+                with: {
+                  command: "first",
+                  result: "text",
+                },
+              },
+            ],
+          },
+        }),
+        timeout,
+      ])
+
+      expect(snapshot.status).toBe("aborted")
+      expect(snapshot.reason).toBe("aborted")
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("aborts a pending interaction when its control signal fires", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-interaction-abort-"))
+    const controller = new AbortController()
+    const timeout = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error("timed out waiting for interaction abort")), 500)
+    })
+
+    try {
+      const snapshot = await Promise.race([
+        runWorkflow({
+          controlHandler: async (request) => {
+            if (request.kind === "step_barrier") {
+              return { action: "continue", kind: "step_barrier" }
+            }
+
+            queueMicrotask(() => controller.abort(new StepInterruptedError("workflow interrupted by operator")))
+            return await new Promise<never>(() => {})
+          },
+          internals: {
+            runActionStep: async (_step, _context, options) => {
+              if (options.interactionHandler === undefined) {
+                throw new Error("interactionHandler missing")
+              }
+
+              await options.interactionHandler({
+                decisions: [
+                  { intent: "approve", value: "approve" },
+                  { intent: "deny", value: "deny" },
+                ],
+                itemId: "item-1",
+                kind: "approval",
+                message: "Approve the step",
+                requestId: "approval-1",
+                requestKind: "command_execution",
+                turnId: "turn-1",
+              })
+
+              return {
+                exitCode: 0,
+                providerEvents: [],
+                result: "ok",
+                stderr: "",
+                stdout: "ok",
+                termination: "completed",
+              }
+            },
+          },
+          invocationInputs: {},
+          parentEnv: process.env,
+          projectRoot: root,
+          signal: controller.signal,
+          workflow: {
+            id: "interaction-abort",
+            steps: [
+              {
+                id: "needs_approval",
+                type: "codex",
+                with: {
+                  action: "run",
+                  prompt: "needs approval",
+                },
+              },
+            ],
+          },
+        }),
+        timeout,
+      ])
+
+      expect(snapshot.status).toBe("aborted")
+      expect(snapshot.reason).toBe("aborted")
+      expect(snapshot.nodes.find((node) => node.user_id === "needs_approval")?.status).toBe("interrupted")
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
   test("evaluates loop exports with the current iteration run context", async () => {
     const root = await mkdtemp(join(tmpdir(), "rigg-execute-loop-exports-"))
 
@@ -425,6 +557,57 @@ describe("run/execute", () => {
         iteration: 1,
         max_iterations: 3,
         node_path: "/0",
+      })
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("stores loop progress on the loop node snapshot", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-loop-progress-"))
+
+    try {
+      const snapshot = await runWorkflow({
+        internals: {
+          runActionStep: async () => ({
+            exitCode: 0,
+            providerEvents: [],
+            result: "ok",
+            stderr: "",
+            stdout: "ok",
+            termination: "completed",
+          }),
+        },
+        invocationInputs: {},
+        parentEnv: process.env,
+        projectRoot: root,
+        workflow: {
+          id: "loop-progress",
+          steps: [
+            {
+              id: "loop",
+              max: 3,
+              steps: [
+                {
+                  id: "inside_loop",
+                  type: "shell",
+                  with: {
+                    command: "inside-loop",
+                    result: "text",
+                  },
+                },
+              ],
+              type: "loop",
+              until: "${{ run.iteration == 2 }}",
+            },
+          ],
+        },
+      })
+
+      expect(snapshot.status).toBe("succeeded")
+      expect(snapshot.nodes.find((node) => node.user_id === "loop")?.progress).toEqual({
+        current_iteration: 2,
+        max_iterations: 3,
       })
     } finally {
       await rm(root, { force: true, recursive: true })
@@ -702,6 +885,125 @@ describe("run/execute", () => {
       })
 
       expect(barriers).toEqual([["run_now"]])
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("records branch_case snapshots for selected and skipped cases", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-branch-case-"))
+
+    try {
+      const snapshot = await runWorkflow({
+        invocationInputs: {},
+        parentEnv: process.env,
+        projectRoot: root,
+        workflow: {
+          id: "branch-case-snapshots",
+          steps: [
+            {
+              id: "choose",
+              type: "branch",
+              cases: [
+                {
+                  if: "${{ true }}",
+                  exports: {
+                    winner: '${{ "fast" }}',
+                  },
+                  steps: [],
+                },
+                {
+                  else: true,
+                  steps: [
+                    {
+                      id: "slow",
+                      type: "shell",
+                      with: {
+                        command: "echo slow",
+                        result: "text",
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      })
+
+      expect(snapshot.status).toBe("succeeded")
+      expect(snapshot.nodes.find((node) => node.node_path === "/0/0")).toMatchObject({
+        node_kind: "branch_case",
+        result: { winner: "fast" },
+        status: "succeeded",
+      })
+      expect(snapshot.nodes.find((node) => node.node_path === "/0/1")).toMatchObject({
+        node_kind: "branch_case",
+        status: "skipped",
+      })
+      expect(snapshot.nodes.find((node) => node.node_path === "/0/1/0")?.status).toBe("skipped")
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("records skipped branch_case snapshots when no branch case matches", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-branch-case-no-match-"))
+
+    try {
+      const snapshot = await runWorkflow({
+        invocationInputs: {},
+        parentEnv: process.env,
+        projectRoot: root,
+        workflow: {
+          id: "branch-case-no-match",
+          steps: [
+            {
+              id: "choose",
+              type: "branch",
+              cases: [
+                {
+                  if: "${{ false }}",
+                  steps: [{ id: "fast", type: "shell", with: { command: "echo fast", result: "text" } }],
+                },
+                {
+                  if: "${{ false }}",
+                  steps: [{ id: "slow", type: "shell", with: { command: "echo slow", result: "text" } }],
+                },
+              ],
+            },
+            {
+              id: "after",
+              type: "shell",
+              with: {
+                command: "echo after",
+                result: "text",
+              },
+            },
+          ],
+        },
+      })
+
+      expect(snapshot.status).toBe("succeeded")
+      expect(snapshot.nodes.find((node) => node.node_path === "/0")).toMatchObject({
+        node_kind: "branch",
+        status: "skipped",
+      })
+      expect(snapshot.nodes.find((node) => node.node_path === "/0/0")).toMatchObject({
+        node_kind: "branch_case",
+        status: "skipped",
+      })
+      expect(snapshot.nodes.find((node) => node.node_path === "/0/1")).toMatchObject({
+        node_kind: "branch_case",
+        status: "skipped",
+      })
+      expect(snapshot.nodes.find((node) => node.node_path === "/0/0/0")?.status).toBe("skipped")
+      expect(snapshot.nodes.find((node) => node.node_path === "/0/1/0")?.status).toBe("skipped")
+      expect(snapshot.nodes.find((node) => node.node_path === "/1")).toMatchObject({
+        node_kind: "shell",
+        result: "after\n",
+        status: "succeeded",
+      })
     } finally {
       await rm(root, { force: true, recursive: true })
     }

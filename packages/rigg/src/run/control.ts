@@ -2,6 +2,7 @@ import { v7 as uuidv7 } from "uuid"
 
 import type { NodePath } from "../compile/schema"
 import type { CodexInteractionRequest, CodexInteractionResolution } from "../codex/interaction"
+import { onAbort } from "../util/abort"
 import { isAbortError } from "../util/error"
 import { timestampNow } from "../util/time"
 import { isStepInterrupted, RunAbortedError, StepInterruptedError } from "./error"
@@ -40,6 +41,8 @@ type ControlQueueEntry = {
   sequence: number
   started: boolean
 }
+
+const CONTROL_ABORTED = Symbol("control-aborted")
 
 export function createControlBroker(): ControlBroker {
   const queue: ControlQueueEntry[] = []
@@ -124,18 +127,11 @@ export function createControlBroker(): ControlBroker {
     }): Promise<T> => {
       return await new Promise<T>((resolve, reject) => {
         const controller = new AbortController()
-        const abortListener = () => {
-          controller.abort(input.signal?.reason)
-          if (!entry.started) {
-            removeEntry(entry)
-            entry.dispose()
-            reject(createControlInterruptedError(input.signal?.reason))
-          }
-        }
+        let disposeAbort = () => {}
 
         const entry: ControlQueueEntry = {
           controller,
-          dispose: () => input.signal?.removeEventListener("abort", abortListener),
+          dispose: () => disposeAbort(),
           priority: input.priority,
           reject,
           run: async (signal) => {
@@ -145,15 +141,15 @@ export function createControlBroker(): ControlBroker {
           started: false,
         }
 
-        if (input.signal?.aborted) {
-          controller.abort(input.signal.reason)
-          entry.dispose()
-          reject(createControlInterruptedError(input.signal.reason))
-          return
-        }
-
-        input.signal?.addEventListener("abort", abortListener, { once: true })
         insertSorted(entry)
+        disposeAbort = onAbort(input.signal, () => {
+          controller.abort(input.signal?.reason)
+          if (!entry.started) {
+            removeEntry(entry)
+            entry.dispose()
+            reject(createControlInterruptedError(input.signal?.reason))
+          }
+        })
         void pump()
       })
     },
@@ -299,16 +295,22 @@ async function resolveControl(
   request: Parameters<RunControlHandler>[0],
 ): Promise<RunControlResolution> {
   throwIfControlAborted(request.signal)
+  const abortRace = createControlAbortRace(request.signal)
 
   try {
-    const resolution = await controlHandler(request)
+    const resolution = await Promise.race([Promise.resolve(controlHandler(request)), abortRace.promise])
     throwIfControlAborted(request.signal)
     return resolution
   } catch (error) {
+    if (error === CONTROL_ABORTED) {
+      throw createControlInterruptedError(request.signal.reason)
+    }
     if (request.signal.aborted && isAbortError(error)) {
       throw createControlInterruptedError(request.signal.reason ?? error)
     }
     throw error
+  } finally {
+    abortRace.dispose()
   }
 }
 
@@ -316,6 +318,15 @@ function throwIfControlAborted(signal: AbortSignal): void {
   if (signal.aborted) {
     throw createControlInterruptedError(signal.reason)
   }
+}
+
+function createControlAbortRace(signal: AbortSignal): { dispose: () => void; promise: Promise<never> } {
+  let dispose = () => {}
+  const promise = new Promise<never>((_, reject) => {
+    dispose = onAbort(signal, () => reject(CONTROL_ABORTED))
+  })
+
+  return { dispose, promise }
 }
 
 function createControlInterruptedError(cause: unknown): StepInterruptedError {

@@ -1,4 +1,5 @@
 import { renderTemplate } from "../compile/expr"
+import { onAbort } from "../util/abort"
 import {
   childLoopScope,
   childNodePath,
@@ -29,11 +30,14 @@ import {
 } from "./error"
 import {
   createNodeSnapshot,
+  currentNodeSnapshot,
   finishNode,
   finishThrownControlNode,
   markCaseSkipped,
   recordSkippedStep,
+  setNodeProgress,
   startNode,
+  startSyntheticNode,
   statusForBinding,
   summarizeCompletedNode,
   type NodeLifecycle,
@@ -449,6 +453,10 @@ async function executeLoop(
 
   return await executeControlNode(environment, step, nodePath, async (lifecycle) => {
     for (let iteration = 1; iteration <= step.max; iteration += 1) {
+      setNodeProgress(environment.runState, nodePath, {
+        current_iteration: iteration,
+        max_iterations: step.max,
+      })
       const iterationFrameId = loopIterationFrameId(loopScopeId, iteration)
       const iterationRun = {
         iteration,
@@ -520,6 +528,9 @@ async function executeBranch(
 ): Promise<StepExecutionOutcome> {
   return await executeControlNode(environment, step, nodePath, async (lifecycle) => {
     if (selection === null) {
+      for (const [index, caseNode] of step.cases.entries()) {
+        markCaseSkipped(environment.runState, caseNode, `${nodePath}/${index}`)
+      }
       const snapshot = createNodeSnapshot(step.id, nodePath, step.type, "skipped", lifecycle)
       snapshot.duration_ms = 0
       snapshot.finished_at = timestampNow()
@@ -540,37 +551,71 @@ async function executeBranch(
       markCaseSkipped(environment.runState, caseNode, `${nodePath}/${index}`)
     }
 
-    const branchResult = await executeBlock(
-      environment,
-      {
-        ...scope,
-        barrierContext: {
-          completed: scope.barrierContext.completed,
-          reason: "branch_selected",
+    const casePath = `${nodePath}/${selection.index}`
+    const caseLifecycle = startSyntheticNode(environment.runState, casePath, "branch_case", environment.emitEvent)
+
+    try {
+      const branchResult = await executeBlock(
+        environment,
+        {
+          ...scope,
+          barrierContext: {
+            completed: scope.barrierContext.completed,
+            reason: "branch_selected",
+          },
+          env,
         },
-        env,
-      },
-      selection.caseNode.steps,
-      `${nodePath}/${selection.index}`,
-    )
-    const exports =
-      branchResult.disposition !== "completed"
-        ? null
-        : evaluateExports(selection.caseNode.exports, {
-            env,
-            inputs: scope.inputs,
-            run: scope.run,
-            steps: { ...scope.steps, ...branchResult.bindings },
-          })
-    return finalizeControlStep(
-      environment,
-      step,
-      nodePath,
-      lifecycle,
-      branchResult.disposition,
-      branchResult.reason,
-      exports,
-    )
+        selection.caseNode.steps,
+        casePath,
+      )
+      const exports =
+        branchResult.disposition !== "completed"
+          ? null
+          : evaluateExports(selection.caseNode.exports, {
+              env,
+              inputs: scope.inputs,
+              run: scope.run,
+              steps: { ...scope.steps, ...branchResult.bindings },
+            })
+
+      const caseFinishedAt = timestampNow()
+      const caseSnapshot = createNodeSnapshot(
+        undefined,
+        casePath,
+        "branch_case",
+        nodeStatusForDisposition(branchResult.disposition),
+        caseLifecycle,
+      )
+      caseSnapshot.duration_ms = elapsedMs(caseLifecycle.startedAt, caseFinishedAt)
+      caseSnapshot.finished_at = caseFinishedAt
+      caseSnapshot.result = exports
+      finishNode(environment.runState, caseSnapshot, environment.emitEvent)
+
+      return finalizeControlStep(
+        environment,
+        step,
+        nodePath,
+        lifecycle,
+        branchResult.disposition,
+        branchResult.reason,
+        exports,
+      )
+    } catch (error) {
+      const interrupted = isStepInterrupted(error)
+      const finishedAt = timestampNow()
+      const caseSnapshot = createNodeSnapshot(
+        undefined,
+        casePath,
+        "branch_case",
+        interrupted ? "interrupted" : "failed",
+        caseLifecycle,
+      )
+      caseSnapshot.duration_ms = elapsedMs(caseLifecycle.startedAt, finishedAt)
+      caseSnapshot.finished_at = finishedAt
+      caseSnapshot.stderr = interrupted ? error.message : normalizeExecutionError(error).message
+      finishNode(environment.runState, caseSnapshot, environment.emitEvent)
+      throw error
+    }
   })
 }
 
@@ -705,6 +750,7 @@ function finalizeControlStep(
   const snapshot = createNodeSnapshot(step.id, nodePath, step.type, nodeStatusForDisposition(disposition), lifecycle)
   snapshot.duration_ms = elapsedMs(lifecycle.startedAt, finishedAt)
   snapshot.finished_at = finishedAt
+  snapshot.progress = currentNodeSnapshot(environment.runState, nodePath)?.progress
   snapshot.result = result
   finishNode(environment.runState, snapshot, environment.emitEvent)
 
@@ -798,19 +844,13 @@ function createAbortController(signal: AbortSignal | undefined): {
   dispose: () => void
 } {
   const controller = new AbortController()
-  const abortListener = () => {
+  const dispose = onAbort(signal, () => {
     controller.abort(signal?.reason)
-  }
-
-  if (signal?.aborted) {
-    abortListener()
-  } else {
-    signal?.addEventListener("abort", abortListener, { once: true })
-  }
+  })
 
   return {
     controller,
-    dispose: () => signal?.removeEventListener("abort", abortListener),
+    dispose,
   }
 }
 

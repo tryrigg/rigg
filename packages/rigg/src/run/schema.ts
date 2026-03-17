@@ -1,5 +1,7 @@
 import { z } from "zod"
 
+import { CodexInteractionKindSchema, CodexInteractionRequestSchema } from "../codex/interaction"
+
 export const RunStatusSchema = z.enum(["running", "succeeded", "failed", "aborted"])
 export const RunPhaseSchema = z.enum([
   "running",
@@ -30,7 +32,7 @@ export const NodeStatusSchema = z.enum([
   "succeeded",
   "failed",
 ])
-export const InteractionKindSchema = z.enum(["approval", "user_input", "elicitation"])
+export const InteractionKindSchema = CodexInteractionKindSchema
 export const BarrierReasonSchema = z.enum([
   "run_started",
   "step_completed",
@@ -39,6 +41,11 @@ export const BarrierReasonSchema = z.enum([
   "branch_selected",
 ])
 
+export const NodeProgressSchema = z.object({
+  current_iteration: z.number().int().nonnegative(),
+  max_iterations: z.number().int().positive(),
+})
+
 export const NodeSnapshotSchema = z.object({
   attempt: z.number().int().nonnegative(),
   duration_ms: z.number().nonnegative().optional().nullable(),
@@ -46,6 +53,7 @@ export const NodeSnapshotSchema = z.object({
   finished_at: z.string().min(1).optional().nullable(),
   node_kind: z.string().min(1),
   node_path: z.string().min(1),
+  progress: NodeProgressSchema.optional(),
   result: z.unknown().optional().nullable(),
   started_at: z.string().min(1).optional().nullable(),
   status: NodeStatusSchema,
@@ -89,7 +97,7 @@ export const PendingInteractionSchema = z.object({
   interaction_id: z.string().min(1),
   kind: InteractionKindSchema,
   node_path: z.string().min(1).optional().nullable(),
-  request: z.unknown(),
+  request: CodexInteractionRequestSchema,
   user_id: z.string().min(1).optional().nullable(),
 })
 
@@ -110,6 +118,7 @@ export type BarrierReason = z.infer<typeof BarrierReasonSchema>
 export type CompletedNodeSummary = z.infer<typeof CompletedNodeSummarySchema>
 export type FrontierNode = z.infer<typeof FrontierNodeSchema>
 export type InteractionKind = z.infer<typeof InteractionKindSchema>
+export type NodeProgress = z.infer<typeof NodeProgressSchema>
 export type NodeSnapshot = z.infer<typeof NodeSnapshotSchema>
 export type NodeStatus = z.infer<typeof NodeStatusSchema>
 export type PendingInteraction = z.infer<typeof PendingInteractionSchema>

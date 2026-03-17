@@ -1,66 +1,93 @@
-export type CodexApprovalDecisionIntent = "approve" | "cancel" | "deny" | null
+import { z } from "zod"
 
-export type CodexApprovalDecision = {
-  intent: CodexApprovalDecisionIntent
-  value: string
-}
+export const CodexApprovalDecisionIntentSchema = z.union([
+  z.literal("approve"),
+  z.literal("cancel"),
+  z.literal("deny"),
+  z.null(),
+])
 
-export type CodexApprovalRequest = {
-  command?: string | null | undefined
-  cwd?: string | null | undefined
-  decisions: ReadonlyArray<CodexApprovalDecision>
-  itemId: string
-  kind: "approval"
-  message: string
-  requestId: string
-  requestKind: "command_execution" | "file_change" | "permissions"
-  turnId: string
-}
+export const CodexApprovalDecisionSchema = z.object({
+  intent: CodexApprovalDecisionIntentSchema,
+  value: z.string(),
+})
 
-export type CodexUserInputQuestion = {
-  header: string
-  id: string
-  isOther: boolean
-  isSecret: boolean
-  options: ReadonlyArray<{
-    description: string
-    label: string
-  }> | null
-  question: string
-}
+const NullableStringSchema = z.string().nullish()
 
-export type CodexUserInputRequest = {
-  itemId: string
-  kind: "user_input"
-  questions: ReadonlyArray<CodexUserInputQuestion>
-  requestId: string
-  turnId: string
-}
+const CodexUserInputQuestionOptionSchema = z.object({
+  description: z.string(),
+  label: z.string(),
+})
 
-export type CodexElicitationRequest =
-  | {
-      itemId: null
-      kind: "elicitation"
-      message: string
-      mode: "form"
-      requestId: string
-      requestedSchema: Record<string, unknown>
-      serverName: string
-      turnId: string | null
-    }
-  | {
-      elicitationId: string
-      itemId: null
-      kind: "elicitation"
-      message: string
-      mode: "url"
-      requestId: string
-      serverName: string
-      turnId: string | null
-      url: string
-    }
+const CodexUserInputQuestionSchema = z.object({
+  header: z.string(),
+  id: z.string(),
+  isOther: z.boolean(),
+  isSecret: z.boolean(),
+  options: z.array(CodexUserInputQuestionOptionSchema).nullable(),
+  question: z.string(),
+})
 
-export type CodexInteractionRequest = CodexApprovalRequest | CodexUserInputRequest | CodexElicitationRequest
+export const CodexApprovalRequestSchema = z.object({
+  command: NullableStringSchema,
+  cwd: NullableStringSchema,
+  decisions: z.array(CodexApprovalDecisionSchema),
+  itemId: z.string(),
+  kind: z.literal("approval"),
+  message: z.string(),
+  requestId: z.string(),
+  requestKind: z.enum(["command_execution", "file_change", "permissions"]),
+  turnId: z.string(),
+})
+
+export const CodexUserInputRequestSchema = z.object({
+  itemId: z.string(),
+  kind: z.literal("user_input"),
+  questions: z.array(CodexUserInputQuestionSchema),
+  requestId: z.string(),
+  turnId: z.string(),
+})
+
+const CodexFormElicitationRequestSchema = z.object({
+  itemId: z.null(),
+  kind: z.literal("elicitation"),
+  message: z.string(),
+  mode: z.literal("form"),
+  requestId: z.string(),
+  requestedSchema: z.record(z.string(), z.unknown()),
+  serverName: z.string(),
+  turnId: z.string().nullable(),
+})
+
+const CodexUrlElicitationRequestSchema = z.object({
+  elicitationId: z.string(),
+  itemId: z.null(),
+  kind: z.literal("elicitation"),
+  message: z.string(),
+  mode: z.literal("url"),
+  requestId: z.string(),
+  serverName: z.string(),
+  turnId: z.string().nullable(),
+  url: z.string(),
+})
+
+export const CodexInteractionKindSchema = z.enum(["approval", "user_input", "elicitation"])
+export const CodexInteractionRequestSchema = z.union([
+  CodexApprovalRequestSchema,
+  CodexUserInputRequestSchema,
+  CodexFormElicitationRequestSchema,
+  CodexUrlElicitationRequestSchema,
+])
+
+export type CodexApprovalDecisionIntent = z.infer<typeof CodexApprovalDecisionIntentSchema>
+export type CodexApprovalDecision = z.infer<typeof CodexApprovalDecisionSchema>
+export type CodexApprovalRequest = z.infer<typeof CodexApprovalRequestSchema>
+export type CodexUserInputQuestion = z.infer<typeof CodexUserInputQuestionSchema>
+export type CodexUserInputRequest = z.infer<typeof CodexUserInputRequestSchema>
+export type CodexElicitationRequest = z.infer<
+  typeof CodexFormElicitationRequestSchema | typeof CodexUrlElicitationRequestSchema
+>
+export type CodexInteractionRequest = z.infer<typeof CodexInteractionRequestSchema>
 
 export type CodexApprovalResolution = {
   decision: string

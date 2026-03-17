@@ -10,7 +10,8 @@ import { runWorkflow } from "../run/index"
 import { examplesDoc, schemaReferenceDoc, skillDoc, workflowSyntaxDoc } from "./docs"
 import { planTemplate, reviewBranchTemplate, reviewCommitTemplate, reviewUncommittedTemplate } from "./templates"
 import { renderCompileErrors } from "./output"
-import { createNonInteractiveRunSession, createTerminalRunSession } from "./run"
+import { createInkRunSession } from "./run"
+import { workflowById } from "../compile/project"
 import { StepInterruptedError } from "../run/error"
 
 type CommandResult = {
@@ -116,23 +117,30 @@ function toPascalCase(value: string): string {
     .join("")
 }
 
-function createWorkflowInterruptController(): { controller: AbortController; dispose: () => void } {
+export type WorkflowInterruptController = {
+  dispose: () => void
+  interrupt: () => void
+  signal: AbortSignal
+}
+
+export function createWorkflowInterruptController(): WorkflowInterruptController {
   const controller = new AbortController()
 
-  const handleSigint = () => {
+  const interrupt = () => {
     if (!controller.signal.aborted) {
       controller.abort(new StepInterruptedError("workflow interrupted by operator"))
       return
     }
 
-    process.off("SIGINT", handleSigint)
+    process.off("SIGINT", interrupt)
     process.kill(process.pid, "SIGINT")
   }
 
-  process.on("SIGINT", handleSigint)
+  process.on("SIGINT", interrupt)
   return {
-    controller,
-    dispose: () => process.off("SIGINT", handleSigint),
+    dispose: () => process.off("SIGINT", interrupt),
+    interrupt,
+    signal: controller.signal,
   }
 }
 
@@ -189,11 +197,22 @@ export async function runRunCommand(
       return failure([inputs.message])
     }
 
+    const workflow = workflowById(projectResult.project, workflowId)
+    if (workflow === undefined) {
+      return failure([`Workflow "${workflowId}" not found.`])
+    }
+
+    if (!process.stdin.isTTY || !process.stderr.isTTY) {
+      return failure([
+        "`rigg run` currently requires an interactive terminal (TTY stdin and stderr). Use an interactive terminal for now; an explicit non-interactive mode will be added separately.",
+      ])
+    }
+
     const interrupt = createWorkflowInterruptController()
-    const runSession =
-      process.stdin.isTTY && process.stderr.isTTY
-        ? createTerminalRunSession(process.stdin, process.stderr)
-        : createNonInteractiveRunSession()
+    const runSession = createInkRunSession({
+      interrupt: interrupt.interrupt,
+      workflow,
+    })
     const runResult = await (async () => {
       try {
         return await runWorkflow({
@@ -202,7 +221,7 @@ export async function runRunCommand(
           onEvent: runSession.emit,
           parentEnv: process.env,
           project: projectResult.project,
-          signal: interrupt.controller.signal,
+          signal: interrupt.signal,
           workflowId,
         })
       } finally {

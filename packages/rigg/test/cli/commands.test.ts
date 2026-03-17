@@ -3,7 +3,12 @@ import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { runInitCommand, runValidateCommand } from "../../src/cli/commands"
+import {
+  createWorkflowInterruptController,
+  runInitCommand,
+  runRunCommand,
+  runValidateCommand,
+} from "../../src/cli/commands"
 import { examplesDoc, schemaReferenceDoc, skillDoc, workflowSyntaxDoc } from "../../src/cli/docs"
 import {
   planTemplate,
@@ -22,6 +27,39 @@ async function createTempWorkspace(): Promise<string> {
   const path = await mkdtemp(join(tmpdir(), "rigg-cli-"))
   tempDirs.push(path)
   return path
+}
+
+function withTTYState(tty: { stderr: boolean; stdin: boolean }, run: () => Promise<void> | void): Promise<void> | void {
+  const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY")
+  const stderrDescriptor = Object.getOwnPropertyDescriptor(process.stderr, "isTTY")
+
+  Object.defineProperty(process.stdin, "isTTY", { configurable: true, value: tty.stdin })
+  Object.defineProperty(process.stderr, "isTTY", { configurable: true, value: tty.stderr })
+
+  const restore = () => {
+    if (stdinDescriptor === undefined) {
+      delete (process.stdin as { isTTY?: boolean }).isTTY
+    } else {
+      Object.defineProperty(process.stdin, "isTTY", stdinDescriptor)
+    }
+    if (stderrDescriptor === undefined) {
+      delete (process.stderr as { isTTY?: boolean }).isTTY
+    } else {
+      Object.defineProperty(process.stderr, "isTTY", stderrDescriptor)
+    }
+  }
+
+  try {
+    const result = run()
+    if (result instanceof Promise) {
+      return result.finally(restore)
+    }
+    restore()
+    return result
+  } catch (error) {
+    restore()
+    throw error
+  }
 }
 
 describe("cli/commands", () => {
@@ -51,5 +89,40 @@ describe("cli/commands", () => {
 
     await runInitCommand(cwd)
     expect(await Bun.file(join(cwd, ".gitignore")).exists()).toBe(false)
+  })
+
+  test("run requires interactive stdin and stderr", async () => {
+    const cwd = await createTempWorkspace()
+    await runInitCommand(cwd)
+
+    await withTTYState({ stderr: true, stdin: false }, async () => {
+      const result = await runRunCommand(cwd, "plan", { inputs: [] })
+      expect(result.exitCode).toBe(1)
+      expect(result.stderrLines.join("\n")).toContain("interactive terminal")
+    })
+  })
+
+  test("workflow interrupt controller aborts first and hard-exits on second interrupt", () => {
+    const originalKill = process.kill
+    let killCount = 0
+
+    ;(process as { kill: typeof process.kill }).kill = ((pid: number, signal?: number | NodeJS.Signals) => {
+      expect(pid).toBe(process.pid)
+      expect(signal).toBe("SIGINT")
+      killCount += 1
+      return true
+    }) as typeof process.kill
+
+    try {
+      const interrupt = createWorkflowInterruptController()
+      interrupt.interrupt()
+      expect(interrupt.signal.aborted).toBe(true)
+
+      interrupt.interrupt()
+      expect(killCount).toBe(1)
+      interrupt.dispose()
+    } finally {
+      ;(process as { kill: typeof process.kill }).kill = originalKill
+    }
   })
 })

@@ -45,8 +45,7 @@ const jsonLd = {
 		<meta name="description" content={description} />
 		<meta name="theme-color" content="#111111" />
 		<link rel="canonical" href={canonicalURL} />
-		<!-- OGP -->
-		<meta property="og:title" content={title} />
+			<meta property="og:title" content={title} />
 		<meta property="og:description" content={description} />
 		<meta property="og:type" content="website" />
 		<meta property="og:url" content={canonicalURL} />
@@ -57,18 +56,15 @@ const jsonLd = {
 		<meta property="og:image:alt" content="Rigg — Local-first workflow runner for agentic coding" />
 		<meta property="og:site_name" content="Rigg" />
 		<meta property="og:locale" content="en_US" />
-		<!-- Twitter Card -->
-		<meta name="twitter:card" content="summary_large_image" />
+			<meta name="twitter:card" content="summary_large_image" />
 		<meta name="twitter:title" content={title} />
 		<meta name="twitter:description" content={description} />
 		<meta name="twitter:image" content={ogImage} />
 		<meta name="twitter:image:alt" content="Rigg — Local-first workflow runner for agentic coding" />
-		<!-- Favicon -->
-		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-		<link rel="icon" href="/favicon.ico" />
-		<link rel="apple-touch-icon" href="/icon.png" />
-		<!-- JSON-LD -->
-		<script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
+			<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+			<link rel="icon" href="/favicon.ico" />
+			<link rel="apple-touch-icon" href="/icon.png" />
+			<script is:inline type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
 		<title>{title}</title>
 	</head>
 	<body>

@@ -1,3 +1,4 @@
+import { onAbort } from "../util/abort"
 import { isAbortError, normalizeError } from "../util/error"
 import { RIGG_VERSION } from "../version"
 import type { CodexProviderEvent } from "./event"
@@ -146,21 +147,38 @@ type TurnResult = {
   text: string
 }
 
-type RuntimeRequestMethod =
-  | "item/commandExecution/requestApproval"
-  | "item/fileChange/requestApproval"
-  | "item/permissions/requestApproval"
-  | "item/tool/requestUserInput"
-  | "mcpServer/elicitation/request"
+const RuntimeRequestMethods = [
+  "item/commandExecution/requestApproval",
+  "item/fileChange/requestApproval",
+  "item/permissions/requestApproval",
+  "item/tool/requestUserInput",
+  "mcpServer/elicitation/request",
+] as const
 
-type RuntimeNotificationMethod =
-  | "error"
-  | "item/agentMessage/delta"
-  | "item/completed"
-  | "item/started"
-  | "thread/started"
-  | "turn/completed"
-  | "turn/started"
+type RuntimeRequestMethod = (typeof RuntimeRequestMethods)[number]
+
+const RuntimeNotificationMethods = [
+  "error",
+  "item/agentMessage/delta",
+  "item/completed",
+  "item/started",
+  "thread/started",
+  "turn/completed",
+  "turn/started",
+] as const
+
+type RuntimeNotificationMethod = (typeof RuntimeNotificationMethods)[number]
+
+const RuntimeRequestMethodSet = new Set<string>(RuntimeRequestMethods)
+const RuntimeNotificationMethodSet = new Set<string>(RuntimeNotificationMethods)
+
+function isRuntimeRequestMethod(method: string): method is RuntimeRequestMethod {
+  return RuntimeRequestMethodSet.has(method)
+}
+
+function isRuntimeNotificationMethod(method: string): method is RuntimeNotificationMethod {
+  return RuntimeNotificationMethodSet.has(method)
+}
 
 export type CodexStepResult = {
   exitCode: number
@@ -556,9 +574,10 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
       const abortListener = () => {
         void interruptExecution(execution)
       }
+      let disposeAbort = () => {}
 
       execution.cleanup = () => {
-        input.signal?.removeEventListener("abort", abortListener)
+        disposeAbort()
       }
 
       trackExecution(execution)
@@ -568,11 +587,7 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
         input.onEvent,
       )
 
-      if (input.signal?.aborted) {
-        abortListener()
-      } else {
-        input.signal?.addEventListener("abort", abortListener, { once: true })
-      }
+      disposeAbort = onAbort(input.signal, abortListener)
     } catch (error) {
       turnPromise.reject(normalizeError(error))
     } finally {
@@ -797,10 +812,7 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     })
   }
 
-  const requestHandlers: Record<
-    RuntimeRequestMethod,
-    (execution: TurnExecution, input: { id: string | number; params: unknown; requestId: string }) => Promise<void>
-  > = {
+  const requestHandlers = {
     "item/commandExecution/requestApproval": async (execution, input) => {
       await handleApprovalRequest(execution, { ...input, requestKind: "command_execution" })
     },
@@ -812,7 +824,10 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     },
     "item/tool/requestUserInput": handleUserInputRequest,
     "mcpServer/elicitation/request": handleElicitationRequest,
-  }
+  } satisfies Record<
+    RuntimeRequestMethod,
+    (execution: TurnExecution, input: { id: string | number; params: unknown; requestId: string }) => Promise<void>
+  >
 
   async function handleErrorNotification(params: unknown): Promise<void> {
     if (isStaleTurnMessage({ kind: "notification", method: "error", params })) {
@@ -951,7 +966,7 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     settleExecution(execution, buildTurnResult(execution, notification.status))
   }
 
-  const notificationHandlers: Record<RuntimeNotificationMethod, (params: unknown) => Promise<void>> = {
+  const notificationHandlers = {
     error: handleErrorNotification,
     "item/agentMessage/delta": handleMessageDeltaNotification,
     "item/completed": async (params) => {
@@ -963,7 +978,7 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     "thread/started": async () => {},
     "turn/completed": handleTurnCompletedNotification,
     "turn/started": async () => {},
-  }
+  } satisfies Record<RuntimeNotificationMethod, (params: unknown) => Promise<void>>
 
   async function handleRequest(id: string | number, method: string, params: unknown): Promise<void> {
     const requestId = String(id)
@@ -979,20 +994,19 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     }
 
     const { execution } = executionLookup
-    const handler = requestHandlers[method as RuntimeRequestMethod]
-    if (handler !== undefined) {
-      await handler(execution, { id, params, requestId })
-      return
+    if (!isRuntimeRequestMethod(method)) {
+      throw new Error(`unsupported codex app-server server request: ${method}`)
     }
 
-    throw new Error(`unsupported codex app-server server request: ${method}`)
+    await requestHandlers[method](execution, { id, params, requestId })
   }
 
   async function handleNotification(method: string, params: unknown): Promise<void> {
-    const handler = notificationHandlers[method as RuntimeNotificationMethod]
-    if (handler !== undefined) {
-      await handler(params)
+    if (!isRuntimeNotificationMethod(method)) {
+      return
     }
+
+    await notificationHandlers[method](params)
   }
 
   function executionFromParams(params: unknown, allowSingleFallback = true): TurnExecution | undefined {

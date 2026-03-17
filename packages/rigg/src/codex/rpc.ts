@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 
+import { onAbort } from "../util/abort"
 import { createAbortError, normalizeError } from "../util/error"
 import { isJsonObject } from "../util/json"
 import type { CodexAppServerProcess } from "./process"
@@ -104,7 +105,10 @@ export function createCodexRpcClient(process: CodexAppServerProcess): CodexRpcCl
 
     const id = randomUUID()
     const timeoutMs = options.timeoutMs ?? 30_000
+    const message = params === undefined ? { id, method } : { id, method, params }
     return new Promise<unknown>((resolve, reject) => {
+      let requestSent = false
+
       if (options.signal?.aborted) {
         reject(createAbortError(options.signal.reason))
         return
@@ -113,24 +117,34 @@ export function createCodexRpcClient(process: CodexAppServerProcess): CodexRpcCl
       const abortListener = () => {
         clearTimeout(timeout)
         pending.delete(id)
-        ignoredResponses.add(id)
+        if (requestSent) {
+          ignoredResponses.add(id)
+        }
         reject(createAbortError(options.signal?.reason))
       }
+      let disposeAbort = () => {}
       const timeout = setTimeout(() => {
         pending.delete(id)
-        ignoredResponses.add(id)
-        options.signal?.removeEventListener("abort", abortListener)
+        if (requestSent) {
+          ignoredResponses.add(id)
+        }
+        disposeAbort()
         reject(new Error(`timed out waiting for codex app-server response to ${method}`))
       }, timeoutMs)
 
       pending.set(id, {
-        dispose: () => options.signal?.removeEventListener("abort", abortListener),
+        dispose: () => disposeAbort(),
         reject,
         resolve,
         timeout,
       })
-      options.signal?.addEventListener("abort", abortListener, { once: true })
-      process.write(params === undefined ? { id, method } : { id, method, params })
+      disposeAbort = onAbort(options.signal, abortListener)
+      if (!pending.has(id)) {
+        return
+      }
+
+      process.write(message)
+      requestSent = true
     })
   }
 
@@ -195,7 +209,7 @@ export function createCodexRpcClient(process: CodexAppServerProcess): CodexRpcCl
     try {
       await handlers?.onRequest(message)
     } catch (error) {
-      await reportError(error)
+      await reportFatal(error)
     }
   }
 
@@ -203,7 +217,7 @@ export function createCodexRpcClient(process: CodexAppServerProcess): CodexRpcCl
     try {
       await handlers?.onNotification(message)
     } catch (error) {
-      await reportError(error)
+      await reportFatal(error)
     }
   }
 
@@ -226,10 +240,6 @@ export function createCodexRpcClient(process: CodexAppServerProcess): CodexRpcCl
     rejectPending(normalized)
     ignoredResponses.clear()
     await handlers?.onError?.(normalized)
-  }
-
-  async function reportError(error: unknown): Promise<void> {
-    await reportFatal(error)
   }
 
   return {

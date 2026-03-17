@@ -6,6 +6,7 @@ import type { ActionNode, CodexNode } from "../compile/schema"
 import type { CodexProviderEvent } from "../codex/event"
 import type { CodexInteractionHandler } from "../codex/interaction"
 import { createCodexRuntimeSession } from "../codex/runtime"
+import { onAbort } from "../util/abort"
 import { filterEnv } from "../util/env"
 import { isAbortError } from "../util/error"
 import { parseJsonOutput } from "../codex/protocol"
@@ -304,11 +305,7 @@ async function runSpawnedProcess<TEvent>(
     }, PROVIDER_TERMINATE_GRACE_MS)
   }
 
-  if (options.signal?.aborted) {
-    abortListener()
-  } else {
-    options.signal?.addEventListener("abort", abortListener, { once: true })
-  }
+  const disposeAbort = onAbort(options.signal, abortListener)
 
   try {
     const [exitCode, stdout, stderr] = await Promise.all([
@@ -333,7 +330,7 @@ async function runSpawnedProcess<TEvent>(
     }
   } finally {
     cleanupTimers()
-    options.signal?.removeEventListener("abort", abortListener)
+    disposeAbort()
   }
 }
 

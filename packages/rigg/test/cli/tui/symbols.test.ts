@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { statusSymbol, formatDuration } from "../../../src/cli/tui/symbols"
+import { statusSymbol, kindColor, formatDuration } from "../../../src/cli/tui/symbols"
 
 describe("statusSymbol", () => {
   test("returns correct colors for each status", () => {
@@ -11,7 +11,7 @@ describe("statusSymbol", () => {
     expect(statusSymbol("failed").color).toBe("red")
     expect(statusSymbol("skipped").color).toBe("dim")
     expect(statusSymbol("interrupted").color).toBe("cyan")
-    expect(statusSymbol("waiting_for_interaction").color).toBe("cyan")
+    expect(statusSymbol("waiting_for_interaction").color).toBe("yellow")
   })
 
   test("returns non-empty icons for each status", () => {
@@ -28,6 +28,29 @@ describe("statusSymbol", () => {
     for (const status of statuses) {
       expect(statusSymbol(status).icon.length).toBeGreaterThan(0)
     }
+  })
+})
+
+describe("kindColor", () => {
+  test("returns a color string for known kinds", () => {
+    expect(kindColor("shell")).toBeTruthy()
+    expect(kindColor("codex")).toBeTruthy()
+    expect(kindColor("write_file")).toBeTruthy()
+  })
+
+  test("returns dim for structural kinds", () => {
+    expect(kindColor("group")).toBe("dim")
+    expect(kindColor("parallel")).toBe("dim")
+    expect(kindColor("branch")).toBe("dim")
+    expect(kindColor("branch_case")).toBe("dim")
+  })
+
+  test("returns cyan for loop kind", () => {
+    expect(kindColor("loop")).toBe("cyan")
+  })
+
+  test("returns dim for unknown kinds", () => {
+    expect(kindColor("unknown")).toBe("dim")
   })
 })
 

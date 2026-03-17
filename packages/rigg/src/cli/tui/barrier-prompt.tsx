@@ -1,12 +1,18 @@
 import { Box, Text, useInput } from "ink"
 
 import type { FrontierNode, StepBarrier } from "../../run/schema"
-import { Divider } from "./divider"
 import { matchesShortcut } from "./input"
+import { statusSymbol } from "./symbols"
 
 function formatFrontierLabel(node: FrontierNode): string {
-  const suffix = node.cwd ? ` cwd=${node.cwd}` : ""
-  return `${node.user_id ?? node.node_path} [${node.node_kind}]${suffix}`
+  const parts: string[] = [node.user_id ?? node.node_path, `[${node.node_kind}]`]
+  if (node.action) {
+    parts.push(node.action)
+  }
+  if (node.model) {
+    parts.push(node.model)
+  }
+  return parts.join(" · ")
 }
 
 export function BarrierPrompt({
@@ -24,28 +30,27 @@ export function BarrierPrompt({
     }
   })
 
+  const completedInfo = barrier.completed
+  const completedSym = completedInfo ? statusSymbol(completedInfo.status) : null
+
   return (
     <Box flexDirection="column">
-      <Divider label="Action required" color="cyan" />
-      {barrier.next.length <= 1 ? (
-        <Text>
-          {"  Next: "}
-          {barrier.next[0] === undefined ? "(none)" : formatFrontierLabel(barrier.next[0])}
+      {completedInfo != null && completedSym != null && (
+        <Text dimColor>
+          <Text color={completedSym.color}>{completedSym.icon}</Text> {completedInfo.user_id ?? completedInfo.node_path}{" "}
+          {completedInfo.status}
         </Text>
-      ) : (
-        <Box flexDirection="column">
-          <Text>{"  Next:"}</Text>
-          {barrier.next.map((node) => (
-            <Text key={node.node_path}>
-              {"  "}
-              {formatFrontierLabel(node)}
-            </Text>
-          ))}
-        </Box>
       )}
-      <Text />
+      <Text>Next: {barrier.next.length === 0 ? "(none)" : formatFrontierLabel(barrier.next[0]!)}</Text>
+      {barrier.next.length > 1 &&
+        barrier.next.slice(1).map((node) => (
+          <Text key={node.node_path} dimColor>
+            {"  "}
+            {formatFrontierLabel(node)}
+          </Text>
+        ))}
+      <Text>{""}</Text>
       <Text>
-        {"  "}
         <Text bold color="cyan">
           [c]
         </Text>{" "}

@@ -1,4 +1,4 @@
-import { Box, useInput } from "ink"
+import { Box, Text, useInput } from "ink"
 import { useMemo, useSyncExternalStore } from "react"
 
 import type { CodexInteractionResolution } from "../../codex/interaction"
@@ -6,6 +6,7 @@ import type { WorkflowDocument } from "../../compile/schema"
 import { BarrierPrompt } from "./barrier-prompt"
 import { Header } from "./header"
 import { InteractionPrompt } from "./interaction-prompt"
+import { formatStepProgress, summarizeStepProgress } from "./step-progress"
 import type { TuiStore } from "./store"
 import { Summary } from "./summary"
 import { formatElapsedClock } from "./time"
@@ -30,6 +31,10 @@ export function App({
   const elapsed = formatElapsedClock(snapshot?.started_at ?? null, snapshot?.finished_at ?? null)
   const isFinished = snapshot !== null && snapshot.status !== "running"
   const entries = useMemo(() => buildTree(workflow, snapshot), [workflow, snapshot])
+  const stepProgress = useMemo(
+    () => formatStepProgress(summarizeStepProgress(workflow, snapshot)),
+    [workflow, snapshot],
+  )
   const activeBarrier = snapshot?.active_barrier ?? null
   const activeInteraction = snapshot?.active_interaction ?? null
 
@@ -41,21 +46,35 @@ export function App({
 
   return (
     <Box flexDirection="column">
-      <Header snapshot={snapshot} elapsed={elapsed} />
+      <Header snapshot={snapshot} elapsed={elapsed} stepProgress={stepProgress} />
       <WorkflowTree entries={entries} liveOutputs={liveOutputs} completedOutputs={completedOutputs} />
       {activeBarrier !== null && (
-        <BarrierPrompt
-          key={activeBarrier.barrier_id}
-          barrier={activeBarrier}
-          onResolve={(action) => onResolveBarrier(activeBarrier.barrier_id, action)}
-        />
+        <Box borderStyle="single" borderColor="yellow" marginTop={1} paddingX={1}>
+          <Box flexDirection="column">
+            <Text inverse color="yellow">
+              {" ⚠ ACTION REQUIRED "}
+            </Text>
+            <BarrierPrompt
+              key={activeBarrier.barrier_id}
+              barrier={activeBarrier}
+              onResolve={(action) => onResolveBarrier(activeBarrier.barrier_id, action)}
+            />
+          </Box>
+        </Box>
       )}
       {activeInteraction !== null && (
-        <InteractionPrompt
-          key={activeInteraction.interaction_id}
-          interaction={activeInteraction}
-          onResolve={(resolution) => onResolveInteraction(activeInteraction.interaction_id, resolution)}
-        />
+        <Box borderStyle="single" borderColor="cyan" marginTop={1} paddingX={1}>
+          <Box flexDirection="column">
+            <Text inverse color="cyan">
+              {" ◇ INPUT NEEDED "}
+            </Text>
+            <InteractionPrompt
+              key={activeInteraction.interaction_id}
+              interaction={activeInteraction}
+              onResolve={(resolution) => onResolveInteraction(activeInteraction.interaction_id, resolution)}
+            />
+          </Box>
+        </Box>
       )}
       {isFinished && activeBarrier === null && activeInteraction === null && (
         <Summary snapshot={snapshot} entries={entries} />

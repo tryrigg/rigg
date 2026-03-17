@@ -10,8 +10,8 @@ import type {
 } from "../../codex/interaction"
 import type { PendingInteraction } from "../../run/schema"
 import { stringifyJsonCompact, tryParseJson } from "../../util/json"
-import { Divider } from "./divider"
 import { matchesShortcut } from "./input"
+import { chars } from "./theme"
 
 function approvalShortcut(decision: CodexApprovalDecision, index: number): string {
   switch (decision.intent) {
@@ -28,6 +28,7 @@ function approvalShortcut(decision: CodexApprovalDecision, index: number): strin
 
 export type ApprovalPromptChoice = {
   decision: string
+  intent: CodexApprovalDecision["intent"]
   shortcut: string
   tokens: string[]
 }
@@ -48,6 +49,7 @@ export function buildApprovalPromptChoices(decisions: ReadonlyArray<CodexApprova
     tokens.add(approvalShortcut(decision, index))
     choices.push({
       decision: decision.value,
+      intent: decision.intent,
       shortcut: approvalShortcut(decision, index),
       tokens: [...tokens],
     })
@@ -110,6 +112,39 @@ export function resolveUserInputAnswer(question: CodexUserInputQuestion, value: 
   return normalizeQuestionAnswer(answer, question.options)
 }
 
+function editDistance(a: string, b: string): number {
+  const m = a.length
+  const n = b.length
+  const dp: number[][] = Array.from({ length: m + 1 }, () => Array.from({ length: n + 1 }, () => 0))
+  for (let i = 0; i <= m; i++) dp[i]![0] = i
+  for (let j = 0; j <= n; j++) dp[0]![j] = j
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i]![j] =
+        a[i - 1] === b[j - 1] ? dp[i - 1]![j - 1]! : 1 + Math.min(dp[i - 1]![j]!, dp[i]![j - 1]!, dp[i - 1]![j - 1]!)
+    }
+  }
+  return dp[m]![n]!
+}
+
+export function findClosestChoice(choices: ReadonlyArray<ApprovalPromptChoice>, input: string): string | undefined {
+  const normalized = normalizeApprovalChoiceInput(input)
+  if (normalized.length === 0) return undefined
+
+  let best: string | undefined
+  let bestDist = Infinity
+  for (const choice of choices) {
+    for (const token of choice.tokens) {
+      const dist = editDistance(normalized, token)
+      if (dist < bestDist && dist <= 2) {
+        bestDist = dist
+        best = choice.decision
+      }
+    }
+  }
+  return best
+}
+
 function ApprovalPrompt({
   request,
   onResolve,
@@ -142,43 +177,45 @@ function ApprovalPrompt({
     if (submitChoice(value)) {
       return
     }
-    setErrorMessage("Unknown choice. Type a shortcut, number, or exact decision label.")
+    const closest = findClosestChoice(choices, value)
+    if (closest) {
+      setErrorMessage(`Unknown choice. Did you mean "${closest}"?`)
+    } else {
+      setErrorMessage("Unknown choice. Type a shortcut, number, or exact decision label.")
+    }
   }
 
   return (
     <Box flexDirection="column">
-      <Divider label="Approval Required" color="cyan" />
       <Text>
-        {"  "}
         <Text bold>{request.requestKind}</Text>: {request.command ?? request.message}
       </Text>
       <Text dimColor>
-        {"  "}reason: {request.message}
+        {"  "}
+        {request.message}
       </Text>
       {request.cwd && (
         <Text dimColor>
           {"  "}cwd: {request.cwd}
         </Text>
       )}
-      <Text />
+      <Text>{""}</Text>
       <Text>
         {"  "}
-        {choices.map((choice) => {
-          return (
-            <Text key={choice.decision}>
-              <Text bold color="cyan">
-                [{choice.shortcut}]
-              </Text>
-              {choice.decision}
-              {"  "}
-            </Text>
-          )
-        })}
+        {choices.map((choice) => (
+          <Text key={choice.decision}>
+            <Text bold color="cyan" underline={choice.intent === "approve"}>
+              [{choice.shortcut}]
+            </Text>{" "}
+            {choice.decision}
+            {"  "}
+          </Text>
+        ))}
       </Text>
-      <Box marginTop={1}>
+      <Text>{""}</Text>
+      <Box>
         <Text>
-          {"  "}
-          {">"}{" "}
+          <Text color="cyan">{chars.promptCaret}</Text>{" "}
         </Text>
         <TextInput value={inputValue} onChange={handleChange} onSubmit={handleSubmit} />
       </Box>
@@ -209,6 +246,10 @@ function UserInputPrompt({
   }
 
   const total = request.questions.length
+  const answeredDisplay = request.questions.slice(0, questionIndex).map((q) => ({
+    header: q.header,
+    answer: answers[q.id]?.answers[0] ?? "",
+  }))
 
   const handleSubmit = (value: string) => {
     const answer = resolveUserInputAnswer(question, value)
@@ -227,32 +268,41 @@ function UserInputPrompt({
     }
   }
 
+  const progress = total > 1 ? ` ${questionIndex + 1}/${total}` : ""
+
   return (
     <Box flexDirection="column">
-      <Divider label="Input Required" color="cyan" />
+      {answeredDisplay.map((prev, i) => (
+        <Text key={i} dimColor>
+          <Text color="green">✓</Text> {prev.header}: {prev.answer}
+        </Text>
+      ))}
       <Text>
-        {"  "}
-        {total > 1 ? `Question ${questionIndex + 1}/${total}: ` : ""}
         <Text bold>{question.header}</Text>
+        {progress && <Text dimColor>{progress}</Text>}
       </Text>
-      <Text>
-        {"  "}
-        {question.question}
-      </Text>
+      {question.question.split("\n").map((line, i) => (
+        <Text key={i} dimColor>
+          {"  "}
+          {line}
+        </Text>
+      ))}
       {question.options !== null && question.options.length > 0 && (
-        <Box flexDirection="column" marginTop={1}>
+        <Box flexDirection="column">
+          <Text>{""}</Text>
           {question.options.map((option, i) => (
             <Text key={option.label}>
               {"  "}
-              {i + 1}. {option.label}
+              <Text bold>{i + 1}.</Text> {option.label}
+              {option.description ? <Text dimColor> {option.description}</Text> : null}
             </Text>
           ))}
         </Box>
       )}
-      <Box marginTop={1}>
+      <Text>{""}</Text>
+      <Box>
         <Text>
-          {"  "}
-          {">"}{" "}
+          <Text color="cyan">{chars.promptCaret}</Text>{" "}
         </Text>
         <TextInput value={inputValue} onChange={setInputValue} onSubmit={handleSubmit} />
       </Box>
@@ -296,9 +346,10 @@ function ElicitationPrompt({
 
   return (
     <Box flexDirection="column">
-      <Divider label="External Request" color="cyan" />
       <Text>
-        {"  "}
+        <Text bold color="cyan">
+          ↗
+        </Text>{" "}
         <Text bold>{request.message}</Text>
       </Text>
       {request.mode === "url" ? (
@@ -310,7 +361,7 @@ function ElicitationPrompt({
           {"  "}schema: {stringifyJsonCompact(request.requestedSchema ?? {})}
         </Text>
       )}
-      <Text />
+      <Text>{""}</Text>
       {phase === "choose" ? (
         <Text>
           {"  "}
@@ -329,7 +380,7 @@ function ElicitationPrompt({
         </Text>
       ) : (
         <Box>
-          <Text>{"  "}JSON: </Text>
+          <Text>JSON: </Text>
           <TextInput value={jsonInput} onChange={setJsonInput} onSubmit={handleJsonSubmit} />
         </Box>
       )}

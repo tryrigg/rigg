@@ -15,7 +15,7 @@ export const SUMMARY_KINDS = new Set<string>([
 ])
 
 export type TreeEntry = {
-  entryType: "step" | "box_open" | "box_close" | "box_divider"
+  entryType: "step" | "label"
   depth: number
   prefix: string
   status: NodeStatus | "not_started"
@@ -27,7 +27,6 @@ export type TreeEntry = {
   isNext: boolean
   meta?: string | undefined
   detail?: string | undefined
-  boxLabel?: string | undefined
 }
 
 type NodeMap = Map<string, NodeSnapshot>
@@ -122,6 +121,9 @@ export function extractDetail(step: WorkflowStep): string | undefined {
       if (step.with.model) {
         detail += ` · ${step.with.model}`
       }
+      if ("effort" in step.with && step.with.effort) {
+        detail += ` · ${step.with.effort}`
+      }
       return detail
     }
     case "write_file":
@@ -203,31 +205,7 @@ function walkStep(
         isNext: false,
         meta,
       })
-      entries.push({
-        entryType: "box_open",
-        depth,
-        prefix,
-        status: "not_started",
-        label: "",
-        suffix: "",
-        nodePath: nodePath + "/__box_open",
-        nodeKind: "group",
-        isActive: false,
-        isNext: false,
-      })
       walkSteps(step.steps, nodeMap, nodePath, depth + 1, prefix + "│  ", entries)
-      entries.push({
-        entryType: "box_close",
-        depth,
-        prefix,
-        status: "not_started",
-        label: "",
-        suffix: "",
-        nodePath: nodePath + "/__box_close",
-        nodeKind: "group",
-        isActive: false,
-        isNext: false,
-      })
       return
     }
     case "loop": {
@@ -247,33 +225,21 @@ function walkStep(
         isNext: false,
         meta,
       })
-      const boxLabel = iterCount > 0 ? `iteration ${iterCount}` : undefined
-      entries.push({
-        entryType: "box_open",
-        depth,
-        prefix,
-        status: "not_started",
-        label: "",
-        suffix: "",
-        nodePath: nodePath + "/__box_open",
-        nodeKind: "loop",
-        isActive: false,
-        isNext: false,
-        boxLabel,
-      })
+      if (iterCount > 0) {
+        entries.push({
+          entryType: "label",
+          depth: depth + 1,
+          prefix: prefix + "│  ",
+          status: "not_started",
+          label: `iteration ${iterCount}`,
+          suffix: "",
+          nodePath: nodePath + "/__iter_label",
+          nodeKind: "loop",
+          isActive: false,
+          isNext: false,
+        })
+      }
       walkSteps(step.steps, nodeMap, nodePath, depth + 1, prefix + "│  ", entries)
-      entries.push({
-        entryType: "box_close",
-        depth,
-        prefix,
-        status: "not_started",
-        label: "",
-        suffix: "",
-        nodePath: nodePath + "/__box_close",
-        nodeKind: "loop",
-        isActive: false,
-        isNext: false,
-      })
       return
     }
     case "branch":
@@ -287,18 +253,6 @@ function walkStep(
         nodePath,
         nodeKind: "branch",
         isActive,
-        isNext: false,
-      })
-      entries.push({
-        entryType: "box_open",
-        depth,
-        prefix,
-        status: "not_started",
-        label: "",
-        suffix: "",
-        nodePath: nodePath + "/__box_open",
-        nodeKind: "branch",
-        isActive: false,
         isNext: false,
       })
       for (let ci = 0; ci < step.cases.length; ci++) {
@@ -322,18 +276,6 @@ function walkStep(
         })
         walkSteps(branchCase.steps, nodeMap, casePath, depth + 2, prefix + "│     ", entries)
       }
-      entries.push({
-        entryType: "box_close",
-        depth,
-        prefix,
-        status: "not_started",
-        label: "",
-        suffix: "",
-        nodePath: nodePath + "/__box_close",
-        nodeKind: "branch",
-        isActive: false,
-        isNext: false,
-      })
       return
     case "parallel": {
       const meta = `${step.branches.length} branches`
@@ -356,49 +298,22 @@ function walkStep(
           continue
         }
         const branchPath = childNodePath(nodePath, bi)
-        if (bi === 0) {
+        if (branch.id) {
           entries.push({
-            entryType: "box_open",
-            depth,
-            prefix,
+            entryType: "label",
+            depth: depth + 1,
+            prefix: prefix + "│  ",
             status: "not_started",
-            label: "",
+            label: branch.id,
             suffix: "",
-            nodePath: branchPath + "/__box_open",
+            nodePath: branchPath + "/__label",
             nodeKind: "parallel",
             isActive: false,
             isNext: false,
-            boxLabel: branch.id,
-          })
-        } else {
-          entries.push({
-            entryType: "box_divider",
-            depth,
-            prefix,
-            status: "not_started",
-            label: "",
-            suffix: "",
-            nodePath: branchPath + "/__box_divider",
-            nodeKind: "parallel",
-            isActive: false,
-            isNext: false,
-            boxLabel: branch.id,
           })
         }
         walkSteps(branch.steps, nodeMap, branchPath, depth + 1, prefix + "│  ", entries)
       }
-      entries.push({
-        entryType: "box_close",
-        depth,
-        prefix,
-        status: "not_started",
-        label: "",
-        suffix: "",
-        nodePath: nodePath + "/__box_close",
-        nodeKind: "parallel",
-        isActive: false,
-        isNext: false,
-      })
       return
     }
   }
@@ -409,53 +324,13 @@ function annotateNext(entries: TreeEntry[], snapshot: RunSnapshot | null): void 
     return
   }
 
-  const hasWaitingInteraction = entries.some((e) => e.entryType === "step" && e.status === "waiting_for_interaction")
-  if (hasWaitingInteraction) {
-    return
-  }
-
   const barrierFrontier = snapshot?.active_barrier?.next ?? []
   if (barrierFrontier.length > 0) {
     const frontierNodePaths = new Set(barrierFrontier.map((node) => node.node_path))
-    let marked = false
     for (const entry of entries) {
-      if (entry.entryType !== "step") {
-        continue
-      }
-      if (frontierNodePaths.has(entry.nodePath)) {
+      if (entry.entryType === "step" && frontierNodePaths.has(entry.nodePath)) {
         entry.isNext = true
-        marked = true
       }
-    }
-    if (marked) {
-      return
-    }
-  }
-
-  const hasRunning = entries.some((e) => e.entryType === "step" && e.status === "running")
-
-  if (!hasRunning) {
-    for (const entry of entries) {
-      if (entry.entryType === "step" && (entry.status === "not_started" || entry.status === "pending")) {
-        entry.isNext = true
-        return
-      }
-    }
-    return
-  }
-
-  let foundRunning = false
-  for (const entry of entries) {
-    if (entry.entryType !== "step") {
-      continue
-    }
-    if (entry.status === "running") {
-      foundRunning = true
-      continue
-    }
-    if (foundRunning && (entry.status === "not_started" || entry.status === "pending")) {
-      entry.isNext = true
-      return
     }
   }
 }

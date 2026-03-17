@@ -1,5 +1,7 @@
+import { chars } from "./theme"
+
 const TERMINAL_SAFETY_COLUMNS = 2
-const HEADER_LABEL = "rigg"
+const HEADER_LABEL = `${chars.bullet} rigg`
 const ELLIPSIS = "..."
 
 type HeaderLayout = {
@@ -51,7 +53,7 @@ function fitHeaderRight(options: { available: number; elapsed: string; status: s
   }
 }
 
-function buildHeaderLeft(options: { budget: number; workflowId: string }): string {
+function buildHeaderLeft(options: { budget: number; stepProgress?: string | undefined; workflowId: string }): string {
   if (options.budget <= 0) {
     return ""
   }
@@ -70,6 +72,11 @@ function buildHeaderLeft(options: { budget: number; workflowId: string }): strin
   output += workflowLabel
   remaining -= workflowLabel.length
 
+  if (options.stepProgress && remaining >= options.stepProgress.length + 2) {
+    output += "  " + options.stepProgress
+    remaining -= options.stepProgress.length + 2
+  }
+
   return " ".repeat(Math.min(2, remaining)) + output
 }
 
@@ -77,6 +84,7 @@ export function layoutHeaderLine(options: {
   cols: number
   elapsed: string
   status: string
+  stepProgress?: string | undefined
   workflowId: string
 }): HeaderLayout {
   const available = safeColumns(options.cols)
@@ -91,6 +99,7 @@ export function layoutHeaderLine(options: {
   const leftBudget = Math.max(0, leftAndGapBudget - 1)
   const left = buildHeaderLeft({
     budget: leftBudget,
+    stepProgress: options.stepProgress,
     workflowId: options.workflowId,
   })
   const gap = left.length > 0 ? Math.max(1, available - left.length - rightWidth) : Math.max(0, leftAndGapBudget)
@@ -104,5 +113,5 @@ export function layoutHeaderLine(options: {
 }
 
 export function renderRule(cols: number, prefix = "  "): string {
-  return prefix + "-".repeat(Math.max(0, safeColumns(cols) - prefix.length))
+  return prefix + chars.rule.repeat(Math.max(0, safeColumns(cols) - prefix.length))
 }

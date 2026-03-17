@@ -8,6 +8,7 @@ import { SUMMARY_KINDS, type TreeEntry } from "./tree"
 
 export function countSummaryStatuses(entries: TreeEntry[]): {
   failedCount: number
+  failedSteps: Array<{ label: string; suffix: string }>
   interruptedCount: number
   skippedCount: number
   succeededCount: number
@@ -16,6 +17,7 @@ export function countSummaryStatuses(entries: TreeEntry[]): {
   let interruptedCount = 0
   let skippedCount = 0
   let succeededCount = 0
+  const failedSteps: Array<{ label: string; suffix: string }> = []
 
   for (const entry of entries) {
     if (entry.entryType !== "step" || !SUMMARY_KINDS.has(entry.nodeKind)) {
@@ -24,6 +26,7 @@ export function countSummaryStatuses(entries: TreeEntry[]): {
     switch (entry.status) {
       case "failed":
         failedCount++
+        failedSteps.push({ label: entry.label, suffix: entry.suffix })
         break
       case "interrupted":
         interruptedCount++
@@ -37,7 +40,7 @@ export function countSummaryStatuses(entries: TreeEntry[]): {
     }
   }
 
-  return { failedCount, interruptedCount, skippedCount, succeededCount }
+  return { failedCount, failedSteps, interruptedCount, skippedCount, succeededCount }
 }
 
 export function Summary({ snapshot, entries }: { snapshot: RunSnapshot | null; entries: TreeEntry[] }) {
@@ -48,7 +51,7 @@ export function Summary({ snapshot, entries }: { snapshot: RunSnapshot | null; e
   const { stdout } = useStdout()
   const cols = stdout?.columns ?? 80
 
-  const { failedCount, interruptedCount, skippedCount, succeededCount } = countSummaryStatuses(entries)
+  const { failedCount, failedSteps, interruptedCount, skippedCount, succeededCount } = countSummaryStatuses(entries)
   const totalMs = runDurationMs(snapshot)
   const statusLabel = snapshot.status.charAt(0).toUpperCase() + snapshot.status.slice(1)
   const statusColor = snapshot.status === "succeeded" ? "green" : "red"
@@ -96,6 +99,16 @@ export function Summary({ snapshot, entries }: { snapshot: RunSnapshot | null; e
           </Text>
         </Box>
       </Box>
+      {failedSteps.length > 0 && <Text>{""}</Text>}
+      {failedSteps.length > 0 &&
+        failedSteps.map((step, i) => (
+          <Text key={i} color="red">
+            {"    "}
+            {failedSym.icon} {step.label}
+            {step.suffix ? `  ${step.suffix}` : ""}
+          </Text>
+        ))}
+      <Text>{""}</Text>
       <Text>
         {"  "}
         <Text bold color={statusColor}>

@@ -3,7 +3,7 @@ import { Box, Text, useStdout } from "ink"
 import type { RunSnapshot, RunStatus } from "../../run/schema"
 import { layoutHeaderLine, renderRule } from "./layout"
 
-function statusColor(status: RunStatus | "waiting"): string {
+function statusColor(status: RunStatus | string): string {
   switch (status) {
     case "running":
       return "cyan"
@@ -17,14 +17,25 @@ function statusColor(status: RunStatus | "waiting"): string {
   }
 }
 
-function statusLabel(snapshot: RunSnapshot): RunStatus | "waiting" {
-  if (snapshot.active_interaction !== null || snapshot.active_barrier !== null) {
-    return "waiting"
+function statusLabel(snapshot: RunSnapshot): string {
+  if (snapshot.active_interaction !== null) {
+    return "waiting for input"
+  }
+  if (snapshot.active_barrier !== null) {
+    return "waiting for approval"
   }
   return snapshot.status
 }
 
-export function Header({ snapshot, elapsed }: { snapshot: RunSnapshot | null; elapsed: string }) {
+export function Header({
+  snapshot,
+  elapsed,
+  stepProgress,
+}: {
+  snapshot: RunSnapshot | null
+  elapsed: string
+  stepProgress?: string | undefined
+}) {
   const { stdout } = useStdout()
   const cols = stdout?.columns ?? 80
 
@@ -54,6 +65,7 @@ export function Header({ snapshot, elapsed }: { snapshot: RunSnapshot | null; el
     cols,
     elapsed,
     status,
+    stepProgress,
     workflowId: snapshot.workflow_id,
   })
 

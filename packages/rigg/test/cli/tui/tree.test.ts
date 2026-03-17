@@ -126,7 +126,7 @@ describe("buildTree", () => {
     expect(stepEntries[2]?.isNext).toBe(false)
   })
 
-  test("builds parallel branch entries with box borders", () => {
+  test("builds parallel branch entries with labels", () => {
     const wf = workflow([
       {
         type: "parallel",
@@ -143,8 +143,8 @@ describe("buildTree", () => {
     expect(entries[0]?.depth).toBe(0)
     expect(entries[0]?.meta).toBe("2 branches")
 
-    expect(entries[1]?.entryType).toBe("box_open")
-    expect(entries[1]?.boxLabel).toBe("left")
+    expect(entries[1]?.entryType).toBe("label")
+    expect(entries[1]?.label).toBe("left")
 
     const leftShell = entries[2]
     expect(leftShell?.entryType).toBe("step")
@@ -152,18 +152,16 @@ describe("buildTree", () => {
     expect(leftShell?.depth).toBe(1)
     expect(leftShell?.prefix).toBe("│  ")
 
-    expect(entries[3]?.entryType).toBe("box_divider")
-    expect(entries[3]?.boxLabel).toBe("right")
+    expect(entries[3]?.entryType).toBe("label")
+    expect(entries[3]?.label).toBe("right")
 
     const rightShell = entries[4]
     expect(rightShell?.entryType).toBe("step")
     expect(rightShell?.nodeKind).toBe("shell")
     expect(rightShell?.depth).toBe(1)
-
-    expect(entries[5]?.entryType).toBe("box_close")
   })
 
-  test("builds loop entries with iteration meta and box", () => {
+  test("builds loop entries with iteration meta", () => {
     const wf = workflow([
       {
         type: "loop",
@@ -178,14 +176,10 @@ describe("buildTree", () => {
     expect(entries[0]?.entryType).toBe("step")
     expect(entries[0]?.meta).toBe("iter 0/5 · max 5")
 
-    expect(entries[1]?.entryType).toBe("box_open")
-
-    const child = entries[2]
+    const child = entries[1]
     expect(child?.entryType).toBe("step")
     expect(child?.depth).toBe(1)
     expect(child?.prefix).toBe("│  ")
-
-    expect(entries[3]?.entryType).toBe("box_close")
   })
 
   test("uses loop progress from the loop node snapshot", () => {
@@ -257,10 +251,11 @@ describe("buildTree", () => {
 
     const entries = buildTree(wf, snapshot)
     expect(entries[0]?.meta).toBe("iter 2/5 · max 5")
-    expect(entries[1]?.boxLabel).toBe("iteration 2")
+    expect(entries[1]?.entryType).toBe("label")
+    expect(entries[1]?.label).toBe("iteration 2")
   })
 
-  test("builds branch entries with cases and box", () => {
+  test("builds branch entries with cases", () => {
     const wf = workflow([
       {
         type: "branch",
@@ -275,20 +270,16 @@ describe("buildTree", () => {
     expect(entries[0]?.nodeKind).toBe("branch")
     expect(entries[0]?.entryType).toBe("step")
 
-    expect(entries[1]?.entryType).toBe("box_open")
+    expect(entries[1]?.label).toBe("inputs.fast")
+    expect(entries[1]?.depth).toBe(1)
+    expect(entries[1]?.prefix).toBe("│  ")
 
-    expect(entries[2]?.label).toBe("inputs.fast")
-    expect(entries[2]?.depth).toBe(1)
-    expect(entries[2]?.prefix).toBe("│  ")
+    expect(entries[2]?.depth).toBe(2)
+    expect(entries[2]?.prefix).toBe("│     ")
 
-    expect(entries[3]?.depth).toBe(2)
-    expect(entries[3]?.prefix).toBe("│     ")
+    expect(entries[3]?.label).toBe("else")
 
-    expect(entries[4]?.label).toBe("else")
-
-    expect(entries[5]?.depth).toBe(2)
-
-    expect(entries[6]?.entryType).toBe("box_close")
+    expect(entries[4]?.depth).toBe(2)
   })
 
   test("derives branch case status from descendant snapshots when no direct case snapshot exists", () => {
@@ -353,8 +344,8 @@ describe("buildTree", () => {
     })
 
     const entries = buildTree(wf, snapshot)
-    expect(entries[2]?.status).toBe("running")
-    expect(entries[4]?.status).toBe("skipped")
+    expect(entries[1]?.status).toBe("running")
+    expect(entries[3]?.status).toBe("skipped")
   })
 
   test("uses step id as label when available", () => {
@@ -365,7 +356,7 @@ describe("buildTree", () => {
     expect(stepEntries[0]?.label).toBe("gather-context")
   })
 
-  test("group node recurses into children with box", () => {
+  test("group node recurses into children with indentation", () => {
     const wf = workflow([
       {
         type: "group",
@@ -382,14 +373,10 @@ describe("buildTree", () => {
     expect(entries[0]?.entryType).toBe("step")
     expect(entries[0]?.meta).toBe("2 steps")
 
-    expect(entries[1]?.entryType).toBe("box_open")
-
+    expect(entries[1]?.depth).toBe(1)
+    expect(entries[1]?.prefix).toBe("│  ")
     expect(entries[2]?.depth).toBe(1)
     expect(entries[2]?.prefix).toBe("│  ")
-    expect(entries[3]?.depth).toBe(1)
-    expect(entries[3]?.prefix).toBe("│  ")
-
-    expect(entries[4]?.entryType).toBe("box_close")
   })
 })
 
@@ -423,6 +410,19 @@ describe("extractDetail", () => {
     expect(extractDetail(step)).toBe("run · o3")
   })
 
+  test("returns action, model and effort for codex steps", () => {
+    const step: WorkflowStep = {
+      type: "codex",
+      with: { action: "run", prompt: "do stuff", model: "o3", effort: "high" },
+    }
+    expect(extractDetail(step)).toBe("run · o3 · high")
+  })
+
+  test("returns action and effort for codex steps without model", () => {
+    const step: WorkflowStep = { type: "codex", with: { action: "run", prompt: "do stuff", effort: "low" } }
+    expect(extractDetail(step)).toBe("run · low")
+  })
+
   test("returns path for write_file steps", () => {
     const step: WorkflowStep = { type: "write_file", with: { path: "out.txt", content: "hi" } }
     expect(extractDetail(step)).toBe("→ out.txt")
@@ -435,67 +435,7 @@ describe("extractDetail", () => {
 })
 
 describe("annotateNext", () => {
-  test("marks first pending entry when nothing is running", () => {
-    const wf = workflow([
-      { type: "shell", with: { command: "echo a" } },
-      { type: "shell", with: { command: "echo b" } },
-    ])
-
-    const entries = buildTree(wf, null)
-    const stepEntries = entries.filter((e) => e.entryType === "step")
-    expect(stepEntries[0]?.isNext).toBe(true)
-    expect(stepEntries[1]?.isNext).toBe(false)
-  })
-
-  test("marks next sibling after running entry", () => {
-    const wf = workflow([
-      { id: "a", type: "shell", with: { command: "echo a" } },
-      { id: "b", type: "shell", with: { command: "echo b" } },
-      { id: "c", type: "shell", with: { command: "echo c" } },
-    ])
-    const snapshot: RunSnapshot = runSnapshot({
-      nodes: [
-        {
-          attempt: 1,
-          duration_ms: 1200,
-          exit_code: 0,
-          finished_at: "2026-03-15T10:01:00.000Z",
-          node_kind: "shell",
-          node_path: "/0",
-          result: null,
-          started_at: "2026-03-15T10:00:00.000Z",
-          status: "succeeded",
-          stderr: null,
-          stdout: "done",
-          user_id: "a",
-          waiting_for: null,
-        },
-        {
-          attempt: 1,
-          duration_ms: null,
-          exit_code: null,
-          finished_at: null,
-          node_kind: "shell",
-          node_path: "/1",
-          result: null,
-          started_at: "2026-03-15T10:01:00.000Z",
-          status: "running",
-          stderr: null,
-          stdout: null,
-          user_id: "b",
-          waiting_for: null,
-        },
-      ],
-    })
-
-    const entries = buildTree(wf, snapshot)
-    const stepEntries = entries.filter((e) => e.entryType === "step")
-    expect(stepEntries[0]?.isNext).toBe(false)
-    expect(stepEntries[1]?.isNext).toBe(false)
-    expect(stepEntries[2]?.isNext).toBe(true)
-  })
-
-  test("prefers active barrier frontier entries over a positional guess", () => {
+  test("marks barrier frontier entries", () => {
     const wf = workflow([
       {
         id: "fanout",
@@ -639,7 +579,7 @@ describe("annotateNext", () => {
 })
 
 describe("prefix", () => {
-  test("nested entries get │  per container depth", () => {
+  test("nested entries get │-rail indent per container depth", () => {
     const wf = workflow([
       {
         type: "group",
@@ -659,7 +599,7 @@ describe("prefix", () => {
     expect(stepEntries[2]?.prefix).toBe("│  │  ")
   })
 
-  test("branch case children get │     prefix", () => {
+  test("branch case children get │-rail prefix", () => {
     const wf = workflow([
       {
         type: "branch",

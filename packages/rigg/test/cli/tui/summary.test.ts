@@ -31,6 +31,7 @@ describe("cli/tui/summary", () => {
 
     expect(counts).toEqual({
       failedCount: 1,
+      failedSteps: [{ label: "step", suffix: "" }],
       interruptedCount: 1,
       skippedCount: 1,
       succeededCount: 1,

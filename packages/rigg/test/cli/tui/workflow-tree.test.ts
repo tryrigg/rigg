@@ -21,8 +21,8 @@ describe("completedOutputToLines", () => {
     }
 
     expect(completedOutputToLines(completed)).toEqual([
-      { muted: false, text: "still working" },
-      { muted: false, text: "stderr: permission denied" },
+      { isStderr: false, muted: false, text: "still working" },
+      { isStderr: true, muted: false, text: "stderr: permission denied" },
     ])
   })
 
@@ -42,7 +42,31 @@ describe("completedOutputToLines", () => {
       },
     }
 
-    expect(completedOutputToLines(completed)).toEqual([{ muted: false, text: "stderr: permission denied" }])
+    expect(completedOutputToLines(completed)).toEqual([
+      { isStderr: true, muted: false, text: "stderr: permission denied" },
+    ])
+  })
+
+  test("preserves stderr preview lines even when stdout contains the same text", () => {
+    const completed: CompletedOutput = {
+      entries: [
+        {
+          key: null,
+          stream: "stdout",
+          text: "permission denied\nline 2\nline 3",
+          variant: "stream",
+        },
+      ],
+      preview: {
+        stream: "stderr",
+        text: "... +1 earlier lines\npermission denied",
+      },
+    }
+
+    expect(completedOutputToLines(completed)).toEqual([
+      { isStderr: true, muted: false, text: "stderr: ... +1 earlier lines" },
+      { isStderr: true, muted: false, text: "permission denied" },
+    ])
   })
 
   test("keeps the latest streamed tail when preview contains an older snapshot", () => {
@@ -62,8 +86,8 @@ describe("completedOutputToLines", () => {
     }
 
     expect(completedOutputToLines(completed)).toEqual([
-      { muted: false, text: "line 2" },
-      { muted: false, text: "line 3" },
+      { isStderr: false, muted: false, text: "line 2" },
+      { isStderr: false, muted: false, text: "line 3" },
     ])
   })
 
@@ -77,10 +101,10 @@ describe("completedOutputToLines", () => {
     }
 
     expect(completedOutputToLines(completed)).toEqual([
-      { muted: false, text: "stderr: ... +1 earlier lines" },
-      { muted: false, text: "line 2" },
-      { muted: false, text: "line 3" },
-      { muted: false, text: "line 4" },
+      { isStderr: true, muted: false, text: "stderr: ... +1 earlier lines" },
+      { isStderr: true, muted: false, text: "line 2" },
+      { isStderr: true, muted: false, text: "line 3" },
+      { isStderr: true, muted: false, text: "line 4" },
     ])
   })
 })

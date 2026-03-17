@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import {
   buildApprovalPromptChoices,
+  findClosestChoice,
   resolveApprovalChoice,
   resolveUserInputAnswer,
   shouldAutoSubmitApprovalChoice,
@@ -39,6 +40,37 @@ describe("approval prompt choices", () => {
 
     expect(shouldAutoSubmitApprovalChoice(choices, "approve")).toBe(false)
     expect(shouldAutoSubmitApprovalChoice(choices, "approved")).toBe(true)
+  })
+
+  test("includes intent in built choices", () => {
+    const choices = buildApprovalPromptChoices([
+      { intent: "approve", value: "Allow" },
+      { intent: "deny", value: "Deny" },
+    ])
+
+    expect(choices[0]?.intent).toBe("approve")
+    expect(choices[1]?.intent).toBe("deny")
+  })
+})
+
+describe("findClosestChoice", () => {
+  test("suggests the closest match for typos", () => {
+    const choices = buildApprovalPromptChoices([
+      { intent: "approve", value: "approve" },
+      { intent: "deny", value: "deny" },
+    ])
+
+    expect(findClosestChoice(choices, "aprove")).toBe("approve")
+    expect(findClosestChoice(choices, "dney")).toBe("deny")
+  })
+
+  test("returns undefined when no close match exists", () => {
+    const choices = buildApprovalPromptChoices([
+      { intent: "approve", value: "approve" },
+      { intent: "deny", value: "deny" },
+    ])
+
+    expect(findClosestChoice(choices, "something completely different")).toBeUndefined()
   })
 })
 

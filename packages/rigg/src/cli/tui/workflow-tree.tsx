@@ -1,34 +1,49 @@
-import { Box, Text, useStdout } from "ink"
+import { Box, Text } from "ink"
 import Spinner from "ink-spinner"
 import { useMemo } from "react"
 
 import type { NodeStatus } from "../../run/schema"
 import type { ActiveLiveOutput, CompletedOutput, LiveLogEntry, OutputPreview } from "../run"
-import { statusSymbol, kindTag } from "./symbols"
+import { statusSymbol, kindColor } from "./symbols"
+import { chars, colors } from "./theme"
 import type { TreeEntry } from "./tree"
 
-const KIND_LABELS: Record<string, string> = { shell: "cmd", codex: "action", write_file: "file" }
+const KIND_LABELS: Record<string, string> = {
+  shell: "cmd",
+  codex: "codex",
+  write_file: "write_file",
+  group: "group",
+  loop: "loop",
+  parallel: "parallel",
+  branch: "branch",
+  branch_case: "case",
+}
 const BASE = "  "
 
-type FlatLine = { muted: boolean; text: string }
+type FlatLine = { isStderr: boolean; muted: boolean; text: string }
+
+function isSameFlatLine(a: FlatLine, b: FlatLine): boolean {
+  return a.isStderr === b.isStderr && a.muted === b.muted && a.text === b.text
+}
 
 function flattenEntriesToLines(entries: LiveLogEntry[], options: { labelStderr: boolean }): FlatLine[] {
   const lines: FlatLine[] = []
   for (const entry of entries) {
     const entryLines = entry.text.replace(/\r\n?/g, "\n").split("\n").filter(Boolean)
+    const isStderr = entry.variant === "stream" && entry.stream === "stderr"
     for (const [index, line] of entryLines.entries()) {
       if (entry.variant === "event") {
-        lines.push({ muted: true, text: `[${line}]` })
+        lines.push({ isStderr: false, muted: true, text: `[${line}]` })
         continue
       }
 
-      if (entry.variant === "stream" && entry.stream === "stderr" && options.labelStderr) {
+      if (isStderr && options.labelStderr) {
         const prefix = index === 0 ? "stderr: " : ""
-        lines.push({ muted: false, text: `${prefix}${line}` })
+        lines.push({ isStderr: true, muted: false, text: `${prefix}${line}` })
         continue
       }
 
-      lines.push({ muted: false, text: line })
+      lines.push({ isStderr, muted: false, text: line })
     }
   }
   return lines
@@ -58,12 +73,14 @@ function previewToLines(preview: OutputPreview | null): FlatLine[] {
     return []
   }
 
+  const isStderr = preview.stream === "stderr"
   return preview.text
     .split("\n")
     .filter(Boolean)
     .map((text, index) => ({
+      isStderr,
       muted: false,
-      text: preview.stream === "stderr" && index === 0 ? `stderr: ${text}` : text,
+      text: isStderr && index === 0 ? `stderr: ${text}` : text,
     }))
 }
 
@@ -83,8 +100,7 @@ export function completedOutputToLines(completed: CompletedOutput | undefined): 
 
   const merged = [...lines]
   const uniquePreviewLines = previewLines.filter(
-    (previewLine) =>
-      !merged.some((candidate) => candidate.text === previewLine.text && candidate.muted === previewLine.muted),
+    (previewLine) => !merged.some((candidate) => isSameFlatLine(candidate, previewLine)),
   )
   for (const previewLine of uniquePreviewLines) {
     merged.push(previewLine)
@@ -93,10 +109,130 @@ export function completedOutputToLines(completed: CompletedOutput | undefined): 
   return merged.length > 0 ? merged.slice(-2) : null
 }
 
+function computeHasNextSibling(entries: TreeEntry[]): boolean[] {
+  const result = new Array<boolean>(entries.length).fill(false)
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i]!
+    if (entry.entryType !== "step") continue
+    for (let j = i + 1; j < entries.length; j++) {
+      const next = entries[j]!
+      if (next.depth < entry.depth) break
+      if (next.depth === entry.depth && next.entryType === "step") {
+        result[i] = true
+        break
+      }
+    }
+  }
+  return result
+}
+
+function connectorColor(status: NodeStatus | "not_started"): string | undefined {
+  switch (status) {
+    case "succeeded":
+      return colors.success
+    case "failed":
+      return colors.error
+    case "skipped":
+    case "interrupted":
+      return undefined
+    case "running":
+      return colors.brand
+    case "waiting_for_interaction":
+      return colors.warning
+    default:
+      return undefined
+  }
+}
+
+type EntryColors = {
+  prefixRailColors: (string | undefined)[]
+  railColor: string | undefined
+}
+
+function computeEntryColors(entries: TreeEntry[]): EntryColors[] {
+  const statusAtDepth = new Map<number, NodeStatus | "not_started">()
+  return entries.map((entry) => {
+    if (entry.entryType === "step") {
+      statusAtDepth.set(entry.depth, entry.status)
+    }
+    const prefixRailColors: (string | undefined)[] = []
+    let depth = 0
+    for (let i = 0; i < entry.prefix.length; i++) {
+      if (entry.prefix[i] === "│") {
+        const ancestorStatus = statusAtDepth.get(depth)
+        prefixRailColors.push(ancestorStatus !== undefined ? connectorColor(ancestorStatus) : undefined)
+        depth++
+      }
+    }
+    const railColor = entry.entryType === "step" ? connectorColor(entry.status) : undefined
+    return { prefixRailColors, railColor }
+  })
+}
+
+function renderColoredRails(text: string, railColors: (string | undefined)[]) {
+  if (text.length === 0) return null
+  if (railColors.length === 0) return <Text dimColor>{text}</Text>
+
+  const parts: React.ReactNode[] = []
+  let railIdx = 0
+  let segStart = 0
+
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "│" && railIdx < railColors.length) {
+      if (i > segStart) {
+        parts.push(
+          <Text key={`s${segStart}`} dimColor>
+            {text.slice(segStart, i)}
+          </Text>,
+        )
+      }
+      const color = railColors[railIdx]
+      parts.push(
+        color ? (
+          <Text key={`r${railIdx}`} color={color}>
+            │
+          </Text>
+        ) : (
+          <Text key={`r${railIdx}`} dimColor>
+            │
+          </Text>
+        ),
+      )
+      railIdx++
+      segStart = i + 1
+    }
+  }
+
+  if (segStart < text.length) {
+    parts.push(
+      <Text key="e" dimColor>
+        {text.slice(segStart)}
+      </Text>,
+    )
+  }
+
+  return <>{parts}</>
+}
+
+function OutputLine({ line, border, alwaysDim }: { line: FlatLine; border: string; alwaysDim?: boolean }) {
+  const dim = alwaysDim ?? line.muted
+  return line.isStderr ? (
+    <Text dimColor={dim} color="red">
+      {border} {line.text}
+    </Text>
+  ) : (
+    <Text dimColor={dim}>
+      {border} {line.text}
+    </Text>
+  )
+}
+
 function InlineOutput({
   nodePath,
   status,
   prefix,
+  rail,
+  railColors,
   liveOutputs,
   completedOutputs,
   maxLiveLines,
@@ -104,11 +240,13 @@ function InlineOutput({
   nodePath: string
   status: NodeStatus | "not_started"
   prefix: string
+  rail: string
+  railColors: (string | undefined)[]
   liveOutputs: Record<string, ActiveLiveOutput>
   completedOutputs: Record<string, CompletedOutput>
   maxLiveLines: number
 }) {
-  const pad = BASE + prefix + "   "
+  const pad = BASE + prefix + rail
 
   const completed = completedOutputs[nodePath]
   const completedLines = useMemo(() => {
@@ -120,15 +258,24 @@ function InlineOutput({
     if (lines === null) {
       return null
     }
+    const truncated = lines.length - maxLiveLines
     const visible = lines.slice(-maxLiveLines)
     return (
       <Box flexDirection="column">
-        <Text dimColor>{pad}output</Text>
         {visible.map((line, i) => (
-          <Text key={i} wrap="truncate-end" dimColor={line.muted}>
-            {pad}│ {line.text}
+          <Text key={i} wrap="truncate-end">
+            {renderColoredRails(pad, railColors)}
+            <OutputLine line={line} border={chars.outputBorderLive} />
           </Text>
         ))}
+        {truncated > 0 && (
+          <Text>
+            {renderColoredRails(pad, railColors)}
+            <Text dimColor>
+              {chars.outputBorderLive} +{truncated} more lines
+            </Text>
+          </Text>
+        )}
       </Box>
     )
   }
@@ -137,8 +284,9 @@ function InlineOutput({
     return (
       <Box flexDirection="column">
         {completedLines.map((line, i) => (
-          <Text key={i} dimColor wrap="truncate-end">
-            {pad}│ {line.text}
+          <Text key={i} wrap="truncate-end">
+            {renderColoredRails(pad, railColors)}
+            <OutputLine line={line} border={chars.outputBorderDone} alwaysDim />
           </Text>
         ))}
       </Box>
@@ -148,23 +296,39 @@ function InlineOutput({
   return null
 }
 
-function StepRow({ entry }: { entry: TreeEntry }) {
+function StepRow({ entry, prefixRailColors }: { entry: TreeEntry; prefixRailColors: (string | undefined)[] }) {
   const sym = statusSymbol(entry.status)
-  const kt = kindTag(entry.nodeKind)
-  const showKind = entry.nodeKind !== entry.label
+  const kc = kindColor(entry.nodeKind)
+  const kindLabel = KIND_LABELS[entry.nodeKind]
+  const showKind = kindLabel !== undefined && entry.nodeKind !== entry.label
+  const isRunningStatus = entry.status === "running"
+  const isWaiting = entry.status === "waiting_for_interaction"
+  const isActive = isRunningStatus || isWaiting
+  const isDimmed = entry.status === "succeeded" || entry.status === "not_started"
 
   return (
     <Box>
       <Text>
         {BASE}
-        {entry.prefix}
-        <Text color={sym.color}>{sym.icon}</Text>
+        {renderColoredRails(entry.prefix, prefixRailColors)}
+        <Text color={entry.isNext ? "yellow" : sym.color}>{sym.icon}</Text>
         {"  "}
-        {entry.label}
+        {isRunningStatus ? (
+          <Text inverse color="cyan">
+            {entry.label}
+          </Text>
+        ) : entry.isNext ? (
+          <Text inverse color="yellow">
+            {entry.label}
+          </Text>
+        ) : (
+          <Text bold={isActive} dimColor={isDimmed && !isActive}>
+            {entry.label}
+          </Text>
+        )}
         {showKind && (
-          <Text dimColor>
-            {"  "}
-            {kt.icon} <Text bold>{entry.nodeKind}</Text>
+          <Text color={kc} dimColor={kc === "dim"}>
+            {"  "}({kindLabel})
           </Text>
         )}
         {entry.suffix ? (
@@ -175,57 +339,46 @@ function StepRow({ entry }: { entry: TreeEntry }) {
         ) : null}
         {entry.meta ? (
           <Text dimColor>
-            {"  "}
-            {entry.meta}
+            {"  "}[{entry.meta}]
           </Text>
         ) : null}
       </Text>
-      {entry.isActive && (
+      {isRunningStatus && entry.isActive && (
         <Text color="cyan">
           {"  "}
           <Spinner type="dots" />
         </Text>
       )}
-      {entry.isNext && <Text dimColor>{"  next"}</Text>}
+      {isWaiting && entry.isActive && (
+        <Text color="yellow">
+          {"  "}
+          <Spinner type="dots" /> waiting
+        </Text>
+      )}
     </Box>
   )
 }
 
-function DetailLine({ entry }: { entry: TreeEntry }) {
+function DetailLine({
+  entry,
+  rail,
+  railColors,
+}: {
+  entry: TreeEntry
+  rail: string
+  railColors: (string | undefined)[]
+}) {
   if (!entry.detail) {
     return null
   }
   if (entry.status === "succeeded" || entry.status === "failed") {
     return null
   }
-  const label = KIND_LABELS[entry.nodeKind]
   return (
-    <Text dimColor>
-      {BASE}
-      {entry.prefix}
-      {"   "}
-      {label && <Text bold>{label} </Text>}
-      {entry.detail}
-    </Text>
-  )
-}
-
-function BoxBorder({ entry, char, cols }: { entry: TreeEntry; char: string; cols: number }) {
-  const labelStr = entry.boxLabel ? `── ${entry.boxLabel} ` : ""
-  const fill = cols - BASE.length - entry.prefix.length - 1 - labelStr.length
-  return (
-    <Text key={entry.nodePath} dimColor>
-      {BASE}
-      {entry.prefix}
-      {char}
-      {entry.boxLabel ? (
-        <>
-          ── <Text bold>{entry.boxLabel}</Text>{" "}
-        </>
-      ) : (
-        ""
-      )}
-      {"─".repeat(Math.max(0, fill))}
+    <Text>
+      <Text dimColor>{BASE}</Text>
+      {renderColoredRails(entry.prefix + rail, railColors)}
+      <Text dimColor>{entry.detail}</Text>
     </Text>
   )
 }
@@ -239,46 +392,50 @@ export function WorkflowTree({
   liveOutputs: Record<string, ActiveLiveOutput>
   completedOutputs: Record<string, CompletedOutput>
 }) {
-  const { stdout } = useStdout()
-  const cols = stdout?.columns ?? 80
-
   if (entries.length === 0) {
     return null
   }
 
   const activeCount = countRenderableLiveOutputs(liveOutputs)
   const maxLiveLines = activeCount > 1 ? Math.max(3, Math.floor(16 / activeCount)) : 8
+  const nextSibling = useMemo(() => computeHasNextSibling(entries), [entries])
+  const entryColors = useMemo(() => computeEntryColors(entries), [entries])
 
   return (
     <Box flexDirection="column">
       {entries.map((entry, i) => {
+        const ec = entryColors[i]!
         switch (entry.entryType) {
-          case "box_open":
-            return <BoxBorder key={entry.nodePath} entry={entry} char="╭" cols={cols} />
-          case "box_divider":
-            return <BoxBorder key={entry.nodePath} entry={entry} char="├" cols={cols} />
-          case "box_close": {
-            const fill = cols - BASE.length - entry.prefix.length - 1
+          case "label":
             return (
-              <Text key={entry.nodePath} dimColor>
-                {BASE}
-                {entry.prefix}╰{"─".repeat(Math.max(0, fill))}
+              <Text key={entry.nodePath}>
+                <Text dimColor>{BASE}</Text>
+                {renderColoredRails(entry.prefix, ec.prefixRailColors)}
+                <Text dimColor>{entry.label}</Text>
               </Text>
             )
-          }
           case "step": {
-            const isTopLevel = entry.depth === 0
+            const hasNext = nextSibling[i] ?? false
+            const rail = hasNext ? "│  " : "   "
+            const railColors = [...ec.prefixRailColors, ec.railColor]
             const prevEntry = i > 0 ? entries[i - 1] : undefined
-            const needsSpace = isTopLevel && prevEntry !== undefined && prevEntry.entryType !== "box_open"
+            const needsConnector =
+              prevEntry !== undefined && prevEntry.entryType === "step" && prevEntry.depth === entry.depth
+            const prevStepStatus = prevEntry?.entryType === "step" ? prevEntry.status : undefined
+            const cColor = prevStepStatus !== undefined ? connectorColor(prevStepStatus) : undefined
+            const connectorStr = BASE + entry.prefix + "│"
+            const connectorRailColors = [...ec.prefixRailColors, cColor]
             return (
               <Box key={entry.nodePath} flexDirection="column">
-                {needsSpace && <Text>{""}</Text>}
-                <StepRow entry={entry} />
-                <DetailLine entry={entry} />
+                {needsConnector && <Text>{renderColoredRails(connectorStr, connectorRailColors)}</Text>}
+                <StepRow entry={entry} prefixRailColors={ec.prefixRailColors} />
+                <DetailLine entry={entry} rail={rail} railColors={railColors} />
                 <InlineOutput
                   nodePath={entry.nodePath}
                   status={entry.status}
                   prefix={entry.prefix}
+                  rail={rail}
+                  railColors={railColors}
                   liveOutputs={liveOutputs}
                   completedOutputs={completedOutputs}
                   maxLiveLines={maxLiveLines}

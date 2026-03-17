@@ -11,7 +11,7 @@ import {
   type PathReference,
   type ResultShape,
 } from "./expr"
-import { createCompileError, CompileErrorCode, type CompileError } from "./diagnostics"
+import { createCompileDiagnostic, CompileDiagnosticCode, type CompileDiagnostic } from "./diagnostic"
 import type {
   ActionNode,
   BranchCase,
@@ -48,16 +48,20 @@ type ValidationSummary = {
   guaranteedResultShape?: ResultShape | undefined
 }
 
-export function validateWorkspace(project: WorkflowProject): CompileError[] {
-  const errors: CompileError[] = []
+export function validateWorkspace(project: WorkflowProject): CompileDiagnostic[] {
+  const errors: CompileDiagnostic[] = []
   const seenWorkflowIds = new Set<string>()
 
   for (const file of project.files) {
     if (seenWorkflowIds.has(file.workflow.id)) {
       errors.push(
-        createCompileError(CompileErrorCode.DuplicateWorkflowId, `Duplicate workflow id \`${file.workflow.id}\`.`, {
-          filePath: file.filePath,
-        }),
+        createCompileDiagnostic(
+          CompileDiagnosticCode.DuplicateWorkflowId,
+          `Duplicate workflow id \`${file.workflow.id}\`.`,
+          {
+            filePath: file.filePath,
+          },
+        ),
       )
       continue
     }
@@ -69,8 +73,8 @@ export function validateWorkspace(project: WorkflowProject): CompileError[] {
   return errors
 }
 
-function validateWorkflow(workflow: WorkflowDocument, filePath: string): CompileError[] {
-  const errors: CompileError[] = []
+function validateWorkflow(workflow: WorkflowDocument, filePath: string): CompileDiagnostic[] {
+  const errors: CompileDiagnostic[] = []
   const seenStepIds = new Set<string>()
   const rootScope: VisibleScope = {
     availableStepShapes: new Map(),
@@ -87,7 +91,7 @@ function validateWorkflow(workflow: WorkflowDocument, filePath: string): Compile
 
   errors.push(
     ...validateInputDefinitions(workflow.inputs ?? {}).map((message) =>
-      createCompileError(CompileErrorCode.InvalidWorkflow, message, { filePath }),
+      createCompileDiagnostic(CompileDiagnosticCode.InvalidWorkflow, message, { filePath }),
     ),
   )
 
@@ -105,7 +109,7 @@ function validateStepList(
   filePath: string,
   seenStepIds: Set<string>,
   scope: VisibleScope,
-  errors: CompileError[],
+  errors: CompileDiagnostic[],
 ): ValidationSummary {
   const availableStepShapes = new Map(scope.availableStepShapes)
 
@@ -137,7 +141,7 @@ function validateStep(
   filePath: string,
   seenStepIds: Set<string>,
   scope: VisibleScope,
-  errors: CompileError[],
+  errors: CompileDiagnostic[],
 ): ValidationSummary & { guaranteedResultShape: ResultShape; resultShape: ResultShape } {
   if (step.id !== undefined) {
     const identifierError = validateIdentifier(step.id, "step id", filePath)
@@ -145,7 +149,7 @@ function validateStep(
       errors.push(identifierError)
     } else if (seenStepIds.has(step.id)) {
       errors.push(
-        createCompileError(CompileErrorCode.InvalidWorkflow, `Duplicate step id \`${step.id}\`.`, {
+        createCompileDiagnostic(CompileDiagnosticCode.InvalidWorkflow, `Duplicate step id \`${step.id}\`.`, {
           filePath,
         }),
       )
@@ -183,7 +187,7 @@ function validateActionStep(
   step: ActionNode,
   filePath: string,
   scope: VisibleScope,
-  errors: CompileError[],
+  errors: CompileDiagnostic[],
 ): ValidationSummary & { guaranteedResultShape: ResultShape; resultShape: ResultShape } {
   switch (step.type) {
     case "shell":
@@ -213,7 +217,7 @@ function validateGroupStep(
   filePath: string,
   seenStepIds: Set<string>,
   scope: VisibleScope,
-  errors: CompileError[],
+  errors: CompileDiagnostic[],
 ): ValidationSummary & { guaranteedResultShape: ResultShape; resultShape: ResultShape } {
   const inner = validateStepList(step.steps, filePath, seenStepIds, scope, errors)
   const resultShape = validateExports(
@@ -238,7 +242,7 @@ function validateLoopStep(
   filePath: string,
   seenStepIds: Set<string>,
   scope: VisibleScope,
-  errors: CompileError[],
+  errors: CompileDiagnostic[],
 ): ValidationSummary & { guaranteedResultShape: ResultShape; resultShape: ResultShape } {
   const loopScope = {
     ...scope,
@@ -278,7 +282,7 @@ function validateBranchStep(
   filePath: string,
   seenStepIds: Set<string>,
   scope: VisibleScope,
-  errors: CompileError[],
+  errors: CompileDiagnostic[],
 ): ValidationSummary & { guaranteedResultShape: ResultShape; resultShape: ResultShape } {
   let seenElse = false
   const branchSummaries: Array<ValidationSummary & { exportShape: ResultShape }> = []
@@ -287,8 +291,8 @@ function validateBranchStep(
     const isElse = caseNode.else === true
     if (isElse && caseNode.if !== undefined) {
       errors.push(
-        createCompileError(
-          CompileErrorCode.InvalidWorkflow,
+        createCompileDiagnostic(
+          CompileDiagnosticCode.InvalidWorkflow,
           `\`cases[${index}]\` cannot set both \`else\` and \`if\``,
           { filePath },
         ),
@@ -296,8 +300,8 @@ function validateBranchStep(
     }
     if (!isElse && caseNode.if === undefined) {
       errors.push(
-        createCompileError(
-          CompileErrorCode.InvalidWorkflow,
+        createCompileDiagnostic(
+          CompileDiagnosticCode.InvalidWorkflow,
           `\`cases[${index}]\` must define \`if\` unless it is an \`else\` case`,
           { filePath },
         ),
@@ -305,15 +309,21 @@ function validateBranchStep(
     }
     if (isElse && index !== step.cases.length - 1) {
       errors.push(
-        createCompileError(CompileErrorCode.InvalidWorkflow, "`else` case must be the last branch case", { filePath }),
+        createCompileDiagnostic(CompileDiagnosticCode.InvalidWorkflow, "`else` case must be the last branch case", {
+          filePath,
+        }),
       )
     }
     if (isElse) {
       if (seenElse) {
         errors.push(
-          createCompileError(CompileErrorCode.InvalidWorkflow, "`branch` may define at most one `else` case", {
-            filePath,
-          }),
+          createCompileDiagnostic(
+            CompileDiagnosticCode.InvalidWorkflow,
+            "`branch` may define at most one `else` case",
+            {
+              filePath,
+            },
+          ),
         )
       }
       seenElse = true
@@ -326,15 +336,19 @@ function validateBranchStep(
   const anyExports = branchSummaries.some((summary) => summary.exportShape.kind !== "none")
   if (anyExports && !seenElse) {
     errors.push(
-      createCompileError(CompileErrorCode.InvalidWorkflow, "`branch` without `else` cannot declare case `exports`", {
-        filePath,
-      }),
+      createCompileDiagnostic(
+        CompileDiagnosticCode.InvalidWorkflow,
+        "`branch` without `else` cannot declare case `exports`",
+        {
+          filePath,
+        },
+      ),
     )
   }
   if (anyExports && branchSummaries.some((summary) => summary.exportShape.kind === "none")) {
     errors.push(
-      createCompileError(
-        CompileErrorCode.InvalidWorkflow,
+      createCompileDiagnostic(
+        CompileDiagnosticCode.InvalidWorkflow,
         "all `branch` cases must declare `exports` when any case exports a result",
         { filePath },
       ),
@@ -351,8 +365,8 @@ function validateBranchStep(
         const merged = mergeResultShapes(branchResultShape, shape)
         if (!areResultShapesCompatible(branchResultShape, shape)) {
           errors.push(
-            createCompileError(
-              CompileErrorCode.InvalidWorkflow,
+            createCompileDiagnostic(
+              CompileDiagnosticCode.InvalidWorkflow,
               "all `branch` case exports must declare the same result shape",
               { filePath },
             ),
@@ -377,7 +391,7 @@ function validateParallelStep(
   filePath: string,
   seenStepIds: Set<string>,
   scope: VisibleScope,
-  errors: CompileError[],
+  errors: CompileDiagnostic[],
 ): ValidationSummary & { guaranteedResultShape: ResultShape; resultShape: ResultShape } {
   const branchIds = new Set<string>()
   const branchSummaries: ValidationSummary[] = []
@@ -389,8 +403,8 @@ function validateParallelStep(
       errors.push(identifierError)
     } else if (branchIds.has(branch.id)) {
       errors.push(
-        createCompileError(
-          CompileErrorCode.InvalidWorkflow,
+        createCompileDiagnostic(
+          CompileDiagnosticCode.InvalidWorkflow,
           `\`branches[${index}]\` reuses local branch id \`${branch.id}\` within the same parallel node`,
           { filePath },
         ),
@@ -430,7 +444,7 @@ function validateBranchCase(
   filePath: string,
   seenStepIds: Set<string>,
   scope: VisibleScope,
-  errors: CompileError[],
+  errors: CompileDiagnostic[],
 ): ValidationSummary & { exportShape: ResultShape } {
   if (caseNode.if !== undefined) {
     validateExpressionTemplate(caseNode.if, filePath, scope, errors, "bool")
@@ -454,7 +468,7 @@ function validateCodex(
   step: CodexNode,
   filePath: string,
   scope: VisibleScope,
-  errors: CompileError[],
+  errors: CompileDiagnostic[],
 ): ValidationSummary & { guaranteedResultShape: ResultShape; resultShape: ResultShape } {
   if (step.with.action === "review") {
     if (step.with.review.target.type === "base") {
@@ -484,7 +498,7 @@ function validateStepExpressions(
   step: WorkflowStep,
   filePath: string,
   scope: VisibleScope,
-  errors: CompileError[],
+  errors: CompileDiagnostic[],
 ): void {
   if (step.if !== undefined) {
     validateExpressionTemplate(step.if, filePath, scope, errors, "bool")
@@ -499,7 +513,7 @@ function validateExports(
   exportsMap: Record<string, string> | undefined,
   filePath: string,
   scope: VisibleScope,
-  errors: CompileError[],
+  errors: CompileDiagnostic[],
 ): ResultShape {
   if (exportsMap === undefined) {
     return { kind: "none" }
@@ -520,7 +534,7 @@ function inferWrappedTemplateShape(
   template: string,
   filePath: string,
   scope: VisibleScope,
-  errors: CompileError[],
+  errors: CompileDiagnostic[],
 ): ResultShape {
   const compiled = validateWrappedExpressionTemplate(template, filePath, scope, errors)
   return compiled === undefined
@@ -528,7 +542,7 @@ function inferWrappedTemplateShape(
     : inferExpressionResultShape(compiled, (reference) => resolvePathShape(reference, scope))
 }
 
-function validateTemplate(template: string, filePath: string, scope: VisibleScope, errors: CompileError[]): void {
+function validateTemplate(template: string, filePath: string, scope: VisibleScope, errors: CompileDiagnostic[]): void {
   for (const expression of extractTemplateExpressions(template)) {
     validateExpression(expression, filePath, scope, errors)
   }
@@ -538,7 +552,7 @@ function validateExpressionTemplate(
   template: string,
   filePath: string,
   scope: VisibleScope,
-  errors: CompileError[],
+  errors: CompileDiagnostic[],
   expected: "bool" | null = null,
 ): void {
   validateWrappedExpressionTemplate(template, filePath, scope, errors, expected)
@@ -548,12 +562,14 @@ function validateWrappedExpressionTemplate(
   template: string,
   filePath: string,
   scope: VisibleScope,
-  errors: CompileError[],
+  errors: CompileDiagnostic[],
   expected: "bool" | null = null,
 ): CompiledExpression | undefined {
   if (!isWholeExpressionTemplate(template)) {
     errors.push(
-      createCompileError(CompileErrorCode.InvalidExpression, "Expected a whole `${{ ... }}` expression.", { filePath }),
+      createCompileDiagnostic(CompileDiagnosticCode.InvalidExpression, "Expected a whole `${{ ... }}` expression.", {
+        filePath,
+      }),
     )
     for (const expression of extractTemplateExpressions(template)) {
       validateExpression(expression, filePath, scope, errors, expected)
@@ -564,7 +580,9 @@ function validateWrappedExpressionTemplate(
   const [expression] = extractTemplateExpressions(template)
   if (expression === undefined) {
     errors.push(
-      createCompileError(CompileErrorCode.InvalidExpression, "Expected a whole `${{ ... }}` expression.", { filePath }),
+      createCompileDiagnostic(CompileDiagnosticCode.InvalidExpression, "Expected a whole `${{ ... }}` expression.", {
+        filePath,
+      }),
     )
     return undefined
   }
@@ -576,7 +594,7 @@ function validateExpression(
   expression: string,
   filePath: string,
   scope: VisibleScope,
-  errors: CompileError[],
+  errors: CompileDiagnostic[],
   expected: "bool" | null = null,
 ): CompiledExpression | undefined {
   let compiled: CompiledExpression
@@ -584,14 +602,14 @@ function validateExpression(
     compiled = compileExpression(expression, expected)
   } catch (error) {
     const cause = normalizeError(error)
-    errors.push(createCompileError(CompileErrorCode.InvalidExpression, cause.message, { filePath, cause }))
+    errors.push(createCompileDiagnostic(CompileDiagnosticCode.InvalidExpression, cause.message, { filePath, cause }))
     return undefined
   }
 
   for (const reference of compiled.pathReferences) {
     const message = validateReference(reference, scope)
     if (message !== undefined) {
-      errors.push(createCompileError(CompileErrorCode.ReferenceError, message, { filePath }))
+      errors.push(createCompileDiagnostic(CompileDiagnosticCode.ReferenceError, message, { filePath }))
     }
   }
 

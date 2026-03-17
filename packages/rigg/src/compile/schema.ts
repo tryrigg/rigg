@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import { CodexEffortSchema } from "../codex/effort"
-import { createCompileError, CompileErrorCode, type CompileError } from "./diagnostics"
+import { createCompileDiagnostic, CompileDiagnosticCode, type CompileDiagnostic } from "./diagnostic"
 import { AnyJsonShape, BooleanShape, IntegerShape, NumberShape, StringShape, type ResultShape } from "./expr"
 import { asJsonValue, deepEqual, isJsonObject, type JsonValue } from "../util/json"
 
@@ -27,10 +27,10 @@ export function isValidIdentifier(value: string): boolean {
   return IDENTIFIER_PATTERN.test(value)
 }
 
-export function validateIdentifier(value: string, label: string, filePath: string): CompileError | undefined {
+export function validateIdentifier(value: string, label: string, filePath: string): CompileDiagnostic | undefined {
   if (!isValidIdentifier(value)) {
-    return createCompileError(
-      CompileErrorCode.InvalidWorkflow,
+    return createCompileDiagnostic(
+      CompileDiagnosticCode.InvalidWorkflow,
       `Invalid ${label} \`${value}\`. Identifiers must start with a letter or \`_\` and only contain ASCII letters, digits, \`_\`, or \`-\`.`,
       { filePath },
     )

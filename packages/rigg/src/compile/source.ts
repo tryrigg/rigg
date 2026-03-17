@@ -1,7 +1,7 @@
 import { readdir } from "node:fs/promises"
 import { join, relative } from "node:path"
 
-import { createCompileError, CompileErrorCode } from "./diagnostics"
+import { createCompileDiagnostic, CompileDiagnosticCode } from "./diagnostic"
 import type { WorkspacePaths, WorkflowSourceFile } from "./project"
 import { normalizeError } from "../util/error"
 
@@ -26,7 +26,7 @@ export async function listWorkflowFiles(riggDir: string): Promise<string[]> {
 
     return filePaths
   } catch (error) {
-    throw createCompileError(CompileErrorCode.ReadFailed, "Failed to list workflow files.", {
+    throw createCompileDiagnostic(CompileDiagnosticCode.ReadFailed, "Failed to list workflow files.", {
       filePath: riggDir,
       cause: normalizeError(error),
     })
@@ -50,7 +50,7 @@ export async function readWorkspace(workspace: WorkspacePaths): Promise<Workflow
     return files
   } catch (error) {
     const cause = normalizeError(error)
-    throw createCompileError(CompileErrorCode.ReadFailed, "Failed to read workflow files.", {
+    throw createCompileDiagnostic(CompileDiagnosticCode.ReadFailed, "Failed to read workflow files.", {
       filePath: workspace.riggDir,
       cause,
     })

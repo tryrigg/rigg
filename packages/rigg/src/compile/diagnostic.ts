@@ -1,4 +1,4 @@
-export const CompileErrorCode = {
+export const CompileDiagnosticCode = {
   InvalidExpression: "invalid_expression",
   InvalidInputValue: "invalid_input_value",
   ProjectNotFound: "project_not_found",
@@ -10,40 +10,40 @@ export const CompileErrorCode = {
   DuplicateWorkflowId: "duplicate_workflow_id",
 } as const
 
-export type CompileErrorCode = (typeof CompileErrorCode)[keyof typeof CompileErrorCode]
+export type CompileDiagnosticCode = (typeof CompileDiagnosticCode)[keyof typeof CompileDiagnosticCode]
 
-export type CompileError = {
-  code: CompileErrorCode
+export type CompileDiagnostic = {
+  code: CompileDiagnosticCode
   message: string
   filePath?: string
   cause?: Error
 }
 
-export function createCompileError(
-  code: CompileErrorCode,
+export function createCompileDiagnostic(
+  code: CompileDiagnosticCode,
   message: string,
   options: {
     filePath?: string
     cause?: Error
   } = {},
-): CompileError {
-  const compileError: CompileError = {
+): CompileDiagnostic {
+  const compileDiagnostic: CompileDiagnostic = {
     code,
     message,
   }
 
   if (options.filePath !== undefined) {
-    compileError.filePath = options.filePath
+    compileDiagnostic.filePath = options.filePath
   }
 
   if (options.cause !== undefined) {
-    compileError.cause = options.cause
+    compileDiagnostic.cause = options.cause
   }
 
-  return compileError
+  return compileDiagnostic
 }
 
-export function isCompileError(value: unknown): value is CompileError {
+export function isCompileDiagnostic(value: unknown): value is CompileDiagnostic {
   return (
     typeof value === "object" &&
     value !== null &&

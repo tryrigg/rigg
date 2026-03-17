@@ -1,17 +1,17 @@
 import { decodeWorkflowFile } from "./decode"
-import { isCompileError, type CompileError } from "./diagnostics"
+import { isCompileDiagnostic, type CompileDiagnostic } from "./diagnostic"
 import { discoverWorkspace, type DecodedWorkflowFile, type WorkflowProject } from "./project"
 import { readWorkspace } from "./source"
 import { parseYamlDocument } from "./syntax"
 import { validateWorkspace } from "./validate"
 import { normalizeError } from "../util/error"
 
-export type { CompileError } from "./diagnostics"
+export type { CompileDiagnostic } from "./diagnostic"
 export type { WorkflowProject } from "./project"
 
 export type LoadWorkflowProjectResult =
   | { kind: "success"; project: WorkflowProject }
-  | { kind: "invalid"; errors: CompileError[] }
+  | { kind: "invalid"; errors: CompileDiagnostic[] }
 
 export async function loadWorkflowProject(startDir: string): Promise<LoadWorkflowProjectResult> {
   const workspaceResult = await discoverWorkspace(startDir)
@@ -26,12 +26,12 @@ export async function loadWorkflowProject(startDir: string): Promise<LoadWorkflo
     const cause = normalizeError(error)
     return {
       kind: "invalid",
-      errors: [isCompileError(cause) ? cause : { code: "read_failed", message: cause.message, cause }],
+      errors: [isCompileDiagnostic(cause) ? cause : { code: "read_failed", message: cause.message, cause }],
     }
   }
 
   const files: DecodedWorkflowFile[] = []
-  const errors: CompileError[] = []
+  const errors: CompileDiagnostic[] = []
 
   for (const sourceFile of sourceFiles) {
     const parsedResult = parseYamlDocument(sourceFile.text, sourceFile.filePath)

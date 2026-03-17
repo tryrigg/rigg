@@ -1,9 +1,9 @@
-import { createCompileError, CompileErrorCode, type CompileError } from "./diagnostics"
+import { createCompileDiagnostic, CompileDiagnosticCode, type CompileDiagnostic } from "./diagnostic"
 import { validateIdentifier, WorkflowDocumentSchema, type WorkflowDocument } from "./schema"
 
 export type WorkflowDecodeResult =
   | { kind: "decoded"; workflow: WorkflowDocument }
-  | { kind: "invalid_workflow"; error: CompileError }
+  | { kind: "invalid_workflow"; error: CompileDiagnostic }
 
 export function decodeWorkflowFile(input: unknown, filePath: string): WorkflowDecodeResult {
   const result = WorkflowDocumentSchema.safeParse(input)
@@ -17,8 +17,8 @@ export function decodeWorkflowFile(input: unknown, filePath: string): WorkflowDe
 
     return {
       kind: "invalid_workflow",
-      error: createCompileError(
-        CompileErrorCode.InvalidWorkflow,
+      error: createCompileDiagnostic(
+        CompileDiagnosticCode.InvalidWorkflow,
         `Workflow schema validation failed. ${issueSummary}`,
         { filePath },
       ),

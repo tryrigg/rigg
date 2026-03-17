@@ -8,7 +8,7 @@ import type { ActionNode } from "../../src/compile/schema"
 import type { CodexProviderEvent } from "../../src/codex/event"
 import { createCodexRuntimeSession } from "../../src/codex/runtime"
 import { RIGG_VERSION } from "../../src/version"
-import { runActionStep } from "../../src/run/adapters"
+import { runActionStep } from "../../src/run/action"
 import { renderContext } from "../fixture/builders"
 import { installFakeCodex } from "../fixture/fake-codex"
 
@@ -71,7 +71,7 @@ async function runBunScript(
   }
 }
 
-describe("run/adapters", () => {
+describe("run/action", () => {
   test("runs shell steps with cwd and env", async () => {
     const outputChunks: Array<{ chunk: string; stream: "stderr" | "stdout" }> = []
     const step: ActionNode = {

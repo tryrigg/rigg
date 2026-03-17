@@ -9,7 +9,7 @@ import {
   runInitCommand,
   runRunCommand,
   runValidateCommand,
-} from "../../src/cli/commands"
+} from "../../src/cli/command"
 import { examplesDoc, schemaReferenceDoc, skillDoc, workflowSyntaxDoc } from "../../src/cli/docs"
 import { StepInterruptedError } from "../../src/run/error"
 import { runSnapshot, workflowProject } from "../fixture/builders"
@@ -70,7 +70,7 @@ function withTTYState(tty: { stderr: boolean; stdin: boolean }, run: () => Promi
   }
 }
 
-describe("cli/commands", () => {
+describe("cli/command", () => {
   test("init generates workflow, docs, and skill assets from packages/rigg", async () => {
     const cwd = await createTempWorkspace()
 

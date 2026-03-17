@@ -1,7 +1,7 @@
 import { listWorkflowIds, type WorkflowProject } from "../compile/index"
-import type { CompileError } from "../compile/index"
+import type { CompileDiagnostic } from "../compile/index"
 
-export function renderCompileErrors(errors: CompileError[]): string[] {
+export function renderCompileErrors(errors: CompileDiagnostic[]): string[] {
   return errors.map((error) => {
     const location = error.filePath === undefined ? "" : ` [${error.filePath}]`
     return `${error.code}${location}: ${error.message}`

@@ -19,7 +19,7 @@ import {
   type WorkflowStep,
 } from "../compile/schema"
 import { v7 as uuidv7 } from "uuid"
-import { runActionStep, type ActionStepOutput } from "./adapters"
+import { runActionStep, type ActionStepOutput } from "./action"
 import { createControlBroker, resolveInteraction, waitForBarrier, type ControlBroker } from "./control"
 import {
   LoopExhaustedError,

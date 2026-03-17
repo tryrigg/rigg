@@ -1,4 +1,4 @@
-import { runInitCommand, runRunCommand, runValidateCommand } from "./commands"
+import { runInitCommand, runRunCommand, runValidateCommand } from "./command"
 import { assertUnreachable } from "../util/assert"
 import { RIGG_VERSION } from "../version"
 import { writeLines } from "./output"

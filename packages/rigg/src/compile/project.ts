@@ -2,7 +2,7 @@ import { lstat } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
 
 import { isMissingPathError } from "../util/error"
-import { createCompileError, CompileErrorCode, type CompileError } from "./diagnostics"
+import { createCompileDiagnostic, CompileDiagnosticCode, type CompileDiagnostic } from "./diagnostic"
 import type { WorkflowDocument } from "./schema"
 
 export type WorkspacePaths = {
@@ -29,7 +29,7 @@ export type WorkflowProject = {
 
 export type WorkspaceDiscoveryResult =
   | { kind: "found"; workspace: WorkspacePaths }
-  | { kind: "not_found"; error: CompileError }
+  | { kind: "not_found"; error: CompileDiagnostic }
 
 export async function discoverWorkspace(startDir: string): Promise<WorkspaceDiscoveryResult> {
   let currentDir = resolve(startDir)
@@ -58,8 +58,8 @@ export async function discoverWorkspace(startDir: string): Promise<WorkspaceDisc
     if (parentDir === currentDir) {
       return {
         kind: "not_found",
-        error: createCompileError(
-          CompileErrorCode.ProjectNotFound,
+        error: createCompileDiagnostic(
+          CompileDiagnosticCode.ProjectNotFound,
           "Could not find a .rigg directory from the current working directory.",
         ),
       }

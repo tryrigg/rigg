@@ -30,8 +30,8 @@ steps:
         claude -p \
           --model claude-opus-4-6 \
           --append-system-prompt-file private/typescript-implementation-guide.md \
-          --tools "Read,Glob,Grep,Bash" \
-          --allowedTools "Read,Glob,Grep,Bash" \
+          --tools "Read,Glob,Grep,Bash,WebSearch" \
+          --allowedTools "Read,Glob,Grep,Bash,WebSearch" \
           --max-turns 15 \
           --no-session-persistence \
           --output-format text \
@@ -197,8 +197,8 @@ steps:
         printf '%s' "$PLAN" | claude -p \
           --model claude-opus-4-6 \
           --append-system-prompt-file private/typescript-implementation-guide.md \
-          --tools "Read,Glob,Grep,Bash" \
-          --allowedTools "Read,Glob,Grep,Bash" \
+          --tools "Read,Glob,Grep,Bash,WebSearch" \
+          --allowedTools "Read,Glob,Grep,Bash,WebSearch" \
           --max-turns 10 \
           --no-session-persistence \
           --output-format text \

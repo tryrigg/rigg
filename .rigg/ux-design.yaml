@@ -17,9 +17,8 @@ steps:
       command: |
         claude -p \
           --model claude-opus-4-6 \
-          --tools "Read,Glob,Grep,Bash" \
-          --allowedTools "Read,Glob,Grep,Bash" \
-          --max-turns 15 \
+          --tools "Read,Glob,Grep,Bash,WebSearch" \
+          --allowedTools "Read,Glob,Grep,Bash,WebSearch" \
           --no-session-persistence \
           --output-format text \
           "You are a UX researcher and product designer preparing context for a CLI user experience design.
@@ -116,9 +115,8 @@ steps:
               command: |
                 claude -p \
                   --model claude-opus-4-6 \
-                  --tools "Read,Glob,Grep" \
-                  --allowedTools "Read,Glob,Grep" \
-                  --max-turns 5 \
+                  --tools "Read,Glob,Grep,WebSearch" \
+                  --allowedTools "Read,Glob,Grep,WebSearch" \
                   --no-session-persistence \
                   --output-format text \
                   "You are a product designer specializing in developer tools and CLI experiences.
@@ -341,9 +339,8 @@ steps:
               command: |
                 printf '%s' "$TARGET_DESIGN" | claude -p \
                   --model claude-opus-4-6 \
-                  --tools "Read,Glob,Grep" \
-                  --allowedTools "Read,Glob,Grep" \
-                  --max-turns 5 \
+                  --tools "Read,Glob,Grep,WebSearch" \
+                  --allowedTools "Read,Glob,Grep,WebSearch" \
                   --no-session-persistence \
                   --output-format text \
                   "You are reviewing a UX design for a CLI developer tool.
@@ -507,9 +504,8 @@ steps:
                       command: |
                         printf '%s' "$OWN_DESIGN" | claude -p \
                           --model claude-opus-4-6 \
-                          --tools "Read,Glob,Grep" \
-                          --allowedTools "Read,Glob,Grep" \
-                          --max-turns 5 \
+                          --tools "Read,Glob,Grep,WebSearch" \
+                          --allowedTools "Read,Glob,Grep,WebSearch" \
                           --no-session-persistence \
                           --output-format text \
                           "You are revising your UX design based on peer review feedback.
@@ -588,9 +584,8 @@ steps:
                       command: |
                         printf '%s' "$TARGET_DESIGN" | claude -p \
                           --model claude-opus-4-6 \
-                          --tools "Read,Glob,Grep" \
-                          --allowedTools "Read,Glob,Grep" \
-                          --max-turns 5 \
+                          --tools "Read,Glob,Grep,WebSearch" \
+                          --allowedTools "Read,Glob,Grep,WebSearch" \
                           --no-session-persistence \
                           --output-format text \
                           "You are reviewing a REVISED UX design for a CLI developer tool.
@@ -708,9 +703,8 @@ steps:
       command: |
         claude -p \
           --model claude-opus-4-6 \
-          --tools "Read,Glob,Grep" \
-          --allowedTools "Read,Glob,Grep" \
-          --max-turns 5 \
+          --tools "Read,Glob,Grep,WebSearch" \
+          --allowedTools "Read,Glob,Grep,WebSearch" \
           --no-session-persistence \
           --output-format text \
           "You are a principal product designer creating the definitive UX design document.

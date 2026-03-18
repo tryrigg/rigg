@@ -64,9 +64,8 @@ steps:
             git diff | claude -p \
               --model claude-opus-4-6 \
               --append-system-prompt-file private/typescript-implementation-guide.md \
-              --tools "Read,Glob,Grep,Bash,Edit" \
-              --allowedTools "Read,Glob,Grep,Bash,Edit" \
-              --max-turns 10 \
+              --tools "Read,Glob,Grep,Bash,Edit,WebSearch" \
+              --allowedTools "Read,Glob,Grep,Bash,Edit,WebSearch" \
               --no-session-persistence \
               --output-format text \
               "You are a senior engineer validating automated code review fixes.
@@ -122,9 +121,8 @@ steps:
         } | claude -p \
           --model claude-opus-4-6 \
           --append-system-prompt-file private/typescript-implementation-guide.md \
-          --tools "Read,Glob,Grep" \
-          --allowedTools "Read,Glob,Grep" \
-          --max-turns 5 \
+          --tools "Read,Glob,Grep,WebSearch" \
+          --allowedTools "Read,Glob,Grep,WebSearch" \
           --no-session-persistence \
           --output-format text \
           "You are a senior engineer summarizing a code review remediation cycle.

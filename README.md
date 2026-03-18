@@ -24,6 +24,13 @@ Install a specific version:
 curl -fsSL https://tryrigg.com/install | bash -s -- --version v0.1.0
 ```
 
+Upgrade an installed release binary:
+
+```bash
+rigg upgrade
+rigg upgrade v0.1.0
+```
+
 The installer currently supports macOS and installs a prebuilt `rigg` binary from GitHub Releases.
 
 Or build from source:

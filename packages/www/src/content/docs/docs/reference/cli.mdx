@@ -13,6 +13,23 @@ Create a `.rigg/` directory with example workflow files.
 rigg init
 ```
 
+## rigg upgrade
+
+Upgrade an installed Rigg release binary to the latest or a specific version.
+
+```bash
+rigg upgrade [target]
+```
+
+Examples:
+
+```bash
+rigg upgrade
+rigg upgrade v0.1.0
+```
+
+`rigg upgrade` is only available from an installed release binary, not from `bun run`.
+
 ## rigg validate
 
 Validate all `.rigg/*.yaml` workflow files. Reports syntax errors, unknown fields, invalid references, and schema violations.

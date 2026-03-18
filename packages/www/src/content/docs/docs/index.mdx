@@ -15,9 +15,18 @@ Specific version:
 curl -fsSL https://tryrigg.com/install | bash -s -- --version v0.1.0
 ```
 
+Upgrade an installed release binary:
+
+```bash
+rigg upgrade
+rigg upgrade v0.1.0
+```
+
 macOS only (prebuilt binary).
 
 **Requirements:** `codex` on `PATH` and `codex-cli 0.114.0` or newer for codex steps.
+
+`rigg upgrade` only works from an installed release binary, not from `bun run`.
 
 ## Init and run
 

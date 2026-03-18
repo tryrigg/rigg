@@ -33,6 +33,7 @@ describe("cli/bootstrap", () => {
 
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain("Commands:\n  init")
+    expect(result.stdout).toContain("  upgrade [target]\n")
     expect(result.stdout).toContain("Options:\n  -h, --help\n  -V, --version\n")
     expect(result.stdout).not.toContain("Commands:\n  version\n")
   })
@@ -50,5 +51,13 @@ describe("cli/bootstrap", () => {
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain("rigg <command>\n")
     expect(result.stdout).not.toContain("rigg dev\n")
+  })
+
+  test("upgrade subcommand is recognized and rejected in dev mode", async () => {
+    const result = await runCli(["upgrade", "v0.1.2"])
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("`rigg upgrade` is only available from an installed release binary.")
+    expect(result.stdout).toBe("")
   })
 })

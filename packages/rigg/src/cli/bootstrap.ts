@@ -1,4 +1,5 @@
 import { runInitCommand, runRunCommand, runValidateCommand } from "./command"
+import { parseUpgradeArgs, runUpgradeCommand } from "./upgrade"
 import { assertUnreachable } from "../util/assert"
 import { RIGG_VERSION } from "../version"
 import { writeLines } from "./output"
@@ -8,6 +9,7 @@ type ParsedCommand =
   | { kind: "help" }
   | { kind: "version" }
   | { kind: "init" }
+  | ({ kind: "upgrade" } & ReturnType<typeof parseUpgradeArgs>)
   | { json: boolean; kind: "validate" }
   | { autoContinue: boolean; inputs: string[]; kind: "run"; workflowId?: string }
 
@@ -25,6 +27,12 @@ function parseCommand(argv: string[]): ParsedCommand {
       return { kind: "version" }
     case "init":
       return { kind: "init" }
+    case "upgrade":
+      try {
+        return { kind: "upgrade", ...parseUpgradeArgs(rest) }
+      } catch (error) {
+        return { kind: "invalid", message: error instanceof Error ? error.message : String(error) }
+      }
     case "validate":
       return { kind: "validate", json: rest.includes("--json") }
     case "run":
@@ -76,6 +84,7 @@ function renderHelp(): string[] {
     "",
     "Commands:",
     "  init",
+    "  upgrade [target]",
     "  validate [--json]",
     "  run <workflow_id> [--input key=value] [--auto-continue]",
     "",
@@ -101,6 +110,15 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       return 0
     case "init": {
       const result = await runInitCommand(cwd)
+      writeLines(result.stdoutLines, process.stdout)
+      writeLines(result.stderrLines, process.stderr)
+      return result.exitCode
+    }
+    case "upgrade": {
+      const result = await runUpgradeCommand(
+        { target: command.target },
+        { writeStdoutLine: (line) => writeLines([line], process.stdout) },
+      )
       writeLines(result.stdoutLines, process.stdout)
       writeLines(result.stderrLines, process.stderr)
       return result.exitCode

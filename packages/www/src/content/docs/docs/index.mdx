@@ -25,6 +25,7 @@ macOS only (prebuilt binary).
 rigg init                              # creates .rigg/ with example workflows
 rigg validate                          # check YAML syntax
 rigg run hello --input name=Rigg       # run a workflow
+rigg run hello --auto-continue         # skip step barriers in the TTY UI
 ```
 
 `--input key=value` auto-parses JSON — `true`, `42`, `["a"]`, `{"x":1}` all work.
@@ -33,6 +34,8 @@ rigg run hello --input name=Rigg       # run a workflow
 
 On a TTY, `rigg run` opens a stateful terminal UI that switches between a live running view, a waiting view for barriers and interactions, and a final result view. During `codex` steps, the running view also shows live codex activity such as assistant text and tool progress. Use `continue` or `abort` at barriers, and use `Ctrl-C` to interrupt the active step.
 
-Non-TTY execution suppresses the interactive UI automatically.
+If you want to keep the TTY UI but skip step barriers, pass `--auto-continue`. This only auto-continues barriers; approvals, questions, and other input prompts still pause normally.
+
+Non-TTY execution is rejected. `rigg run` and `rigg run --auto-continue` both require an interactive terminal.
 
 Run state is in-memory only; Rigg does not persist run history.

@@ -5,13 +5,15 @@ import type { CodexInteractionResolution } from "../codex/interaction"
 import type { CodexProviderEvent } from "../codex/event"
 import type { WorkflowDocument } from "../compile/schema"
 import type { RunControlHandler, RunControlRequest, RunControlResolution, RunEvent, StreamKind } from "../run/progress"
-import type { RunSnapshot } from "../run/schema"
+import type { FrontierNode, RunSnapshot } from "../run/schema"
 import { clonePendingInteraction, cloneRunSnapshot } from "../run/snapshot"
 import { setActiveInteraction } from "../run/state"
 import { onAbort } from "../util/abort"
 import { createAbortError } from "../util/error"
 import { App } from "./tui/app"
 import { createTuiStore } from "./tui/store"
+
+export type BarrierApprovalMode = "manual" | "auto_continue"
 
 export type ActiveLiveOutput = {
   entries: LiveLogEntry[]
@@ -35,6 +37,7 @@ export type OutputPreview = {
 }
 
 export type TerminalUiState = {
+  barrierMode: BarrierApprovalMode
   lastCompletedNodePath: string | null
   liveOutputs: Record<string, ActiveLiveOutput>
   completedOutputs: Record<string, CompletedOutput>
@@ -77,8 +80,9 @@ type ControlResolverRegistry = {
 
 type InkRenderFunction = typeof render
 
-export function createTerminalUiState(): TerminalUiState {
+export function createTerminalUiState(barrierMode: BarrierApprovalMode = "manual"): TerminalUiState {
   return {
+    barrierMode,
     lastCompletedNodePath: null,
     liveOutputs: {},
     completedOutputs: {},
@@ -119,7 +123,7 @@ export function previewNodeOutput(node: { status: string; stderr?: unknown; stdo
 }
 
 function resolveImmediateControlRequest(request: RunControlRequest): RunControlResolution | null {
-  if (request.kind !== "interaction") {
+  if (request.kind === "step_barrier") {
     return null
   }
 
@@ -245,12 +249,13 @@ export function createControlResolverRegistry(): ControlResolverRegistry {
 }
 
 export function createInkRunSession(options: {
+  barrierMode: BarrierApprovalMode
   interrupt: WorkflowInterruptHandler
   renderApp?: InkRenderFunction
   terminal?: InteractiveTerminal
   workflow: WorkflowDocument
 }): RunSession {
-  const store = createTuiStore()
+  const store = createTuiStore({ barrierMode: options.barrierMode })
   const controlResolvers = createControlResolverRegistry()
   const terminal = options.terminal ?? {
     stderr: process.stderr,
@@ -259,6 +264,7 @@ export function createInkRunSession(options: {
   const renderApp = options.renderApp ?? render
   const inkInstance = renderApp(
     React.createElement(App, {
+      barrierMode: options.barrierMode,
       onInterrupt: options.interrupt,
       onResolveBarrier: (barrierId: string, action: "abort" | "continue") =>
         controlResolvers.resolveBarrier(barrierId, action),
@@ -286,6 +292,10 @@ export function createInkRunSession(options: {
       }
     },
     handle: (request) => {
+      if (request.kind === "step_barrier" && options.barrierMode === "auto_continue") {
+        return { action: "continue", kind: "step_barrier" }
+      }
+
       const immediateResolution = resolveImmediateControlRequest(request)
       if (immediateResolution !== null) {
         return immediateResolution
@@ -319,6 +329,12 @@ export function createInkRunSession(options: {
       )
     },
   }
+}
+
+const FRONTIER_KIND_LABELS: Record<string, string> = {
+  codex: "codex",
+  shell: "cmd",
+  write_file: "write_file",
 }
 
 export function applyRunEvent(state: TerminalUiState, event: RunEvent): void {
@@ -356,6 +372,7 @@ export function applyRunEvent(state: TerminalUiState, event: RunEvent): void {
       state.snapshot = event.snapshot
       if (event.barrier.completed !== null && event.barrier.completed !== undefined) {
         state.lastCompletedNodePath = event.barrier.completed.node_path
+        appendAutoContinueEvent(state, event)
       }
       return
     case "barrier_resolved":
@@ -379,6 +396,65 @@ export function applyRunEvent(state: TerminalUiState, event: RunEvent): void {
       state.liveOutputs = {}
       return
   }
+}
+
+function appendAutoContinueEvent(state: TerminalUiState, event: Extract<RunEvent, { kind: "barrier_reached" }>): void {
+  if (state.barrierMode !== "auto_continue") {
+    return
+  }
+
+  const completed = event.barrier.completed
+  if (completed === null || completed === undefined) {
+    return
+  }
+
+  const label = formatBarrierFrontier(event.barrier.next)
+  if (label === null) {
+    return
+  }
+
+  const completedOutput = ensureCompletedOutput(state, completed.node_path)
+  completedOutput.entries.push({
+    key: null,
+    text: `auto-continue: Next: ${label}`,
+    variant: "event",
+  })
+}
+
+function ensureCompletedOutput(state: TerminalUiState, nodePath: string): CompletedOutput {
+  const existing = state.completedOutputs[nodePath]
+  if (existing !== undefined) {
+    return existing
+  }
+
+  const node = state.snapshot?.nodes.find((candidate) => candidate.node_path === nodePath)
+  const completedOutput: CompletedOutput = {
+    entries: [],
+    preview: node ? previewNodeOutput(node) : null,
+  }
+  state.completedOutputs[nodePath] = completedOutput
+  return completedOutput
+}
+
+function formatBarrierFrontier(next: FrontierNode[]): string | null {
+  if (next.length === 0) {
+    return null
+  }
+
+  return next.map((node) => formatFrontierNodeLabel(node)).join(", ")
+}
+
+function formatFrontierNodeLabel(node: FrontierNode): string {
+  const parts = [`${node.user_id ?? node.node_path} [${FRONTIER_KIND_LABELS[node.node_kind] ?? node.node_kind}]`]
+
+  if (node.node_kind === "codex" && node.action) {
+    parts.push(node.action)
+  }
+  if (node.node_kind === "codex" && node.model) {
+    parts.push(node.model)
+  }
+
+  return parts.join(" · ")
 }
 
 function appendLiveStream(state: TerminalUiState, nodePath: string, chunk: string, stream: StreamKind): void {

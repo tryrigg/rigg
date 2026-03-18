@@ -9,7 +9,7 @@ type ParsedCommand =
   | { kind: "version" }
   | { kind: "init" }
   | { json: boolean; kind: "validate" }
-  | { inputs: string[]; kind: "run"; workflowId?: string }
+  | { autoContinue: boolean; inputs: string[]; kind: "run"; workflowId?: string }
 
 function parseCommand(argv: string[]): ParsedCommand {
   const [commandName, ...rest] = argv
@@ -35,6 +35,7 @@ function parseCommand(argv: string[]): ParsedCommand {
 }
 
 function parseRunCommand(args: string[]): ParsedCommand {
+  let autoContinue = false
   const inputs: string[] = []
   let workflowId: string | undefined
 
@@ -52,6 +53,10 @@ function parseRunCommand(args: string[]): ParsedCommand {
       index += 1
       continue
     }
+    if (value === "--auto-continue") {
+      autoContinue = true
+      continue
+    }
     if (value.startsWith("--")) {
       return { kind: "invalid", message: `Unknown run option: ${value}` }
     }
@@ -60,7 +65,9 @@ function parseRunCommand(args: string[]): ParsedCommand {
     }
   }
 
-  return workflowId === undefined ? { inputs, kind: "run" } : { inputs, kind: "run", workflowId }
+  return workflowId === undefined
+    ? { autoContinue, inputs, kind: "run" }
+    : { autoContinue, inputs, kind: "run", workflowId }
 }
 
 function renderHelp(): string[] {
@@ -70,7 +77,7 @@ function renderHelp(): string[] {
     "Commands:",
     "  init",
     "  validate [--json]",
-    "  run <workflow_id> [--input key=value]",
+    "  run <workflow_id> [--input key=value] [--auto-continue]",
     "",
     "Options:",
     "  -h, --help",
@@ -106,6 +113,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     }
     case "run": {
       const result = await runRunCommand(cwd, command.workflowId, {
+        autoContinue: command.autoContinue,
         inputs: command.inputs,
       })
       writeLines(result.stdoutLines, process.stdout)

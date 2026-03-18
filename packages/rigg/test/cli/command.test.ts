@@ -104,9 +104,76 @@ describe("cli/command", () => {
     await runInitCommand(cwd)
 
     await withTTYState({ stderr: true, stdin: false }, async () => {
-      const result = await runRunCommand(cwd, "plan", { inputs: [] })
+      const result = await runRunCommand(cwd, "plan", { autoContinue: false, inputs: [] })
       expect(result.exitCode).toBe(1)
-      expect(result.stderrLines.join("\n")).toContain("interactive terminal")
+      expect(result.stderrLines).toEqual([
+        "`rigg run` requires a TTY because step barriers and workflow input prompts are interactive. Re-run in an interactive terminal. `--auto-continue` only works in an interactive terminal.",
+      ])
+    })
+  })
+
+  test("run --auto-continue is still rejected without a TTY", async () => {
+    const cwd = await createTempWorkspace()
+    await runInitCommand(cwd)
+
+    await withTTYState({ stderr: false, stdin: true }, async () => {
+      const result = await runRunCommand(cwd, "plan", { autoContinue: true, inputs: [] })
+      expect(result.exitCode).toBe(1)
+      expect(result.stderrLines).toEqual([
+        "`rigg run` requires a TTY because step barriers and workflow input prompts are interactive. Re-run in an interactive terminal. `--auto-continue` only works in an interactive terminal.",
+      ])
+    })
+  })
+
+  test("tty run --auto-continue passes auto barrier mode into the session factory", async () => {
+    const cwd = await createTempWorkspace()
+    await writeWorkflow(
+      cwd,
+      "prompt.yaml",
+      ["id: prompt", "steps:", "  - type: shell", "    with:", "      command: echo hi"].join("\n"),
+    )
+
+    await withTTYState({ stderr: true, stdin: true }, async () => {
+      const createRunSessionCalls: string[] = []
+
+      const result = await runRunCommand(
+        cwd,
+        "prompt",
+        { autoContinue: true, inputs: [] },
+        {
+          createInterruptController: () => {
+            const controller = new AbortController()
+            return {
+              dispose: () => {},
+              interrupt: () => controller.abort(new StepInterruptedError("workflow interrupted by operator")),
+              signal: controller.signal,
+            }
+          },
+          createRunSession: ((options: any) => {
+            createRunSessionCalls.push(options.barrierMode)
+            return {
+              close: () => {},
+              emit: () => {},
+              handle: async () => {
+                throw new Error("unexpected control request")
+              },
+            }
+          }) as any,
+          runWorkflowImpl: (async () => ({
+            kind: "completed",
+            snapshot: runSnapshot({
+              finished_at: "2026-03-17T00:00:02.000Z",
+              phase: "completed",
+              reason: "completed",
+              status: "succeeded",
+              workflow_id: "prompt",
+            }),
+          })) as any,
+        },
+      )
+
+      expect(result.exitCode).toBe(0)
+      expect(createRunSessionCalls).toEqual(["auto_continue"])
     })
   })
 
@@ -218,7 +285,7 @@ describe("cli/command", () => {
       const result = await runRunCommand(
         cwd,
         "prompt",
-        { inputs: ["name=cli-name"] },
+        { autoContinue: false, inputs: ["name=cli-name"] },
         {
           createInterruptController: () => {
             const controller = new AbortController()
@@ -325,7 +392,7 @@ describe("cli/command", () => {
       const result = await runRunCommand(
         cwd,
         "prompt",
-        { inputs: ["name=cli-name", 'config={\"enabled\":true}'] },
+        { autoContinue: false, inputs: ["name=cli-name", 'config={\"enabled\":true}'] },
         {
           createInterruptController: () => {
             const controller = new AbortController()
@@ -399,7 +466,7 @@ describe("cli/command", () => {
       const result = await runRunCommand(
         cwd,
         "prompt",
-        { inputs: [] },
+        { autoContinue: false, inputs: [] },
         {
           createInterruptController: () => {
             const controller = new AbortController()
@@ -469,7 +536,7 @@ describe("cli/command", () => {
       const result = await runRunCommand(
         cwd,
         "prompt",
-        { inputs: [] },
+        { autoContinue: false, inputs: [] },
         {
           createInterruptController: () => {
             const controller = new AbortController()
@@ -543,7 +610,7 @@ describe("cli/command", () => {
       const result = await runRunCommand(
         cwd,
         "prompt",
-        { inputs: [] },
+        { autoContinue: false, inputs: [] },
         {
           createInterruptController: () => ({
             dispose: () => {},

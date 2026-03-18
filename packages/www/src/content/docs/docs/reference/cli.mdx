@@ -26,12 +26,13 @@ rigg validate
 Execute a workflow by ID.
 
 ```bash
-rigg run <workflow_id> [--input key=value]
+rigg run <workflow_id> [--input key=value] [--auto-continue]
 ```
 
-| Flag                | Description                                                             |
-| ------------------- | ----------------------------------------------------------------------- |
-| `--input key=value` | Set input parameter (repeatable). Values are JSON-parsed when possible. |
+| Flag                | Description                                                                                                    |
+| ------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `--input key=value` | Set input parameter (repeatable). Values are JSON-parsed when possible.                                        |
+| `--auto-continue`   | TTY-only mode that skips step barriers, while still pausing for approvals, questions, and other input prompts. |
 
 On a TTY, `rigg run` opens a stateful terminal UI with:
 
@@ -40,6 +41,8 @@ On a TTY, `rigg run` opens a stateful terminal UI with:
 - a waiting view for barriers and interactions
 - a final view that shows the last completed step result
 
-Use `Ctrl-C` to interrupt the active step. Non-TTY execution suppresses the interactive UI.
+With `--auto-continue`, the same TTY UI stays active, but step barriers advance automatically and the UI emits a muted `auto-continue: Next: ...` line for each released barrier. Real runtime interactions such as approvals and user input still pause normally.
+
+Use `Ctrl-C` to interrupt the active step. Non-TTY execution is rejected because barriers and workflow input prompts are interactive, including when `--auto-continue` is set.
 
 Workflows are discovered from the nearest `.rigg/` directory.

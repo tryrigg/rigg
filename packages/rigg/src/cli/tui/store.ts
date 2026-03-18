@@ -1,6 +1,6 @@
 import type { RunEvent } from "../../run/progress"
 import type { RunSnapshot } from "../../run/schema"
-import { applyRunEvent, createTerminalUiState, type TerminalUiState } from "../run"
+import { applyRunEvent, createTerminalUiState, type BarrierApprovalMode, type TerminalUiState } from "../run"
 
 export type TuiStoreSnapshot = {
   state: TerminalUiState
@@ -16,8 +16,8 @@ export type TuiStore = {
   stopTimer: () => void
 }
 
-export function createTuiStore(): TuiStore {
-  const uiState = createTerminalUiState()
+export function createTuiStore(options: { barrierMode?: BarrierApprovalMode } = {}): TuiStore {
+  const uiState = createTerminalUiState(options.barrierMode)
 
   let timerTick = 0
   let timerInterval: ReturnType<typeof setInterval> | null = null

@@ -292,6 +292,178 @@ describe("cli/run", () => {
     expect(state.snapshot?.status).toBe("succeeded")
   })
 
+  test("applyRunEvent appends an auto-continue event for completed barriers", () => {
+    const state = createTerminalUiState("auto_continue")
+    const completedNode = {
+      attempt: 1,
+      duration_ms: 1200,
+      exit_code: 0,
+      finished_at: "2026-03-15T10:01:00.000Z",
+      node_kind: "shell",
+      node_path: "/0",
+      result: null,
+      started_at: "2026-03-15T10:00:00.000Z",
+      status: "succeeded" as const,
+      stderr: null,
+      stdout: "repo ready\n",
+      user_id: "collect_context",
+      waiting_for: null,
+    }
+    const completedSnapshot = runSnapshot({ nodes: [completedNode] })
+
+    applyRunEvent(state, { kind: "run_started", snapshot: completedSnapshot })
+    applyRunEvent(state, {
+      kind: "node_completed",
+      node: completedNode,
+      snapshot: completedSnapshot,
+    })
+    applyRunEvent(state, {
+      barrier: {
+        barrier_id: "barrier-1",
+        completed: {
+          node_kind: "shell",
+          node_path: "/0",
+          result: null,
+          status: "succeeded",
+          user_id: "collect_context",
+        },
+        created_at: "2026-03-15T10:01:01.000Z",
+        frame_id: "root",
+        next: [
+          {
+            action: null,
+            cwd: null,
+            detail: "echo hi",
+            frame_id: "root",
+            model: null,
+            node_kind: "shell",
+            node_path: "/1",
+            prompt_preview: null,
+            user_id: "draft_shell",
+          },
+          {
+            action: "plan",
+            cwd: "/workspace",
+            detail: "codex plan",
+            frame_id: "root",
+            model: "gpt-5.4",
+            node_kind: "codex",
+            node_path: "/2",
+            prompt_preview: "Draft a plan",
+            user_id: "draft_plan",
+          },
+        ],
+        reason: "step_completed",
+      },
+      kind: "barrier_reached",
+      snapshot: runSnapshot({
+        active_barrier: {
+          barrier_id: "barrier-1",
+          completed: {
+            node_kind: "shell",
+            node_path: "/0",
+            result: null,
+            status: "succeeded",
+            user_id: "collect_context",
+          },
+          created_at: "2026-03-15T10:01:01.000Z",
+          frame_id: "root",
+          next: [
+            {
+              action: null,
+              cwd: null,
+              detail: "echo hi",
+              frame_id: "root",
+              model: null,
+              node_kind: "shell",
+              node_path: "/1",
+              prompt_preview: null,
+              user_id: "draft_shell",
+            },
+            {
+              action: "plan",
+              cwd: "/workspace",
+              detail: "codex plan",
+              frame_id: "root",
+              model: "gpt-5.4",
+              node_kind: "codex",
+              node_path: "/2",
+              prompt_preview: "Draft a plan",
+              user_id: "draft_plan",
+            },
+          ],
+          reason: "step_completed",
+        },
+        nodes: [completedNode],
+      }),
+    })
+
+    expect(state.completedOutputs["/0"]?.entries.at(-1)).toEqual({
+      key: null,
+      text: "auto-continue: Next: draft_shell [cmd], draft_plan [codex] · plan · gpt-5.4",
+      variant: "event",
+    })
+  })
+
+  test("applyRunEvent leaves manual barriers unchanged", () => {
+    const state = createTerminalUiState("manual")
+    const completedNode = {
+      attempt: 1,
+      duration_ms: 1200,
+      exit_code: 0,
+      finished_at: "2026-03-15T10:01:00.000Z",
+      node_kind: "shell",
+      node_path: "/0",
+      result: null,
+      started_at: "2026-03-15T10:00:00.000Z",
+      status: "succeeded" as const,
+      stderr: null,
+      stdout: "repo ready\n",
+      user_id: "collect_context",
+      waiting_for: null,
+    }
+    const completedSnapshot = runSnapshot({ nodes: [completedNode] })
+
+    applyRunEvent(state, { kind: "run_started", snapshot: completedSnapshot })
+    applyRunEvent(state, {
+      kind: "node_completed",
+      node: completedNode,
+      snapshot: completedSnapshot,
+    })
+    applyRunEvent(state, {
+      barrier: {
+        barrier_id: "barrier-1",
+        completed: {
+          node_kind: "shell",
+          node_path: "/0",
+          result: null,
+          status: "succeeded",
+          user_id: "collect_context",
+        },
+        created_at: "2026-03-15T10:01:01.000Z",
+        frame_id: "root",
+        next: [
+          {
+            action: null,
+            cwd: null,
+            detail: "echo hi",
+            frame_id: "root",
+            model: null,
+            node_kind: "shell",
+            node_path: "/1",
+            prompt_preview: null,
+            user_id: "draft_shell",
+          },
+        ],
+        reason: "step_completed",
+      },
+      kind: "barrier_reached",
+      snapshot: runSnapshot({ nodes: [completedNode] }),
+    })
+
+    expect(state.completedOutputs["/0"]?.entries).toEqual([])
+  })
+
   test("uses an explicit non-interactive control policy", async () => {
     const session = createNonInteractiveRunSession()
     const snapshot = runSnapshot()
@@ -428,6 +600,7 @@ describe("cli/run", () => {
     let interrupted = 0
 
     const session = createInkRunSession({
+      barrierMode: "manual",
       interrupt: () => {
         interrupted++
       },
@@ -467,6 +640,74 @@ describe("cli/run", () => {
     expect(unmounted).toBe(true)
   })
 
+  test("ink run session auto-continues barriers but still waits on interactions", async () => {
+    const workflow: WorkflowDocument = { id: "wf", steps: [] }
+    const terminal = {
+      stderr: { isTTY: true } as unknown as NodeJS.WriteStream,
+      stdin: { isTTY: true } as unknown as NodeJS.ReadStream,
+    }
+    let renderedTree: any
+
+    const session = createInkRunSession({
+      barrierMode: "auto_continue",
+      interrupt: () => {},
+      renderApp: ((tree: unknown) => {
+        renderedTree = tree
+        return { unmount: () => {} } as any
+      }) as any,
+      terminal,
+      workflow,
+    })
+
+    expect(
+      session.handle({
+        barrier: {
+          barrier_id: "barrier-1",
+          completed: null,
+          created_at: "2026-03-15T10:01:00.000Z",
+          frame_id: "root",
+          next: [],
+          reason: "run_started",
+        },
+        kind: "step_barrier",
+        signal: new AbortController().signal,
+        snapshot: runSnapshot(),
+      }),
+    ).toEqual({ action: "continue", kind: "step_barrier" })
+
+    const pending = session.handle({
+      interaction: {
+        created_at: "2026-03-15T10:01:00.000Z",
+        interaction_id: "approval-1",
+        kind: "approval",
+        node_path: "/1",
+        request: {
+          command: "git push",
+          cwd: "/app",
+          decisions: [
+            { intent: "approve", value: "approve" },
+            { intent: "deny", value: "deny" },
+          ],
+          itemId: "item-1",
+          kind: "approval",
+          message: "Ship the release",
+          requestId: "approval-1",
+          requestKind: "command_execution",
+          turnId: "turn-1",
+        },
+        user_id: "release",
+      },
+      kind: "interaction",
+      signal: new AbortController().signal,
+      snapshot: runSnapshot(),
+    })
+
+    renderedTree?.props.onResolveInteraction("approval-1", { decision: "approve", kind: "approval" })
+
+    await expect(pending).resolves.toEqual({ decision: "approve", kind: "approval" })
+    session.close()
+  })
+
   test("ink run session resolves empty user_input interactions immediately", async () => {
     const workflow: WorkflowDocument = { id: "wf", steps: [] }
     const terminal = {
@@ -475,6 +716,7 @@ describe("cli/run", () => {
     }
 
     const session = createInkRunSession({
+      barrierMode: "manual",
       interrupt: () => {},
       renderApp: (() => ({ unmount: () => {} })) as any,
       terminal,
@@ -518,6 +760,7 @@ describe("cli/run", () => {
     let renderedTree: any
 
     const session = createInkRunSession({
+      barrierMode: "manual",
       interrupt: () => {},
       renderApp: ((tree: unknown) => {
         renderedTree = tree
@@ -584,6 +827,7 @@ describe("cli/run", () => {
     let renderedTree: any
 
     const session = createInkRunSession({
+      barrierMode: "manual",
       interrupt: () => {},
       renderApp: ((tree: unknown) => {
         renderedTree = tree

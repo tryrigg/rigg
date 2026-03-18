@@ -37,6 +37,13 @@ describe("cli/bootstrap", () => {
     expect(result.stdout).not.toContain("Commands:\n  version\n")
   })
 
+  test("run help includes auto-continue", async () => {
+    const result = await runCli(["--help"])
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("run <workflow_id> [--input key=value] [--auto-continue]")
+  })
+
   test("version subcommand no longer prints the version", async () => {
     const result = await runCli(["version"])
 

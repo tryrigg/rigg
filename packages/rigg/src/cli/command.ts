@@ -277,7 +277,7 @@ export async function runValidateCommand(cwd: string, json = false): Promise<Com
 export async function runRunCommand(
   cwd: string,
   workflowId: string | undefined,
-  options: { inputs: string[] },
+  options: { autoContinue: boolean; inputs: string[] },
   dependencies: Partial<RunCommandDependencies> = {},
 ): Promise<CommandResult> {
   if (workflowId === undefined) {
@@ -303,12 +303,13 @@ export async function runRunCommand(
 
     if (!process.stdin.isTTY || !process.stderr.isTTY) {
       return failure([
-        "`rigg run` currently requires an interactive terminal (TTY stdin and stderr). Use an interactive terminal for now; an explicit non-interactive mode will be added separately.",
+        "`rigg run` requires a TTY because step barriers and workflow input prompts are interactive. Re-run in an interactive terminal. `--auto-continue` only works in an interactive terminal.",
       ])
     }
 
     const interrupt = deps.createInterruptController()
     const runSession = deps.createRunSession({
+      barrierMode: options.autoContinue ? "auto_continue" : "manual",
       interrupt: interrupt.interrupt,
       workflow,
     })

@@ -3,6 +3,7 @@ import { useMemo, useSyncExternalStore } from "react"
 
 import type { CodexInteractionResolution } from "../../codex/interaction"
 import type { WorkflowDocument } from "../../compile/schema"
+import type { BarrierApprovalMode } from "../run"
 import { BarrierPrompt } from "./barrier-prompt"
 import { Header } from "./header"
 import { InteractionPrompt } from "./interaction-prompt"
@@ -14,12 +15,14 @@ import { buildTree } from "./tree"
 import { WorkflowTree } from "./workflow-tree"
 
 export function App({
+  barrierMode,
   onInterrupt,
   onResolveBarrier,
   onResolveInteraction,
   store,
   workflow,
 }: {
+  barrierMode: BarrierApprovalMode
   onInterrupt: () => void
   onResolveBarrier: (barrierId: string, action: "abort" | "continue") => void
   onResolveInteraction: (interactionId: string, resolution: CodexInteractionResolution) => void
@@ -46,9 +49,9 @@ export function App({
 
   return (
     <Box flexDirection="column">
-      <Header snapshot={snapshot} elapsed={elapsed} stepProgress={stepProgress} />
+      <Header barrierMode={barrierMode} snapshot={snapshot} elapsed={elapsed} stepProgress={stepProgress} />
       <WorkflowTree entries={entries} liveOutputs={liveOutputs} completedOutputs={completedOutputs} />
-      {activeBarrier !== null && (
+      {activeBarrier !== null && barrierMode === "manual" && (
         <Box borderStyle="single" borderColor="yellow" marginTop={1} paddingX={1}>
           <Box flexDirection="column">
             <Text inverse color="yellow">

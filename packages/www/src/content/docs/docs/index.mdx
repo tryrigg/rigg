@@ -32,10 +32,8 @@ rigg run hello --auto-continue         # skip step barriers in the TTY UI
 
 ## Output
 
-On a TTY, `rigg run` opens a stateful terminal UI that switches between a live running view, a waiting view for barriers and interactions, and a final result view. During `codex` steps, the running view also shows live codex activity such as assistant text and tool progress. Use `continue` or `abort` at barriers, and use `Ctrl-C` to interrupt the active step.
+`rigg run` requires an interactive terminal. It opens a stateful terminal UI that switches between a live running view, a waiting view for barriers and interactions, and a final result view. During `codex` steps, the running view also shows live codex activity such as assistant text and tool progress. Use `continue` or `abort` at barriers, and use `Ctrl-C` to interrupt the active step.
 
-If you want to keep the TTY UI but skip step barriers, pass `--auto-continue`. This only auto-continues barriers; approvals, questions, and other input prompts still pause normally.
-
-Non-TTY execution is rejected. `rigg run` and `rigg run --auto-continue` both require an interactive terminal.
+With `--auto-continue`, step barriers advance automatically while approvals, questions, and other input prompts still pause normally.
 
 Run state is in-memory only; Rigg does not persist run history.

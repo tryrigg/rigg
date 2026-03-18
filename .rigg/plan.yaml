@@ -9,23 +9,68 @@ inputs:
     default: plan.md
 
 steps:
-  - id: context
+  - id: explore
     type: shell
+    env:
+      REQUIREMENTS: ${{ inputs.requirements }}
     with:
       command: |
-        echo "=== FILES ==="
-        find . -type f \
-          -not -path './.git/*' \
-          -not -path './node_modules/*' \
-          -not -path './dist/*' \
-          -not -path './.next/*' \
-          | sort | head -200
-        echo ""
-        echo "=== RECENT COMMITS ==="
-        git log --oneline -20
-        echo ""
-        echo "=== TIMESTAMP ==="
-        date -u '+%Y-%m-%d %H:%M UTC'
+        claude -p \
+          --model claude-opus-4-6 \
+          --append-system-prompt-file private/typescript-implementation-guide.md \
+          --tools "Read,Glob,Grep,Bash" \
+          --allowedTools "Read,Glob,Grep,Bash" \
+          --max-turns 15 \
+          --no-session-persistence \
+          --output-format text \
+          "You are a senior software architect preparing context for an implementation plan.
+
+        # Project: Rigg
+        - Language: TypeScript 5.9 (strict, erasableSyntaxOnly)
+        - Runtime: Bun 1.3.10
+        - Monorepo:
+          - packages/rigg — workflow engine CLI (React 19, Ink 6, Zod 4, YAML 2.8)
+          - packages/www — documentation site (Astro 6, Starlight)
+        - Test: bun test (table-driven, mock only at I/O boundaries)
+        - Format: Prettier (no semicolons, printWidth 120)
+        - CI: GitHub Actions
+
+        # Requirements
+        $REQUIREMENTS
+
+        # Task
+        Explore the codebase actively to gather ALL context needed to implement the requirements above.
+
+        1. Use Glob and Grep to find files related to the requirements
+        2. Read the actual source code of relevant modules, types, and tests
+        3. Map how the relevant code connects to the rest of the system
+        4. Find similar patterns and conventions already in the codebase
+        5. Check recent git history for related changes
+
+        # Output format
+        Produce ONLY this structured document. No preamble, no meta-commentary.
+
+        ### Architecture overview
+        How the relevant parts of the codebase are structured.
+
+        ### Relevant files
+        | Path | Purpose | Key exports/types |
+        |------|---------|-------------------|
+        Every file relevant to the implementation.
+
+        ### Existing patterns
+        Conventions and abstractions the codebase already uses.
+
+        ### Key type definitions
+        Relevant types copied verbatim from the source code.
+
+        ### Test patterns
+        How existing tests are structured in the relevant areas.
+
+        ### Constraints and gotchas
+        Anything discovered during exploration that the implementer needs to know.
+
+        Base everything on what you actually read from the codebase. No assumptions."
 
   - id: draft
     type: codex
@@ -51,8 +96,8 @@ steps:
         - Format: Prettier (no semicolons, printWidth 120)
         - CI: GitHub Actions
 
-        ## Codebase
-        ${{ steps.context.result }}
+        ## Codebase context (gathered by active codebase exploration)
+        ${{ steps.explore.result }}
 
         ## Implementation guide
         Read `private/typescript-implementation-guide.md` in full before drafting.
@@ -93,7 +138,7 @@ steps:
         Potential issues, trade-offs, or questions to resolve before starting.
 
         ## Rules
-        - Reference actual paths from the codebase listing above. Follow existing naming conventions for new files.
+        - Reference actual paths from the codebase context above. Follow existing naming conventions for new files.
         - Minimal scope — fewest files, simplest approach that satisfies the requirements.
         - Every step must be independently verifiable.
         - Do not propose abstractions the codebase does not already use.
@@ -103,36 +148,44 @@ steps:
           2. Pin the plan to that exact version (e.g. "install foo@3.2.1", not "install foo").
           3. Fetch and read the official documentation or migration guide for that version.
           4. Note the primary source URL in the plan so the implementer can verify.
-          The current time is shown in the TIMESTAMP section of the codebase context above — use it to judge whether search results are current.
           Do NOT rely on your training data for version numbers — always search live.
 
         REMINDER: Your entire response goes into a file as-is. No preamble. First line = "### 1. Summary".
 
   - id: critique
-    type: codex
+    type: shell
+    env:
+      PLAN: ${{ steps.draft.result }}
     with:
-      action: run
-      model: gpt-5.4
-      effort: medium
-      prompt: |
-        You are auditing an implementation plan for the Rigg project (TypeScript 5.9, Bun 1.3.10).
+      command: |
+        printf '%s' "$PLAN" | claude -p \
+          --model claude-opus-4-6 \
+          --append-system-prompt-file private/typescript-implementation-guide.md \
+          --tools "Read,Glob,Grep,Bash" \
+          --allowedTools "Read,Glob,Grep,Bash" \
+          --max-turns 10 \
+          --no-session-persistence \
+          --output-format text \
+          "You are auditing an implementation plan for the Rigg project (TypeScript 5.9, Bun 1.3.10).
 
-        Read `private/typescript-implementation-guide.md` for the project's coding standards.
+        The implementation plan is provided via stdin. Read it carefully.
 
         ## Target persona
-        The user of this feature is a senior/staff engineer who:
+        Senior/staff engineer who:
         - Runs Rigg workflows from the terminal as part of their daily coding loop
         - Expects CLI output to be scannable — no walls of text, no ambiguous states
         - Treats YAML workflow files as code: they should be readable, diffable, composable
         - Will hit edge cases fast — empty inputs, interrupted runs, large repos
-        - Values fast feedback loops: a 30-second workflow that fails clearly beats a 2-minute one that succeeds silently
-        - Has strong opinions on DX: error messages must be actionable, not "something went wrong"
+        - Values fast feedback loops
+        - Has strong opinions on DX: error messages must be actionable
 
-        ## Plan
-        ${{ steps.draft.result }}
+        ## Task
+        ACTIVELY VERIFY the plan against the actual codebase:
+        1. Use Glob to check that referenced file paths exist (or that parent dirs exist for new files)
+        2. Use Read to verify that types/functions mentioned in the plan actually exist in those files
+        3. Use Grep to confirm API signatures and patterns the plan depends on
 
-        ## Evaluation
-        Score each dimension PASS or FAIL with a one-line reason:
+        Then score each dimension PASS or FAIL with a one-line reason:
 
         **Implementation quality**
         1. **Paths** — All referenced file paths exist in the repo or follow its naming conventions for new files.
@@ -147,14 +200,14 @@ steps:
         8. **Versions** — Every new or upgraded package specifies an exact latest-stable version confirmed via live search, not a guess or range.
         9. **Primary sources** — Each dependency cites an official docs URL or migration guide for the pinned version.
 
-        **User experience (from the persona's perspective)**
+        **User experience (from the persona perspective)**
         10. **CLI output** — Will the user see clear, scannable feedback at each stage? No silent successes, no unstructured dumps.
         11. **Failure modes** — Are invalid inputs, missing files, and interrupted runs handled with actionable messages?
         12. **Workflow composability** — Does this change play well with existing .rigg workflows and not break the user's muscle memory?
 
         If all items PASS, respond with exactly: LGTM
 
-        Otherwise, list only the FAILing items with specific, actionable fixes. Be concise — one fix per item.
+        Otherwise, list only the FAILing items with specific, actionable fixes. Be concise — one fix per item."
 
   - id: finalize
     type: branch

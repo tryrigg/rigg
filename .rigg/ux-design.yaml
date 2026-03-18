@@ -1,0 +1,835 @@
+id: ux-design
+inputs:
+  requirements:
+    type: string
+    description: Requirements for the UX design
+  filename:
+    type: string
+    description: Output filename (written to private/<filename>)
+    default: ux-design.md
+
+steps:
+  - id: explore
+    type: shell
+    env:
+      REQUIREMENTS: ${{ inputs.requirements }}
+    with:
+      command: |
+        claude -p \
+          --model claude-opus-4-6 \
+          --tools "Read,Glob,Grep,Bash" \
+          --allowedTools "Read,Glob,Grep,Bash" \
+          --max-turns 15 \
+          --no-session-persistence \
+          --output-format text \
+          "You are a UX researcher and product designer preparing context for a CLI user experience design.
+
+        # Project: Rigg
+        - Language: TypeScript 5.9
+        - Runtime: Bun 1.3.10
+        - Monorepo:
+          - packages/rigg — workflow engine CLI (React 19, Ink 6, Zod 4, YAML 2.8)
+          - packages/www — documentation site (Astro 6, Starlight)
+
+        # Requirements
+        $REQUIREMENTS
+
+        # Task
+        Explore the codebase to gather ALL context needed for UX design — focusing on the user, the experience, and how the product communicates.
+
+        ## Persona research
+        1. Read the CLI entry point, README, docs site, and any user-facing help text to understand who uses Rigg
+        2. Trace the user's typical workflow: how they discover features, configure workflows, run them, interpret results
+        3. Identify what mental model the user needs to have — what concepts they must understand
+        4. Map concepts the user brings from tools they already use (git, docker, npm, make, CI systems)
+        5. Catalog Rigg-specific concepts — which are necessary, which could be replaced by familiar analogues?
+        6. Look for implicit persona signals: error message tone, feature complexity, documentation depth
+
+        ## Current UX audit
+        5. Read all Ink components and UI utilities — understand the visual language
+        6. Map the output patterns: spinners, progress indicators, tables, color usage, indentation, icons
+        7. Catalog error display patterns: format, information density, actionability
+        8. Analyze the interaction model: CLI flags, interactive prompts, streaming output, defaults
+        9. Check how state and progress are communicated during long-running operations
+
+        ## Information architecture
+        10. How are commands and workflows organized? How does the user navigate the feature space?
+        11. What is the discoverability model? (help text, docs, error hints)
+        12. How does the YAML workflow syntax map to user intent? Where is the gap?
+
+        ## Extensibility surface
+        13. What extension points exist today? (step types, plugins, custom commands)
+        14. How do users currently compose and reuse workflows?
+        15. Where are the natural seams for future features?
+
+        # Output format
+        Produce ONLY this structured document. No preamble.
+
+        ### Who uses Rigg
+        Concrete persona based on evidence from the codebase. Role, goals, technical level, workflow habits, frustrations.
+
+        ### User's mental model
+        What concepts the user holds in their head. What mapping between intent and action they maintain.
+        What concepts they bring from tools they already use (git, docker, npm, make, CI).
+        Which Rigg-specific concepts exist today — which are essential, which add unnecessary cognitive load?
+        Where the current design requires the user to think too hard.
+
+        ### Current UX vocabulary
+        The visual and interaction patterns the CLI already uses:
+        - Ink components inventory (what exists, how each is used)
+        - Color and formatting conventions
+        - Progress and state communication patterns
+        - Error display patterns (with examples from the codebase)
+        - Interactive vs non-interactive patterns
+
+        ### Information architecture
+        How features are organized, discovered, and navigated.
+        Where users might get lost or confused.
+
+        ### Extensibility surface
+        Current extension points and composition patterns.
+        Natural seams for future features.
+
+        ### Relevant files
+        | Path | UX role | Notes |
+        |------|---------|-------|
+        Every file relevant to the user experience.
+
+        ### Constraints and opportunities
+        UX constraints from the codebase. Opportunities for improvement.
+
+        Base everything on what you actually read. No assumptions."
+
+  # ── Round 1: Parallel initial designs ──────────────────────────────────
+
+  - id: initial_designs
+    type: parallel
+    branches:
+      - id: claude_branch
+        steps:
+          - id: claude_v0
+            type: shell
+            env:
+              CONTEXT: ${{ steps.explore.result }}
+              REQUIREMENTS: ${{ inputs.requirements }}
+            with:
+              command: |
+                claude -p \
+                  --model claude-opus-4-6 \
+                  --tools "Read,Glob,Grep" \
+                  --allowedTools "Read,Glob,Grep" \
+                  --max-turns 5 \
+                  --no-session-persistence \
+                  --output-format text \
+                  "You are a product designer specializing in developer tools and CLI experiences.
+                Your north star: 'Don't Make Me Think.' Every interaction obvious, every output scannable, every error actionable.
+
+                # Codebase context
+                $CONTEXT
+
+                # Requirements
+                $REQUIREMENTS
+
+                # Task
+                Create a comprehensive UX design from scratch.
+
+                ## Design approach
+                1. **Start from the PERSONA.** Who is this person? What concepts do they already carry from tools
+                   like git, npm, docker, CI systems? What mental models are already in their head? The design
+                   must build on what they know — every new concept you introduce is cognitive debt.
+                2. **Reuse familiar concepts.** Map features to concepts the user already understands from their
+                   existing toolkit. Prefer familiar terminology and patterns. If git calls it a 'branch', don't
+                   invent a new name. Rigg-specific vocabulary is a last resort — justify every new concept.
+                3. **Design for predictability.** If the user learns how one feature works, they should be able to
+                   predict how the next one works. Consistent patterns enable analogical reasoning: 'A works like
+                   X, so B should work like X too.' Surprises are bugs.
+                4. **Fewer concepts, more power.** Resist adding a specialized feature for every use case. Find the
+                   smallest set of composable primitives that covers multiple scenarios. One well-designed concept
+                   serving three use cases beats three dedicated features.
+                5. **Make every moment obvious.** At each step, there should be exactly one obvious next action.
+                   Defaults should be right 90% of the time. Errors tell the user exactly what to do next.
+
+                # Output format
+                Produce ONLY this structured document. No preamble, no meta-commentary.
+
+                ### Persona
+                Who this is designed for. Must be specific enough to make design decisions from:
+                - Role, technical level, daily workflow
+                - What they're trying to accomplish with this feature
+                - Their expectations (based on tools they already use: git, npm, docker, etc.)
+                - Their frustrations (what wastes their time or attention today)
+                - Their emotional state when they reach for this feature
+
+                ### Design principles
+                3-5 principles derived from the persona. Each must be:
+                - Actionable (you can test a design decision against it)
+                - Specific to this feature and this persona (not generic UX platitudes)
+                - Prioritized (when two principles conflict, which wins?)
+
+                ### Interaction flow
+                Complete step-by-step walkthrough:
+                - What the user types (exact commands, flags, arguments)
+                - What they see (exact terminal output in code blocks)
+                - What they think at each moment (should be 'obvious what to do next')
+                - Decision points and how smart defaults minimize them
+                - The zero-config experience vs the power-user experience
+
+                ### Output design
+                Exact format of every CLI output:
+                - Progress indicators (what information, what format, what timing)
+                - Success output (what the user needs to know, nothing more)
+                - Intermediate states (long-running operations)
+                All with concrete terminal output examples in code blocks.
+
+                ### Error design
+                Every error state with:
+                - When it occurs
+                - Exact error message (in a code block)
+                - Why it's phrased that way (what action it guides toward)
+                - Recovery path (exact commands to run)
+
+                ### Edge cases
+                | Scenario | Behavior | What the user sees |
+                |----------|----------|--------------------|
+                Empty input, large repos, interrupted runs, missing files, concurrent access,
+                partial state, first-time use, stale state.
+
+                ### Information architecture
+                How this feature fits into Rigg's structure:
+                - Command/subcommand placement and naming rationale
+                - Discoverability: how a new user finds this feature
+                - Composability: how this works with existing workflows
+                - Progressive disclosure: simple surface, depth available
+
+                ### Concept inventory
+                Every concept the user needs to know to use this feature:
+                | Concept | Familiar from | New to Rigg? | Justification if new |
+                |---------|--------------|-------------|---------------------|
+                Minimize new concepts. If the total exceeds 2 new concepts, reconsider the design.
+
+                ### Extensibility
+                How this design accommodates future growth through general primitives:
+                - What plugs in naturally without new concepts
+                - How existing concepts extend to cover future use cases
+                - Design boundaries (what would require a rethink)
+
+                ### Consistency
+                How this aligns with existing Rigg UX patterns.
+                Can a user who knows existing features predict how this one works?
+                Any intentional departures and the rationale."
+
+      - id: codex_branch
+        steps:
+          - id: codex_v0
+            type: codex
+            with:
+              action: plan
+              model: gpt-5.4
+              effort: high
+              prompt: |
+                You are a UX engineer who designs CLI developer tools with systematic rigor.
+                Your design philosophy: ruthless simplicity — remove everything that isn't essential, then make what's left obvious.
+
+                # Codebase context
+                ${{ steps.explore.result }}
+
+                # Requirements
+                ${{ inputs.requirements }}
+
+                # Task
+                Create a comprehensive UX design from scratch.
+
+                ## Design approach
+                1. **Build the PERSONA from evidence.** Don't invent a generic user. What does the documentation
+                   assume? What tools does this person already use daily (git, docker, npm, CI)? What concepts
+                   and vocabulary do they carry? Your design must extend their existing mental model, not replace it.
+                2. **Reuse the user's vocabulary.** Every concept must map to something the user already knows.
+                   Don't invent terminology when existing dev vocabulary works. Count the new concepts you
+                   introduce — if it's more than one, you're probably overdesigning.
+                3. **Design for analogical reasoning.** Patterns must be consistent enough that users can predict
+                   behavior. If `rigg run X` works a certain way, `rigg run Y` should work the same way. When
+                   the user thinks 'if A works like this, B should too' — they should be right.
+                4. **Minimize the concept surface.** Instead of a feature for each use case, find the smallest
+                   set of composable primitives. One mechanism serving three use cases > three specialized
+                   mechanisms. This is how extensibility works — general patterns accommodate future needs.
+                5. **Map the STATE MACHINE.** Every user interaction is a state machine. Make states, transitions,
+                   and outputs explicit. Ambiguous states = confused users. Progressive disclosure: start simple,
+                   reveal complexity only when needed.
+
+                CRITICAL: Your response is saved directly. Output ONLY the design document.
+                No preamble, no thinking, no meta-commentary. Start with "### Persona".
+
+                # Output format
+
+                ### Persona
+                Who this is designed for. Must be specific enough to make design decisions from:
+                - Role, technical level, daily workflow
+                - What they're trying to accomplish with this feature
+                - Their expectations (based on tools they already use: git, npm, docker, etc.)
+                - Their frustrations (what wastes their time or attention today)
+                - Their emotional state when they reach for this feature
+
+                ### Design principles
+                3-5 principles derived from the persona. Each must be:
+                - Actionable (you can test a design decision against it)
+                - Specific to this feature and this persona (not generic UX platitudes)
+                - Prioritized (when two principles conflict, which wins?)
+
+                ### Interaction flow
+                Complete step-by-step walkthrough:
+                - What the user types (exact commands, flags, arguments)
+                - What they see (exact terminal output in code blocks)
+                - What they think at each moment (should be 'obvious what to do next')
+                - Decision points and how smart defaults minimize them
+                - The zero-config experience vs the power-user experience
+
+                ### Output design
+                Exact format of every CLI output:
+                - Progress indicators (what information, what format, what timing)
+                - Success output (what the user needs to know, nothing more)
+                - Intermediate states (long-running operations)
+                All with concrete terminal output examples in code blocks.
+
+                ### Error design
+                Every error state with:
+                - When it occurs
+                - Exact error message (in a code block)
+                - Why it's phrased that way (what action it guides toward)
+                - Recovery path (exact commands to run)
+
+                ### Edge cases
+                | Scenario | Behavior | What the user sees |
+                |----------|----------|--------------------|
+                Empty input, large repos, interrupted runs, missing files, concurrent access,
+                partial state, first-time use, stale state.
+
+                ### Information architecture
+                How this feature fits into Rigg's structure:
+                - Command/subcommand placement and naming rationale
+                - Discoverability: how a new user finds this feature
+                - Composability: how this works with existing workflows
+                - Progressive disclosure: simple surface, depth available
+
+                ### Extensibility
+                How this design accommodates future growth:
+                - What plugs in naturally without UX changes
+                - Intentional seams for future features
+                - Design boundaries (what would require a rethink)
+
+                ### Consistency
+                How this aligns with existing Rigg UX patterns.
+                Any intentional departures and the rationale.
+    exports:
+      claude: ${{ steps.claude_v0.result }}
+      codex: ${{ steps.codex_v0.result }}
+
+  # ── Round 1: Cross-review ──────────────────────────────────────────────
+
+  - id: review_round1
+    type: parallel
+    branches:
+      - id: claude_r1
+        steps:
+          - id: r1_claude
+            type: shell
+            env:
+              TARGET_DESIGN: ${{ steps.initial_designs.result.codex }}
+              OWN_DESIGN: ${{ steps.initial_designs.result.claude }}
+              CONTEXT: ${{ steps.explore.result }}
+              REQUIREMENTS: ${{ inputs.requirements }}
+            with:
+              command: |
+                printf '%s' "$TARGET_DESIGN" | claude -p \
+                  --model claude-opus-4-6 \
+                  --tools "Read,Glob,Grep" \
+                  --allowedTools "Read,Glob,Grep" \
+                  --max-turns 5 \
+                  --no-session-persistence \
+                  --output-format text \
+                  "You are reviewing a UX design for a CLI developer tool.
+                The design to review is provided via stdin.
+
+                # Codebase context
+                $CONTEXT
+
+                # Requirements
+                $REQUIREMENTS
+
+                # Your own design (for comparison — be fair, not self-serving)
+                $OWN_DESIGN
+
+                # Review criteria
+                Score each dimension PASS or FAIL with a one-line reason.
+
+                **Persona and conceptual design**
+                1. **Persona specificity** — Concrete and evidence-based? Includes what the user already knows
+                   from other tools (git, docker, npm, CI)?
+                2. **Familiar vocabulary** — Does the design reuse concepts from the user's existing toolkit?
+                   Each new Rigg-specific concept must be justified. Unnecessary novel terminology fails.
+                3. **Predictability** — Are patterns consistent enough for analogical reasoning? If the user
+                   learns feature A, can they predict how feature B works?
+
+                **Interaction design**
+                4. **Happy path** — Most common use case is effortless? Zero unnecessary steps or decisions.
+                5. **Output clarity** — Are CLI outputs specific and example-driven?
+                   Vague descriptions like 'show progress' fail. Exact format with examples passes.
+                6. **Error actionability** — Every error tells the user what to DO, not just what went wrong.
+                   Include exact recovery commands.
+                7. **Edge case coverage** — Empty input, large repos, interrupted runs, missing files explicitly addressed.
+
+                **Architecture**
+                8. **Conceptual economy** — Does the design use the minimum number of concepts? Could specialized
+                   features be replaced by a more general primitive that covers multiple use cases?
+                9. **Consistency** — Matches existing Rigg CLI patterns? Enables analogical reasoning across features?
+                10. **Composability** — Plays well with existing workflows and not break muscle memory?
+
+                **Synthesis quality**
+                11. **Specificity** — Are decisions justified and concrete?
+                    Every output format, every error message must be exact, not described abstractly.
+
+                If all items PASS, respond with exactly: LGTM
+
+                Otherwise, list only FAILing items with specific, actionable fixes.
+                Be constructive — incorporate good ideas from your own design if they'd improve this one.
+                One fix per item. Be concise."
+
+      - id: codex_r1
+        steps:
+          - id: r1_codex
+            type: codex
+            with:
+              action: plan
+              model: gpt-5.4
+              effort: high
+              prompt: |
+                You are reviewing a UX design for a CLI developer tool.
+
+                # Design to review
+                ${{ steps.initial_designs.result.claude }}
+
+                # Codebase context
+                ${{ steps.explore.result }}
+
+                # Requirements
+                ${{ inputs.requirements }}
+
+                # Your own design (for comparison — be fair, not self-serving)
+                ${{ steps.initial_designs.result.codex }}
+
+                # Review criteria
+                Score each dimension PASS or FAIL with a one-line reason.
+
+                **Persona and conceptual design**
+                1. **Persona specificity** — Concrete and evidence-based? Includes what the user already knows
+                   from other tools (git, docker, npm, CI)?
+                2. **Familiar vocabulary** — Does the design reuse concepts from the user's existing toolkit?
+                   Each new Rigg-specific concept must be justified. Unnecessary novel terminology fails.
+                3. **Predictability** — Are patterns consistent enough for analogical reasoning? If the user
+                   learns feature A, can they predict how feature B works?
+
+                **Interaction design**
+                4. **Happy path** — Most common use case is effortless? Zero unnecessary steps or decisions.
+                5. **Output clarity** — Are CLI outputs specific and example-driven?
+                   Vague descriptions like 'show progress' fail. Exact format with examples passes.
+                6. **Error actionability** — Every error tells the user what to DO, not just what went wrong.
+                   Include exact recovery commands.
+                7. **Edge case coverage** — Empty input, large repos, interrupted runs, missing files explicitly addressed.
+
+                **Architecture**
+                8. **Conceptual economy** — Does the design use the minimum number of concepts? Could specialized
+                   features be replaced by a more general primitive that covers multiple use cases?
+                9. **Consistency** — Matches existing Rigg CLI patterns? Enables analogical reasoning across features?
+                10. **Composability** — Plays well with existing workflows and not break muscle memory?
+
+                **Synthesis quality**
+                11. **Specificity** — Are decisions justified and concrete?
+                    Every output format, every error message must be exact, not described abstractly.
+
+                CRITICAL: Output ONLY the review. No preamble.
+
+                If all items PASS, respond with exactly: LGTM
+
+                Otherwise, list only FAILing items with specific, actionable fixes.
+                Be constructive — incorporate good ideas from your own design if they'd improve this one.
+                One fix per item. Be concise.
+    exports:
+      claude_review: ${{ steps.r1_claude.result }}
+      codex_review: ${{ steps.r1_codex.result }}
+
+  # ── Round 1: Convergence check ─────────────────────────────────────────
+
+  - id: round1_check
+    type: shell
+    env:
+      CLAUDE_REVIEW: ${{ steps.review_round1.result.claude_review }}
+      CODEX_REVIEW: ${{ steps.review_round1.result.codex_review }}
+    with:
+      command: |
+        claude_lgtm=false
+        codex_lgtm=false
+        echo "$CLAUDE_REVIEW" | grep -q "LGTM" && claude_lgtm=true
+        echo "$CODEX_REVIEW" | grep -q "LGTM" && codex_lgtm=true
+        if [ "$claude_lgtm" = true ] && [ "$codex_lgtm" = true ]; then
+          echo "CONVERGED"
+        else
+          echo "CONTINUE"
+        fi
+
+  # ── Round 2: Revise + re-review, or pass through if converged ──────────
+
+  - id: round2
+    type: branch
+    cases:
+      - if: ${{ contains(steps.round1_check.result, 'CONVERGED') }}
+        steps: []
+        exports:
+          claude_design: ${{ steps.initial_designs.result.claude }}
+          codex_design: ${{ steps.initial_designs.result.codex }}
+          claude_review: ${{ steps.review_round1.result.claude_review }}
+          codex_review: ${{ steps.review_round1.result.codex_review }}
+
+      - else:
+        steps:
+          - id: revisions
+            type: parallel
+            branches:
+              - id: claude_rev
+                steps:
+                  - id: claude_v1
+                    type: shell
+                    env:
+                      OWN_DESIGN: ${{ steps.initial_designs.result.claude }}
+                      PEER_FEEDBACK: ${{ steps.review_round1.result.codex_review }}
+                      PEER_DESIGN: ${{ steps.initial_designs.result.codex }}
+                      CONTEXT: ${{ steps.explore.result }}
+                      REQUIREMENTS: ${{ inputs.requirements }}
+                    with:
+                      command: |
+                        printf '%s' "$OWN_DESIGN" | claude -p \
+                          --model claude-opus-4-6 \
+                          --tools "Read,Glob,Grep" \
+                          --allowedTools "Read,Glob,Grep" \
+                          --max-turns 5 \
+                          --no-session-persistence \
+                          --output-format text \
+                          "You are revising your UX design based on peer review feedback.
+                        Your original design is provided via stdin.
+
+                        # Codebase context
+                        $CONTEXT
+
+                        # Requirements
+                        $REQUIREMENTS
+
+                        # Peer feedback (address every FAIL item)
+                        $PEER_FEEDBACK
+
+                        # Peer's design (steal good ideas if they'd improve yours)
+                        $PEER_DESIGN
+
+                        # Task
+                        Revise your design to address every FAILing item from the peer review.
+                        Preserve everything that wasn't flagged — this is a targeted revision, not a rewrite.
+                        If the peer's design has better solutions for flagged items, adopt them.
+
+                        Output the COMPLETE revised design in the same format as the original.
+                        No preamble. Start with '### Persona'."
+
+              - id: codex_rev
+                steps:
+                  - id: codex_v1
+                    type: codex
+                    with:
+                      action: plan
+                      model: gpt-5.4
+                      effort: high
+                      prompt: |
+                        You are revising your UX design based on peer review feedback.
+
+                        # Your original design
+                        ${{ steps.initial_designs.result.codex }}
+
+                        # Codebase context
+                        ${{ steps.explore.result }}
+
+                        # Requirements
+                        ${{ inputs.requirements }}
+
+                        # Peer feedback (address every FAIL item)
+                        ${{ steps.review_round1.result.claude_review }}
+
+                        # Peer's design (steal good ideas if they'd improve yours)
+                        ${{ steps.initial_designs.result.claude }}
+
+                        # Task
+                        Revise your design to address every FAILing item from the peer review.
+                        Preserve everything that wasn't flagged — this is a targeted revision, not a rewrite.
+                        If the peer's design has better solutions for flagged items, adopt them.
+
+                        CRITICAL: Output the COMPLETE revised design in the same format as the original.
+                        No preamble. Start with "### Persona".
+            exports:
+              claude: ${{ steps.claude_v1.result }}
+              codex: ${{ steps.codex_v1.result }}
+
+          - id: review_r2
+            type: parallel
+            branches:
+              - id: claude_r2
+                steps:
+                  - id: r2_claude
+                    type: shell
+                    env:
+                      TARGET_DESIGN: ${{ steps.revisions.result.codex }}
+                      OWN_DESIGN: ${{ steps.revisions.result.claude }}
+                      CONTEXT: ${{ steps.explore.result }}
+                      REQUIREMENTS: ${{ inputs.requirements }}
+                    with:
+                      command: |
+                        printf '%s' "$TARGET_DESIGN" | claude -p \
+                          --model claude-opus-4-6 \
+                          --tools "Read,Glob,Grep" \
+                          --allowedTools "Read,Glob,Grep" \
+                          --max-turns 5 \
+                          --no-session-persistence \
+                          --output-format text \
+                          "You are reviewing a REVISED UX design for a CLI developer tool.
+                        The design to review is provided via stdin.
+
+                        # Codebase context
+                        $CONTEXT
+
+                        # Requirements
+                        $REQUIREMENTS
+
+                        # Your own revised design (for comparison — be fair, not self-serving)
+                        $OWN_DESIGN
+
+                        # Review criteria
+                        Score each dimension PASS or FAIL with a one-line reason.
+
+                        **Persona and conceptual design**
+                        1. **Persona specificity** — Concrete, evidence-based, includes user's existing knowledge?
+                        2. **Familiar vocabulary** — Reuses concepts from user's toolkit? New concepts justified?
+                        3. **Predictability** — Patterns consistent enough for analogical reasoning?
+
+                        **Interaction design**
+                        4. **Happy path** — Most common use case is effortless?
+                        5. **Output clarity** — Specific and example-driven?
+                        6. **Error actionability** — Tells user what to DO?
+                        7. **Edge case coverage** — Explicitly addressed?
+
+                        **Architecture**
+                        8. **Conceptual economy** — Minimum concepts? General primitives over specialized features?
+                        9. **Consistency** — Matches existing patterns? Enables cross-feature prediction?
+                        10. **Composability** — Plays well with existing workflows?
+
+                        **Synthesis quality**
+                        11. **Specificity** — Decisions justified and concrete?
+
+                        If all items PASS, respond with exactly: LGTM
+
+                        Otherwise, list only FAILing items with specific, actionable fixes.
+                        One fix per item. Be concise."
+
+              - id: codex_r2
+                steps:
+                  - id: r2_codex
+                    type: codex
+                    with:
+                      action: plan
+                      model: gpt-5.4
+                      effort: high
+                      prompt: |
+                        You are reviewing a REVISED UX design for a CLI developer tool.
+
+                        # Design to review
+                        ${{ steps.revisions.result.claude }}
+
+                        # Codebase context
+                        ${{ steps.explore.result }}
+
+                        # Requirements
+                        ${{ inputs.requirements }}
+
+                        # Your own revised design (for comparison — be fair, not self-serving)
+                        ${{ steps.revisions.result.codex }}
+
+                        # Review criteria
+                        Score each dimension PASS or FAIL with a one-line reason.
+
+                        **Persona and conceptual design**
+                        1. **Persona specificity** — Concrete, evidence-based, includes user's existing knowledge?
+                        2. **Familiar vocabulary** — Reuses concepts from user's toolkit? New concepts justified?
+                        3. **Predictability** — Patterns consistent enough for analogical reasoning?
+
+                        **Interaction design**
+                        4. **Happy path** — Most common use case is effortless?
+                        5. **Output clarity** — Specific and example-driven?
+                        6. **Error actionability** — Tells user what to DO?
+                        7. **Edge case coverage** — Explicitly addressed?
+
+                        **Architecture**
+                        8. **Conceptual economy** — Minimum concepts? General primitives over specialized features?
+                        9. **Consistency** — Matches existing patterns? Enables cross-feature prediction?
+                        10. **Composability** — Plays well with existing workflows?
+
+                        **Synthesis quality**
+                        11. **Specificity** — Decisions justified and concrete?
+
+                        CRITICAL: Output ONLY the review. No preamble.
+
+                        If all items PASS, respond with exactly: LGTM
+
+                        Otherwise, list only FAILing items with specific, actionable fixes.
+                        One fix per item. Be concise.
+            exports:
+              claude_review: ${{ steps.r2_claude.result }}
+              codex_review: ${{ steps.r2_codex.result }}
+
+        exports:
+          claude_design: ${{ steps.revisions.result.claude }}
+          codex_design: ${{ steps.revisions.result.codex }}
+          claude_review: ${{ steps.review_r2.result.claude_review }}
+          codex_review: ${{ steps.review_r2.result.codex_review }}
+
+  # ── Synthesize: merge best ideas into final design ─────────────────────
+
+  - id: synthesize
+    type: shell
+    env:
+      CLAUDE_DESIGN: ${{ steps.round2.result.claude_design }}
+      CODEX_DESIGN: ${{ steps.round2.result.codex_design }}
+      CLAUDE_REVIEW: ${{ steps.round2.result.claude_review }}
+      CODEX_REVIEW: ${{ steps.round2.result.codex_review }}
+      CONTEXT: ${{ steps.explore.result }}
+      REQUIREMENTS: ${{ inputs.requirements }}
+    with:
+      command: |
+        claude -p \
+          --model claude-opus-4-6 \
+          --tools "Read,Glob,Grep" \
+          --allowedTools "Read,Glob,Grep" \
+          --max-turns 5 \
+          --no-session-persistence \
+          --output-format text \
+          "You are a principal product designer creating the definitive UX design document.
+
+        Two AI models independently designed the user experience, then reviewed each other's work
+        through cross-review iterations. Your job: synthesize the BEST ideas from both into a single,
+        authoritative design.
+
+        # Codebase context
+        $CONTEXT
+
+        # Requirements
+        $REQUIREMENTS
+
+        # Claude's latest design
+        $CLAUDE_DESIGN
+
+        # Codex's latest design
+        $CODEX_DESIGN
+
+        # Claude's review of Codex's design
+        $CLAUDE_REVIEW
+
+        # Codex's review of Claude's design
+        $CODEX_REVIEW
+
+        # Synthesis rules
+        1. Take the strongest elements from each design — this is curating, not averaging
+        2. When designs conflict, choose what's best for the USER (not what's easier to implement)
+        3. Nothing valuable from either design should be lost
+        4. The result must feel like one coherent vision, not a Frankenstein of two
+        5. If both reviews flagged the same issue, it's definitely real — make sure it's resolved
+        6. If one model's persona analysis was deeper, use that as the foundation
+        7. Concrete beats abstract — prefer the design with more specific output examples
+        8. Prefer the design that reuses more familiar concepts from the user's existing toolkit
+        9. Prefer the design with fewer total concepts — general primitives over specialized features
+        10. Ensure patterns are consistent enough that learning one feature predicts the next
+
+        CRITICAL: Your response is saved directly to a file. Output ONLY the design document.
+        No preamble, no meta-commentary. Start with '### 1. Persona'.
+
+        # Output format
+
+        ### 1. Persona
+        The definitive user persona. Specific, evidence-based, actionable.
+        - Role, technical level, daily workflow
+        - Goals and motivations
+        - Expectations (from tools they already use)
+        - Frustrations and pain points
+        - Emotional state when reaching for this feature
+
+        ### 2. Design principles
+        3-5 principles that guided every decision below.
+        Specific to this feature and this persona. Prioritized for conflict resolution.
+
+        ### 3. Interaction flow
+        The complete experience, step by step:
+        - What the user types (exact commands)
+        - What they see (exact terminal output in code blocks)
+        - What they think at each moment
+        - Decision points and how defaults eliminate them
+        - Zero-config experience vs power-user paths
+
+        ### 4. Output design
+        Exact format for every CLI output:
+        - Progress indicators (format, timing, density)
+        - Success output (what, how, where)
+        - Intermediate states (long-running operations)
+        All with concrete terminal output examples in code blocks.
+
+        ### 5. Error design
+        Complete error catalog:
+        | Trigger | Message | Rationale | Recovery |
+        |---------|---------|-----------|----------|
+        Every error is actionable. The user never wonders 'what do I do now?'
+
+        ### 6. Edge cases
+        | Scenario | Behavior | Output |
+        |----------|----------|--------|
+        Empty input, large repos, interrupted runs, missing files, concurrent access,
+        partial state, first-time use, stale state.
+
+        ### 7. Information architecture
+        How this feature fits into Rigg's structure:
+        - Command placement and naming
+        - Discoverability path for new users
+        - Composability with existing workflows
+        - Progressive disclosure strategy
+
+        ### 8. Concept inventory
+        Every concept the user needs to know:
+        | Concept | Familiar from | New to Rigg? | Justification if new |
+        |---------|--------------|-------------|---------------------|
+        Minimize new concepts. General primitives over specialized features.
+
+        ### 9. Extensibility
+        How this design grows through general primitives:
+        - What plugs in naturally without new concepts
+        - How existing concepts extend to cover future use cases
+        - Design boundaries and what would require a rethink
+
+        ### 10. Consistency
+        How this aligns with existing Rigg UX patterns.
+        Can a user who knows existing features predict how this one works?
+        Any intentional departures and the rationale."
+
+  - id: write_output
+    type: write_file
+    with:
+      path: private/${{ inputs.filename }}
+      content: ${{ steps.synthesize.result }}
+
+  - id: strip_preamble
+    type: shell
+    env:
+      TARGET: private/${{ inputs.filename }}
+    with:
+      command: |
+        if grep -q '^### 1\. Persona' "$TARGET"; then
+          sed -n '/^### 1\. Persona/,$p' "$TARGET" > "$TARGET.tmp" && mv "$TARGET.tmp" "$TARGET"
+        fi
+      result: none

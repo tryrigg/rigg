@@ -3,16 +3,28 @@ inputs:
   requirements:
     type: string
     description: Requirements for the implementation plan
+  ux_design:
+    type: string
+    description: Path to the UX design document (from ux-design workflow)
+    default: private/ux-design.md
   filename:
     type: string
     description: Output filename (written to private/<filename>)
     default: plan.md
 
 steps:
+  - id: read_ux
+    type: shell
+    env:
+      UX_PATH: ${{ inputs.ux_design }}
+    with:
+      command: cat "$UX_PATH"
+
   - id: explore
     type: shell
     env:
       REQUIREMENTS: ${{ inputs.requirements }}
+      UX_DESIGN: ${{ steps.read_ux.result }}
     with:
       command: |
         claude -p \
@@ -23,7 +35,8 @@ steps:
           --max-turns 15 \
           --no-session-persistence \
           --output-format text \
-          "You are a senior software architect and product engineer preparing context for an implementation plan.
+          "You are a senior software architect preparing implementation context.
+        You have a finalized UX design — your job is to find the code that needs to change to realize it.
 
         # Project: Rigg
         - Language: TypeScript 5.9 (strict, erasableSyntaxOnly)
@@ -38,47 +51,40 @@ steps:
         # Requirements
         $REQUIREMENTS
 
+        # UX design (already finalized — implementation must match this)
+        $UX_DESIGN
+
         # Task
-        Explore the codebase to gather ALL context needed — both implementation AND product/UX.
+        Explore the codebase to gather ALL implementation context needed to realize the UX design above.
+        Do NOT redesign the UX — focus entirely on HOW to build it.
 
         ## Implementation exploration
-        1. Use Glob and Grep to find files related to the requirements
+        1. Use Glob and Grep to find files related to the requirements and the UX design
         2. Read the actual source code of relevant modules, types, and tests
         3. Map how the relevant code connects to the rest of the system
         4. Find similar patterns and conventions already in the codebase
         5. Check recent git history for related changes
-
-        ## Product and UX exploration
-        6. Read the CLI entry point, command definitions, and Ink components to understand the user-facing surface
-        7. Analyze how Rigg currently communicates with the user: progress indicators, success/error output, formatting conventions
-        8. Trace the user journey through features related to the requirements — what does the user see, type, and expect at each step?
-        9. Read existing error messages and help text to understand the tone and information density
-        10. Check the docs site (packages/www) for how this feature area is documented or would need to be
+        6. Identify which existing Ink components, utilities, and abstractions can be reused
+        7. Check what types and schemas already exist that the implementation should extend
 
         # Output format
         Produce ONLY this structured document. No preamble, no meta-commentary.
 
-        ### Product context
-        What Rigg is, who uses it, and how the requirements fit into the user's workflow.
-        What is the user trying to accomplish? What do they see today?
-
-        ### UI and UX patterns
-        How the CLI presents information to the user:
-        - Ink components used (spinners, tables, progress bars, etc.)
-        - Output formatting conventions (colors, icons, indentation)
-        - Error display patterns (how errors are shown, what information is included)
-        - Interaction model (flags, prompts, streaming output)
-
         ### Architecture overview
         How the relevant parts of the codebase are structured.
+        Which modules and layers are involved in implementing the UX design.
 
         ### Relevant files
         | Path | Purpose | Key exports/types |
         |------|---------|-------------------|
-        Every file relevant to the implementation, including UI components.
+        Every file relevant to the implementation.
 
         ### Existing patterns
-        Conventions and abstractions the codebase already uses.
+        Conventions and abstractions the codebase already uses that the implementation should follow.
+
+        ### Reusable components
+        Existing Ink components, utilities, and abstractions that can be reused or extended.
+        For each, note the file path, current behavior, and how it maps to the UX design.
 
         ### Key type definitions
         Relevant types copied verbatim from the source code.
@@ -99,6 +105,7 @@ steps:
       effort: high
       prompt: |
         You are a senior software architect creating an implementation plan.
+        A UX design has already been finalized — your job is to plan HOW to build it, not WHAT to build.
 
         CRITICAL: Your response is saved directly to a markdown file. Output ONLY the plan.
         No investigation notes, no thinking, no preamble. Start with "### 1. Summary".
@@ -114,6 +121,9 @@ steps:
         - Test: bun test (table-driven, mock only at I/O boundaries)
         - Format: Prettier (no semicolons, printWidth 120)
         - CI: GitHub Actions
+
+        ## UX design (finalized — implementation must match this exactly)
+        ${{ steps.read_ux.result }}
 
         ## Codebase context (gathered by active codebase exploration)
         ${{ steps.explore.result }}
@@ -133,44 +143,41 @@ steps:
         ${{ inputs.requirements }}
 
         ## Task
-        Produce an implementation plan in this exact structure:
+        Produce an implementation plan that realizes the UX design above. The UX design is the spec —
+        the plan explains how to build it in code.
 
         ### 1. Summary
-        What this change does and why. One paragraph.
+        What this change does and why. One paragraph. Reference the UX design as the spec.
 
-        ### 2. User experience design
-        How this change affects what the user sees, types, and feels. Must include:
-        - **Interaction flow** — Step-by-step: what the user does and what they see at each point
-        - **Output design** — Exact format of CLI output (progress, results, errors). Be specific: show example output.
-        - **Error states** — Every error the user could hit, with the exact message they should see. Messages must be actionable (tell the user what to do, not just what went wrong).
-        - **Edge cases** — Empty input, large repos, interrupted runs, missing files — what happens?
-        - **Consistency** — How this fits with existing Rigg CLI patterns (refer to the UX patterns from codebase context).
-
-        ### 3. Files
+        ### 2. Files
         | Path | Action | Purpose |
         |------|--------|---------|
         Every file to create, modify, or delete.
 
-        ### 4. Implementation steps
+        ### 3. Implementation steps
         Numbered list. Each step MUST include:
         - Concrete action (e.g. "Add type WorkflowResult to packages/rigg/src/compile/schema.ts")
         - Target file path(s)
         - Key type signatures or data shapes being introduced
+        - How this step connects to the UX design (which interaction, output, or error state it implements)
         - Verification command (`bun test <path>`, `bunx tsc --noEmit`, or what to manually check)
 
-        ### 5. Testing strategy
+        ### 4. Testing strategy
         Test files to create or update. Specific cases to cover.
-        Include UX-relevant test cases: error message content, output formatting, edge case behavior.
+        Include tests that verify UX contract: error message content, output formatting, edge case behavior
+        as specified in the UX design.
 
-        ### 6. Risks and open questions
+        ### 5. Risks and open questions
         Potential issues, trade-offs, or questions to resolve before starting.
 
         ## Rules
         - Reference actual paths from the codebase context above. Follow existing naming conventions for new files.
-        - Minimal scope — fewest files, simplest approach that satisfies the requirements.
+        - Minimal scope — fewest files, simplest approach that satisfies the UX design.
         - Every step must be independently verifiable.
         - Do not propose abstractions the codebase does not already use.
         - Do not propose config, env vars, or feature flags unless the requirements demand them.
+        - Implementation must match the UX design exactly: same CLI output format, same error messages,
+          same interaction flow, same edge case behavior. Do not deviate.
         - **External dependencies**: If the plan introduces a new package or upgrades an existing one, you MUST:
           1. Search the web for the latest stable release of that package (npm registry, GitHub releases, or official site).
           2. Pin the plan to that exact version (e.g. "install foo@3.2.1", not "install foo").
@@ -184,6 +191,7 @@ steps:
     type: shell
     env:
       PLAN: ${{ steps.draft.result }}
+      UX_DESIGN: ${{ steps.read_ux.result }}
     with:
       command: |
         printf '%s' "$PLAN" | claude -p \
@@ -198,14 +206,8 @@ steps:
 
         The implementation plan is provided via stdin. Read it carefully.
 
-        ## Target persona
-        Senior/staff engineer who:
-        - Runs Rigg workflows from the terminal as part of their daily coding loop
-        - Expects CLI output to be scannable — no walls of text, no ambiguous states
-        - Treats YAML workflow files as code: they should be readable, diffable, composable
-        - Will hit edge cases fast — empty inputs, interrupted runs, large repos
-        - Values fast feedback loops
-        - Has strong opinions on DX: error messages must be actionable
+        ## UX design (the spec that the plan must implement)
+        $UX_DESIGN
 
         ## Task
         ACTIVELY VERIFY the plan against the actual codebase:
@@ -218,7 +220,7 @@ steps:
         **Implementation quality**
         1. **Paths** — All referenced file paths exist in the repo or follow its naming conventions for new files.
         2. **Ordering** — Steps respect dependencies; no step requires output of a later step.
-        3. **Completeness** — No missing steps to fully satisfy the requirements.
+        3. **Completeness** — No missing steps to fully realize the UX design.
         4. **Type design** — Proposed types conform to the implementation guide (discriminated unions, Zod-first, no enum).
         5. **Error handling** — Error paths addressed at system boundaries per the guide.
         6. **Tests** — Proposed tests are sufficient and follow bun test patterns (table-driven, no unnecessary mocks).
@@ -228,13 +230,11 @@ steps:
         8. **Versions** — Every new or upgraded package specifies an exact latest-stable version confirmed via live search, not a guess or range.
         9. **Primary sources** — Each dependency cites an official docs URL or migration guide for the pinned version.
 
-        **User experience (from the persona perspective)**
-        10. **UX design present** — Does the plan include a concrete user experience design (section 2)? Not just implementation, but what the user sees and feels.
-        11. **Output design** — Are CLI outputs specific and example-driven? Vague descriptions like 'show progress' fail; exact output format with examples passes.
-        12. **Error messages** — Every error state has an actionable message. Read existing error patterns in the codebase to verify consistency.
-        13. **Edge cases** — Empty input, large repos, interrupted runs, missing files — are they explicitly addressed?
-        14. **Consistency** — Does the UX match existing Rigg CLI patterns? Check actual Ink components and output conventions in the codebase.
-        15. **Workflow composability** — Does this change play well with existing .rigg workflows and not break the user's muscle memory?
+        **UX design fidelity**
+        10. **Output format** — Does the plan implement the exact CLI output format specified in the UX design? Compare output examples.
+        11. **Error messages** — Does the plan implement every error message from the UX design verbatim?
+        12. **Edge cases** — Does the plan handle every edge case specified in the UX design?
+        13. **Interaction flow** — Does the plan implement the complete interaction flow from the UX design? No steps missing?
 
         If all items PASS, respond with exactly: LGTM
 
@@ -299,7 +299,7 @@ steps:
                    - Specific type signatures, data shapes, and code-level details
                 3. For each FAILing item, make the minimum edit that resolves it. Do not rewrite surrounding content.
                 4. Do not add scope, features, or steps beyond what the findings require.
-                5. Keep the same structure: Summary → User experience design → Files → Implementation steps → Testing strategy → Risks.
+                5. Keep the same structure: Summary → Files → Implementation steps → Testing strategy → Risks.
                 6. If the original plan has N implementation steps and only step 3 was flagged, the output must still have all N steps (with step 3 revised).
 
                 REMINDER: Your entire response goes into a file as-is. No preamble. First line = "### 1. Summary".

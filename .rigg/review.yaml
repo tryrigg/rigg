@@ -54,6 +54,46 @@ steps:
             2. `bun run check`
             3. `bun test`
 
+      - id: validate
+        if: ${{ len(steps.review.result.findings) > 0 }}
+        type: shell
+        env:
+          FINDINGS: ${{ toJSON(steps.review.result) }}
+        with:
+          command: |
+            git diff | claude -p \
+              --model claude-opus-4-6 \
+              --append-system-prompt-file private/typescript-implementation-guide.md \
+              --tools "Read,Glob,Grep,Bash,Edit" \
+              --allowedTools "Read,Glob,Grep,Bash,Edit" \
+              --max-turns 10 \
+              --no-session-persistence \
+              --output-format text \
+              "You are a senior engineer validating automated code review fixes.
+
+            The diff of uncommitted changes is provided via stdin.
+
+            ## Original findings
+            $FINDINGS
+
+            ## Task
+            1. Read each changed file in full to see the fix in context
+            2. For each fix, verify:
+               - Does it address the ROOT CAUSE, not just the symptom?
+               - Is it a band-aid? (as any, eslint-disable, suppress warning, empty catch, TODO/FIXME deferral)
+               - Does it conform to the TypeScript implementation guide?
+               - Could it introduce regressions?
+            3. If any fix is insufficient, use Edit to correct it with a proper root-cause fix
+            4. After making any corrections, run in order and fix errors:
+               - bun run format
+               - bun run check
+               - bun test
+
+            ## Output
+            Brief validation result:
+            - APPROVED (all fixes sound) or CORRECTED (improved N fixes)
+            - One-line summary per fix evaluated"
+
       - id: commit
         if: ${{ len(steps.review.result.findings) > 0 }}
         type: shell
@@ -61,6 +101,55 @@ steps:
           command: |
             git add -A
             if ! git diff --cached --quiet; then
-              git commit -m "fix"
+              git commit -m "fix: review remediation (iteration ${{ run.iteration }})"
             fi
           result: none
+
+  - id: report
+    type: shell
+    with:
+      command: |
+        if git diff --quiet main...HEAD 2>/dev/null; then
+          echo "No changes needed. All code passed review."
+          exit 0
+        fi
+        {
+          echo "=== COMMITS ==="
+          git log main..HEAD --oneline
+          echo ""
+          echo "=== DIFF ==="
+          git diff main...HEAD
+        } | claude -p \
+          --model claude-opus-4-6 \
+          --append-system-prompt-file private/typescript-implementation-guide.md \
+          --tools "Read,Glob,Grep" \
+          --allowedTools "Read,Glob,Grep" \
+          --max-turns 5 \
+          --no-session-persistence \
+          --output-format text \
+          "You are a senior engineer summarizing a code review remediation cycle.
+
+        The git log and full diff (against main) are provided via stdin.
+
+        ## Task
+        Read the changed files if you need more context beyond the diff.
+
+        Produce a concise report:
+
+        ### Review Summary
+        - Iterations completed
+        - Total files changed
+
+        ### Changes
+        | Finding | Root Cause | Fix Applied | File(s) |
+        |---------|-----------|-------------|---------|
+        For each distinct fix, explain WHAT was found and WHY it was changed.
+
+        ### Validation Notes
+        Note any fixes that were corrected during validation (band-aids replaced with root-cause fixes).
+
+        ### Remaining Risks
+        Flag anything that looks incomplete, fragile, or worth watching.
+        If everything looks clean, say so.
+
+        Be concise. No preamble."

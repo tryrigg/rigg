@@ -99,14 +99,12 @@ steps:
 
         Base everything on what you actually read. No assumptions."
 
-  # ── Round 1: Parallel initial designs ──────────────────────────────────
-
-  - id: initial_designs
+  - id: designs
     type: parallel
     branches:
       - id: claude_branch
         steps:
-          - id: claude_v0
+          - id: claude_design
             type: shell
             env:
               CONTEXT: ${{ steps.explore.result }}
@@ -218,7 +216,7 @@ steps:
 
       - id: codex_branch
         steps:
-          - id: codex_v0
+          - id: codex_design
             type: codex
             with:
               action: plan
@@ -318,385 +316,14 @@ steps:
                 How this aligns with existing Rigg UX patterns.
                 Any intentional departures and the rationale.
     exports:
-      claude: ${{ steps.claude_v0.result }}
-      codex: ${{ steps.codex_v0.result }}
-
-  # ── Round 1: Cross-review ──────────────────────────────────────────────
-
-  - id: review_round1
-    type: parallel
-    branches:
-      - id: claude_r1
-        steps:
-          - id: r1_claude
-            type: shell
-            env:
-              TARGET_DESIGN: ${{ steps.initial_designs.result.codex }}
-              OWN_DESIGN: ${{ steps.initial_designs.result.claude }}
-              CONTEXT: ${{ steps.explore.result }}
-              REQUIREMENTS: ${{ inputs.requirements }}
-            with:
-              command: |
-                printf '%s' "$TARGET_DESIGN" | claude -p \
-                  --model claude-opus-4-6 \
-                  --tools "Read,Glob,Grep,WebSearch" \
-                  --allowedTools "Read,Glob,Grep,WebSearch" \
-                  --no-session-persistence \
-                  --output-format text \
-                  "You are reviewing a UX design for a CLI developer tool.
-                The design to review is provided via stdin.
-
-                # Codebase context
-                $CONTEXT
-
-                # Requirements
-                $REQUIREMENTS
-
-                # Your own design (for comparison — be fair, not self-serving)
-                $OWN_DESIGN
-
-                # Review criteria
-                Score each dimension PASS or FAIL with a one-line reason.
-
-                **Persona and conceptual design**
-                1. **Persona specificity** — Concrete and evidence-based? Includes what the user already knows
-                   from other tools (git, docker, npm, CI)?
-                2. **Familiar vocabulary** — Does the design reuse concepts from the user's existing toolkit?
-                   Each new Rigg-specific concept must be justified. Unnecessary novel terminology fails.
-                3. **Predictability** — Are patterns consistent enough for analogical reasoning? If the user
-                   learns feature A, can they predict how feature B works?
-
-                **Interaction design**
-                4. **Happy path** — Most common use case is effortless? Zero unnecessary steps or decisions.
-                5. **Output clarity** — Are CLI outputs specific and example-driven?
-                   Vague descriptions like 'show progress' fail. Exact format with examples passes.
-                6. **Error actionability** — Every error tells the user what to DO, not just what went wrong.
-                   Include exact recovery commands.
-                7. **Edge case coverage** — Empty input, large repos, interrupted runs, missing files explicitly addressed.
-
-                **Architecture**
-                8. **Conceptual economy** — Does the design use the minimum number of concepts? Could specialized
-                   features be replaced by a more general primitive that covers multiple use cases?
-                9. **Consistency** — Matches existing Rigg CLI patterns? Enables analogical reasoning across features?
-                10. **Composability** — Plays well with existing workflows and not break muscle memory?
-
-                **Synthesis quality**
-                11. **Specificity** — Are decisions justified and concrete?
-                    Every output format, every error message must be exact, not described abstractly.
-
-                If all items PASS, respond with exactly: LGTM
-
-                Otherwise, list only FAILing items with specific, actionable fixes.
-                Be constructive — incorporate good ideas from your own design if they'd improve this one.
-                One fix per item. Be concise."
-
-      - id: codex_r1
-        steps:
-          - id: r1_codex
-            type: codex
-            with:
-              action: plan
-              model: gpt-5.4
-              effort: high
-              prompt: |
-                You are reviewing a UX design for a CLI developer tool.
-
-                # Design to review
-                ${{ steps.initial_designs.result.claude }}
-
-                # Codebase context
-                ${{ steps.explore.result }}
-
-                # Requirements
-                ${{ inputs.requirements }}
-
-                # Your own design (for comparison — be fair, not self-serving)
-                ${{ steps.initial_designs.result.codex }}
-
-                # Review criteria
-                Score each dimension PASS or FAIL with a one-line reason.
-
-                **Persona and conceptual design**
-                1. **Persona specificity** — Concrete and evidence-based? Includes what the user already knows
-                   from other tools (git, docker, npm, CI)?
-                2. **Familiar vocabulary** — Does the design reuse concepts from the user's existing toolkit?
-                   Each new Rigg-specific concept must be justified. Unnecessary novel terminology fails.
-                3. **Predictability** — Are patterns consistent enough for analogical reasoning? If the user
-                   learns feature A, can they predict how feature B works?
-
-                **Interaction design**
-                4. **Happy path** — Most common use case is effortless? Zero unnecessary steps or decisions.
-                5. **Output clarity** — Are CLI outputs specific and example-driven?
-                   Vague descriptions like 'show progress' fail. Exact format with examples passes.
-                6. **Error actionability** — Every error tells the user what to DO, not just what went wrong.
-                   Include exact recovery commands.
-                7. **Edge case coverage** — Empty input, large repos, interrupted runs, missing files explicitly addressed.
-
-                **Architecture**
-                8. **Conceptual economy** — Does the design use the minimum number of concepts? Could specialized
-                   features be replaced by a more general primitive that covers multiple use cases?
-                9. **Consistency** — Matches existing Rigg CLI patterns? Enables analogical reasoning across features?
-                10. **Composability** — Plays well with existing workflows and not break muscle memory?
-
-                **Synthesis quality**
-                11. **Specificity** — Are decisions justified and concrete?
-                    Every output format, every error message must be exact, not described abstractly.
-
-                CRITICAL: Output ONLY the review. No preamble.
-
-                If all items PASS, respond with exactly: LGTM
-
-                Otherwise, list only FAILing items with specific, actionable fixes.
-                Be constructive — incorporate good ideas from your own design if they'd improve this one.
-                One fix per item. Be concise.
-    exports:
-      claude_review: ${{ steps.r1_claude.result }}
-      codex_review: ${{ steps.r1_codex.result }}
-
-  # ── Round 1: Convergence check ─────────────────────────────────────────
-
-  - id: round1_check
-    type: shell
-    env:
-      CLAUDE_REVIEW: ${{ steps.review_round1.result.claude_review }}
-      CODEX_REVIEW: ${{ steps.review_round1.result.codex_review }}
-    with:
-      command: |
-        claude_lgtm=false
-        codex_lgtm=false
-        echo "$CLAUDE_REVIEW" | grep -q "LGTM" && claude_lgtm=true
-        echo "$CODEX_REVIEW" | grep -q "LGTM" && codex_lgtm=true
-        if [ "$claude_lgtm" = true ] && [ "$codex_lgtm" = true ]; then
-          echo "CONVERGED"
-        else
-          echo "CONTINUE"
-        fi
-
-  # ── Round 2: Revise + re-review, or pass through if converged ──────────
-
-  - id: round2
-    type: branch
-    cases:
-      - if: ${{ contains(steps.round1_check.result, 'CONVERGED') }}
-        steps: []
-        exports:
-          claude_design: ${{ steps.initial_designs.result.claude }}
-          codex_design: ${{ steps.initial_designs.result.codex }}
-          claude_review: ${{ steps.review_round1.result.claude_review }}
-          codex_review: ${{ steps.review_round1.result.codex_review }}
-
-      - else:
-        steps:
-          - id: revisions
-            type: parallel
-            branches:
-              - id: claude_rev
-                steps:
-                  - id: claude_v1
-                    type: shell
-                    env:
-                      OWN_DESIGN: ${{ steps.initial_designs.result.claude }}
-                      PEER_FEEDBACK: ${{ steps.review_round1.result.codex_review }}
-                      PEER_DESIGN: ${{ steps.initial_designs.result.codex }}
-                      CONTEXT: ${{ steps.explore.result }}
-                      REQUIREMENTS: ${{ inputs.requirements }}
-                    with:
-                      command: |
-                        printf '%s' "$OWN_DESIGN" | claude -p \
-                          --model claude-opus-4-6 \
-                          --tools "Read,Glob,Grep,WebSearch" \
-                          --allowedTools "Read,Glob,Grep,WebSearch" \
-                          --no-session-persistence \
-                          --output-format text \
-                          "You are revising your UX design based on peer review feedback.
-                        Your original design is provided via stdin.
-
-                        # Codebase context
-                        $CONTEXT
-
-                        # Requirements
-                        $REQUIREMENTS
-
-                        # Peer feedback (address every FAIL item)
-                        $PEER_FEEDBACK
-
-                        # Peer's design (steal good ideas if they'd improve yours)
-                        $PEER_DESIGN
-
-                        # Task
-                        Revise your design to address every FAILing item from the peer review.
-                        Preserve everything that wasn't flagged — this is a targeted revision, not a rewrite.
-                        If the peer's design has better solutions for flagged items, adopt them.
-
-                        Output the COMPLETE revised design in the same format as the original.
-                        No preamble. Start with '### Persona'."
-
-              - id: codex_rev
-                steps:
-                  - id: codex_v1
-                    type: codex
-                    with:
-                      action: plan
-                      model: gpt-5.4
-                      effort: high
-                      prompt: |
-                        You are revising your UX design based on peer review feedback.
-
-                        # Your original design
-                        ${{ steps.initial_designs.result.codex }}
-
-                        # Codebase context
-                        ${{ steps.explore.result }}
-
-                        # Requirements
-                        ${{ inputs.requirements }}
-
-                        # Peer feedback (address every FAIL item)
-                        ${{ steps.review_round1.result.claude_review }}
-
-                        # Peer's design (steal good ideas if they'd improve yours)
-                        ${{ steps.initial_designs.result.claude }}
-
-                        # Task
-                        Revise your design to address every FAILing item from the peer review.
-                        Preserve everything that wasn't flagged — this is a targeted revision, not a rewrite.
-                        If the peer's design has better solutions for flagged items, adopt them.
-
-                        CRITICAL: Output the COMPLETE revised design in the same format as the original.
-                        No preamble. Start with "### Persona".
-            exports:
-              claude: ${{ steps.claude_v1.result }}
-              codex: ${{ steps.codex_v1.result }}
-
-          - id: review_r2
-            type: parallel
-            branches:
-              - id: claude_r2
-                steps:
-                  - id: r2_claude
-                    type: shell
-                    env:
-                      TARGET_DESIGN: ${{ steps.revisions.result.codex }}
-                      OWN_DESIGN: ${{ steps.revisions.result.claude }}
-                      CONTEXT: ${{ steps.explore.result }}
-                      REQUIREMENTS: ${{ inputs.requirements }}
-                    with:
-                      command: |
-                        printf '%s' "$TARGET_DESIGN" | claude -p \
-                          --model claude-opus-4-6 \
-                          --tools "Read,Glob,Grep,WebSearch" \
-                          --allowedTools "Read,Glob,Grep,WebSearch" \
-                          --no-session-persistence \
-                          --output-format text \
-                          "You are reviewing a REVISED UX design for a CLI developer tool.
-                        The design to review is provided via stdin.
-
-                        # Codebase context
-                        $CONTEXT
-
-                        # Requirements
-                        $REQUIREMENTS
-
-                        # Your own revised design (for comparison — be fair, not self-serving)
-                        $OWN_DESIGN
-
-                        # Review criteria
-                        Score each dimension PASS or FAIL with a one-line reason.
-
-                        **Persona and conceptual design**
-                        1. **Persona specificity** — Concrete, evidence-based, includes user's existing knowledge?
-                        2. **Familiar vocabulary** — Reuses concepts from user's toolkit? New concepts justified?
-                        3. **Predictability** — Patterns consistent enough for analogical reasoning?
-
-                        **Interaction design**
-                        4. **Happy path** — Most common use case is effortless?
-                        5. **Output clarity** — Specific and example-driven?
-                        6. **Error actionability** — Tells user what to DO?
-                        7. **Edge case coverage** — Explicitly addressed?
-
-                        **Architecture**
-                        8. **Conceptual economy** — Minimum concepts? General primitives over specialized features?
-                        9. **Consistency** — Matches existing patterns? Enables cross-feature prediction?
-                        10. **Composability** — Plays well with existing workflows?
-
-                        **Synthesis quality**
-                        11. **Specificity** — Decisions justified and concrete?
-
-                        If all items PASS, respond with exactly: LGTM
-
-                        Otherwise, list only FAILing items with specific, actionable fixes.
-                        One fix per item. Be concise."
-
-              - id: codex_r2
-                steps:
-                  - id: r2_codex
-                    type: codex
-                    with:
-                      action: plan
-                      model: gpt-5.4
-                      effort: high
-                      prompt: |
-                        You are reviewing a REVISED UX design for a CLI developer tool.
-
-                        # Design to review
-                        ${{ steps.revisions.result.claude }}
-
-                        # Codebase context
-                        ${{ steps.explore.result }}
-
-                        # Requirements
-                        ${{ inputs.requirements }}
-
-                        # Your own revised design (for comparison — be fair, not self-serving)
-                        ${{ steps.revisions.result.codex }}
-
-                        # Review criteria
-                        Score each dimension PASS or FAIL with a one-line reason.
-
-                        **Persona and conceptual design**
-                        1. **Persona specificity** — Concrete, evidence-based, includes user's existing knowledge?
-                        2. **Familiar vocabulary** — Reuses concepts from user's toolkit? New concepts justified?
-                        3. **Predictability** — Patterns consistent enough for analogical reasoning?
-
-                        **Interaction design**
-                        4. **Happy path** — Most common use case is effortless?
-                        5. **Output clarity** — Specific and example-driven?
-                        6. **Error actionability** — Tells user what to DO?
-                        7. **Edge case coverage** — Explicitly addressed?
-
-                        **Architecture**
-                        8. **Conceptual economy** — Minimum concepts? General primitives over specialized features?
-                        9. **Consistency** — Matches existing patterns? Enables cross-feature prediction?
-                        10. **Composability** — Plays well with existing workflows?
-
-                        **Synthesis quality**
-                        11. **Specificity** — Decisions justified and concrete?
-
-                        CRITICAL: Output ONLY the review. No preamble.
-
-                        If all items PASS, respond with exactly: LGTM
-
-                        Otherwise, list only FAILing items with specific, actionable fixes.
-                        One fix per item. Be concise.
-            exports:
-              claude_review: ${{ steps.r2_claude.result }}
-              codex_review: ${{ steps.r2_codex.result }}
-
-        exports:
-          claude_design: ${{ steps.revisions.result.claude }}
-          codex_design: ${{ steps.revisions.result.codex }}
-          claude_review: ${{ steps.review_r2.result.claude_review }}
-          codex_review: ${{ steps.review_r2.result.codex_review }}
-
-  # ── Synthesize: merge best ideas into final design ─────────────────────
+      claude: ${{ steps.claude_design.result }}
+      codex: ${{ steps.codex_design.result }}
 
   - id: synthesize
     type: shell
     env:
-      CLAUDE_DESIGN: ${{ steps.round2.result.claude_design }}
-      CODEX_DESIGN: ${{ steps.round2.result.codex_design }}
-      CLAUDE_REVIEW: ${{ steps.round2.result.claude_review }}
-      CODEX_REVIEW: ${{ steps.round2.result.codex_review }}
+      CLAUDE_DESIGN: ${{ steps.designs.result.claude }}
+      CODEX_DESIGN: ${{ steps.designs.result.codex }}
       CONTEXT: ${{ steps.explore.result }}
       REQUIREMENTS: ${{ inputs.requirements }}
     with:
@@ -709,9 +336,8 @@ steps:
           --output-format text \
           "You are a principal product designer creating the definitive UX design document.
 
-        Two AI models independently designed the user experience, then reviewed each other's work
-        through cross-review iterations. Your job: synthesize the BEST ideas from both into a single,
-        authoritative design.
+        Two AI models independently designed the user experience. Your job: critically evaluate both,
+        then synthesize the BEST ideas into a single, authoritative design.
 
         # Codebase context
         $CONTEXT
@@ -719,29 +345,34 @@ steps:
         # Requirements
         $REQUIREMENTS
 
-        # Claude's latest design
+        # Claude's design
         $CLAUDE_DESIGN
 
-        # Codex's latest design
+        # Codex's design
         $CODEX_DESIGN
 
-        # Claude's review of Codex's design
-        $CLAUDE_REVIEW
-
-        # Codex's review of Claude's design
-        $CODEX_REVIEW
+        # Evaluation criteria (apply to both designs before synthesizing)
+        Before merging, score each design on these dimensions to identify strengths and weaknesses:
+        - **Persona specificity** — Concrete, evidence-based, includes user's existing knowledge?
+        - **Familiar vocabulary** — Reuses concepts from user's toolkit? New concepts justified?
+        - **Predictability** — Patterns consistent enough for analogical reasoning?
+        - **Happy path** — Most common use case is effortless?
+        - **Output clarity** — Specific and example-driven with exact terminal output?
+        - **Error actionability** — Every error tells the user what to DO?
+        - **Edge case coverage** — Explicitly addressed?
+        - **Conceptual economy** — Minimum concepts? General primitives over specialized features?
+        - **Consistency** — Matches existing Rigg CLI patterns?
+        - **Specificity** — Decisions justified and concrete, not abstract?
 
         # Synthesis rules
         1. Take the strongest elements from each design — this is curating, not averaging
         2. When designs conflict, choose what's best for the USER (not what's easier to implement)
         3. Nothing valuable from either design should be lost
         4. The result must feel like one coherent vision, not a Frankenstein of two
-        5. If both reviews flagged the same issue, it's definitely real — make sure it's resolved
-        6. If one model's persona analysis was deeper, use that as the foundation
-        7. Concrete beats abstract — prefer the design with more specific output examples
-        8. Prefer the design that reuses more familiar concepts from the user's existing toolkit
-        9. Prefer the design with fewer total concepts — general primitives over specialized features
-        10. Ensure patterns are consistent enough that learning one feature predicts the next
+        5. Concrete beats abstract — prefer the design with more specific output examples
+        6. Prefer the design that reuses more familiar concepts from the user's existing toolkit
+        7. Prefer the design with fewer total concepts — general primitives over specialized features
+        8. Ensure patterns are consistent enough that learning one feature predicts the next
 
         CRITICAL: Your response is saved directly to a file. Output ONLY the design document.
         No preamble, no meta-commentary. Start with '### 1. Persona'.

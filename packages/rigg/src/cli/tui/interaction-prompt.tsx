@@ -1,5 +1,4 @@
 import { Box, Text, useInput } from "ink"
-import TextInput from "ink-text-input"
 import { useMemo, useState } from "react"
 
 import type {
@@ -11,6 +10,7 @@ import type {
 import type { PendingInteraction } from "../../run/schema"
 import { stringifyJsonCompact, tryParseJson } from "../../util/json"
 import { matchesShortcut } from "./input"
+import { PromptTextInput } from "./prompt-text-input"
 import { chars } from "./theme"
 
 function approvalShortcut(decision: CodexApprovalDecision, index: number): string {
@@ -217,7 +217,7 @@ function ApprovalPrompt({
         <Text>
           <Text color="cyan">{chars.promptCaret}</Text>{" "}
         </Text>
-        <TextInput value={inputValue} onChange={handleChange} onSubmit={handleSubmit} />
+        <PromptTextInput value={inputValue} onChange={handleChange} onSubmit={handleSubmit} />
       </Box>
       {errorMessage !== null && (
         <Text color="red">
@@ -304,7 +304,7 @@ function UserInputPrompt({
         <Text>
           <Text color="cyan">{chars.promptCaret}</Text>{" "}
         </Text>
-        <TextInput value={inputValue} onChange={setInputValue} onSubmit={handleSubmit} />
+        <PromptTextInput value={inputValue} onChange={setInputValue} onSubmit={handleSubmit} />
       </Box>
     </Box>
   )
@@ -381,7 +381,7 @@ function ElicitationPrompt({
       ) : (
         <Box>
           <Text>JSON: </Text>
-          <TextInput value={jsonInput} onChange={setJsonInput} onSubmit={handleJsonSubmit} />
+          <PromptTextInput value={jsonInput} onChange={setJsonInput} onSubmit={handleJsonSubmit} />
         </Box>
       )}
     </Box>

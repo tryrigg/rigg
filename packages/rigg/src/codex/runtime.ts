@@ -398,14 +398,6 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     await completeInterruptedExecution(execution)
   }
 
-  void appServer.exited.then((exit) => {
-    if (exit.expected) {
-      return
-    }
-    failAllTurns(
-      new Error(`codex app-server exited unexpectedly (code=${String(exit.code)} signal=${String(exit.signal)})`),
-    )
-  })
   appServer.stderr.on("line", (line) => {
     if (isBenignCodexDiagnostic(line)) {
       return

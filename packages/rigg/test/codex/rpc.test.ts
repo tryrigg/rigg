@@ -31,6 +31,7 @@ class AbortOnAddSignal extends EventTarget {
 }
 
 function createFakeProcess(): {
+  exit: (result: { code: number | null; expected: boolean; signal: NodeJS.Signals | null }) => void
   process: CodexAppServerProcess
   stderr: EventEmitter
   stdout: EventEmitter
@@ -39,11 +40,19 @@ function createFakeProcess(): {
   const stdout = new EventEmitter()
   const stderr = new EventEmitter()
   const writes: unknown[] = []
+  let resolveExit:
+    | ((result: { code: number | null; expected: boolean; signal: NodeJS.Signals | null }) => void)
+    | undefined
 
   return {
+    exit: (result) => {
+      resolveExit?.(result)
+    },
     process: {
       close: async () => {},
-      exited: new Promise(() => {}),
+      exited: new Promise((resolve) => {
+        resolveExit = resolve
+      }),
       stderr: stderr as unknown as readline.Interface,
       stdout: stdout as unknown as readline.Interface,
       write: (message) => {
@@ -104,5 +113,26 @@ describe("codex/rpc", () => {
     await flushMicrotasks()
 
     expect(reportedErrors).toEqual([])
+  })
+
+  test("keeps the first fatal error when invalid stdout is followed by process exit", async () => {
+    const { exit, process, stdout } = createFakeProcess()
+    const client = createCodexRpcClient(process)
+    const reportedErrors: Error[] = []
+
+    client.start({
+      onError: (error) => {
+        reportedErrors.push(error)
+      },
+      onNotification: () => {},
+      onRequest: () => {},
+    })
+
+    stdout.emit("line", "{not-json")
+    exit({ code: 0, expected: false, signal: null })
+    await flushMicrotasks()
+
+    expect(reportedErrors).toHaveLength(1)
+    expect(reportedErrors[0]?.message).toContain("codex app-server returned invalid JSON")
   })
 })

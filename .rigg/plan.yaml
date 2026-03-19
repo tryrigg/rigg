@@ -55,7 +55,7 @@ steps:
         $REQUIREMENTS
 
         # UX design
-        $(if [ -n \"$UX_DESIGN\" ]; then echo 'The following UX design is finalized — implementation must match it exactly.'; echo; echo \"$UX_DESIGN\"; else echo 'No UX design was provided. Derive the UX from the requirements and existing codebase patterns.'; fi)
+        $(if [ -n "$UX_DESIGN" ]; then echo 'The following UX design is finalized — implementation must match it exactly.'; echo; echo "$UX_DESIGN"; else echo 'No UX design was provided. Derive the UX from the requirements and existing codebase patterns.'; fi)
 
         # Task
         Explore the codebase to gather ALL implementation context needed.
@@ -213,7 +213,7 @@ steps:
         The implementation plan is provided via stdin. Read it carefully.
 
         ## UX design
-        $(if [ -n \"$UX_DESIGN\" ]; then echo 'The following UX design is the spec that the plan must implement:'; echo; echo \"$UX_DESIGN\"; else echo 'No separate UX design was provided. The plan derives UX from the requirements directly.'; fi)
+        $(if [ -n "$UX_DESIGN" ]; then echo 'The following UX design is the spec that the plan must implement:'; echo; echo "$UX_DESIGN"; else echo 'No separate UX design was provided. The plan derives UX from the requirements directly.'; fi)
 
         ## Task
         ACTIVELY VERIFY the plan against the actual codebase:

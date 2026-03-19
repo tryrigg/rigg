@@ -8,7 +8,7 @@ inputs:
 steps:
   - id: remediation
     type: loop
-    max: 5
+    max: 6
     until: ${{ len(steps.review.result.findings) == 0 }}
     steps:
       - id: review

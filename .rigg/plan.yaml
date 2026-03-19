@@ -5,8 +5,8 @@ inputs:
     description: Requirements for the implementation plan
   ux_design:
     type: string
-    description: Path to the UX design document (from ux-design workflow)
-    default: private/ux-design.md
+    description: Path to the UX design document (optional, from ux-design workflow)
+    default: ""
   filename:
     type: string
     description: Output filename (written to private/<filename>)
@@ -18,7 +18,10 @@ steps:
     env:
       UX_PATH: ${{ inputs.ux_design }}
     with:
-      command: cat "$UX_PATH"
+      command: |
+        if [ -n "$UX_PATH" ] && [ -f "$UX_PATH" ]; then
+          cat "$UX_PATH"
+        fi
 
   - id: explore
     type: shell
@@ -36,7 +39,7 @@ steps:
           --no-session-persistence \
           --output-format text \
           "You are a senior software architect preparing implementation context.
-        You have a finalized UX design — your job is to find the code that needs to change to realize it.
+        Your job is to find the code that needs to change to realize the requirements below.
 
         # Project: Rigg
         - Language: TypeScript 5.9 (strict, erasableSyntaxOnly)
@@ -51,15 +54,15 @@ steps:
         # Requirements
         $REQUIREMENTS
 
-        # UX design (already finalized — implementation must match this)
-        $UX_DESIGN
+        # UX design
+        $(if [ -n \"$UX_DESIGN\" ]; then echo 'The following UX design is finalized — implementation must match it exactly.'; echo; echo \"$UX_DESIGN\"; else echo 'No UX design was provided. Derive the UX from the requirements and existing codebase patterns.'; fi)
 
         # Task
-        Explore the codebase to gather ALL implementation context needed to realize the UX design above.
-        Do NOT redesign the UX — focus entirely on HOW to build it.
+        Explore the codebase to gather ALL implementation context needed.
+        Focus entirely on HOW to build it.
 
         ## Implementation exploration
-        1. Use Glob and Grep to find files related to the requirements and the UX design
+        1. Use Glob and Grep to find files related to the requirements
         2. Read the actual source code of relevant modules, types, and tests
         3. Map how the relevant code connects to the rest of the system
         4. Find similar patterns and conventions already in the codebase
@@ -72,7 +75,7 @@ steps:
 
         ### Architecture overview
         How the relevant parts of the codebase are structured.
-        Which modules and layers are involved in implementing the UX design.
+        Which modules and layers are involved in the implementation.
 
         ### Relevant files
         | Path | Purpose | Key exports/types |
@@ -84,7 +87,7 @@ steps:
 
         ### Reusable components
         Existing Ink components, utilities, and abstractions that can be reused or extended.
-        For each, note the file path, current behavior, and how it maps to the UX design.
+        For each, note the file path, current behavior, and how it maps to the requirements.
 
         ### Key type definitions
         Relevant types copied verbatim from the source code.
@@ -105,7 +108,7 @@ steps:
       effort: high
       prompt: |
         You are a senior software architect creating an implementation plan.
-        A UX design has already been finalized — your job is to plan HOW to build it, not WHAT to build.
+        Your job is to plan HOW to build the requirements, not WHAT to build.
 
         CRITICAL: Your response is saved directly to a markdown file. Output ONLY the plan.
         No investigation notes, no thinking, no preamble. Start with "### 1. Summary".
@@ -122,8 +125,11 @@ steps:
         - Format: Prettier (no semicolons, printWidth 120)
         - CI: GitHub Actions
 
-        ## UX design (finalized — implementation must match this exactly)
+        ## UX design
         ${{ steps.read_ux.result }}
+        NOTE: If the UX design above is empty, no separate UX design was provided.
+        In that case, derive UX decisions from the requirements and existing codebase patterns.
+        If a UX design IS provided, implementation must match it exactly.
 
         ## Codebase context (gathered by active codebase exploration)
         ${{ steps.explore.result }}
@@ -143,11 +149,12 @@ steps:
         ${{ inputs.requirements }}
 
         ## Task
-        Produce an implementation plan that realizes the UX design above. The UX design is the spec —
-        the plan explains how to build it in code.
+        Produce an implementation plan that realizes the requirements above.
+        If a UX design was provided, treat it as the spec — the plan explains how to build it in code.
+        If no UX design was provided, make pragmatic UX decisions based on existing codebase patterns.
 
         ### 1. Summary
-        What this change does and why. One paragraph. Reference the UX design as the spec.
+        What this change does and why. One paragraph.
 
         ### 2. Files
         | Path | Action | Purpose |
@@ -159,24 +166,23 @@ steps:
         - Concrete action (e.g. "Add type WorkflowResult to packages/rigg/src/compile/schema.ts")
         - Target file path(s)
         - Key type signatures or data shapes being introduced
-        - How this step connects to the UX design (which interaction, output, or error state it implements)
+        - How this step connects to the requirements (which interaction, output, or error state it implements)
         - Verification command (`bun test <path>`, `bunx tsc --noEmit`, or what to manually check)
 
         ### 4. Testing strategy
         Test files to create or update. Specific cases to cover.
-        Include tests that verify UX contract: error message content, output formatting, edge case behavior
-        as specified in the UX design.
+        Include tests that verify expected behavior: error message content, output formatting, edge cases.
 
         ### 5. Risks and open questions
         Potential issues, trade-offs, or questions to resolve before starting.
 
         ## Rules
         - Reference actual paths from the codebase context above. Follow existing naming conventions for new files.
-        - Minimal scope — fewest files, simplest approach that satisfies the UX design.
+        - Minimal scope — fewest files, simplest approach that satisfies the requirements.
         - Every step must be independently verifiable.
         - Do not propose abstractions the codebase does not already use.
         - Do not propose config, env vars, or feature flags unless the requirements demand them.
-        - Implementation must match the UX design exactly: same CLI output format, same error messages,
+        - If a UX design was provided, match it exactly: same CLI output format, same error messages,
           same interaction flow, same edge case behavior. Do not deviate.
         - **External dependencies**: If the plan introduces a new package or upgrades an existing one, you MUST:
           1. Search the web for the latest stable release of that package (npm registry, GitHub releases, or official site).
@@ -206,8 +212,8 @@ steps:
 
         The implementation plan is provided via stdin. Read it carefully.
 
-        ## UX design (the spec that the plan must implement)
-        $UX_DESIGN
+        ## UX design
+        $(if [ -n \"$UX_DESIGN\" ]; then echo 'The following UX design is the spec that the plan must implement:'; echo; echo \"$UX_DESIGN\"; else echo 'No separate UX design was provided. The plan derives UX from the requirements directly.'; fi)
 
         ## Task
         ACTIVELY VERIFY the plan against the actual codebase:
@@ -220,7 +226,7 @@ steps:
         **Implementation quality**
         1. **Paths** — All referenced file paths exist in the repo or follow its naming conventions for new files.
         2. **Ordering** — Steps respect dependencies; no step requires output of a later step.
-        3. **Completeness** — No missing steps to fully realize the UX design.
+        3. **Completeness** — No missing steps to fully realize the requirements.
         4. **Type design** — Proposed types conform to the implementation guide (discriminated unions, Zod-first, no enum).
         5. **Error handling** — Error paths addressed at system boundaries per the guide.
         6. **Tests** — Proposed tests are sufficient and follow bun test patterns (table-driven, no unnecessary mocks).
@@ -230,7 +236,7 @@ steps:
         8. **Versions** — Every new or upgraded package specifies an exact latest-stable version confirmed via live search, not a guess or range.
         9. **Primary sources** — Each dependency cites an official docs URL or migration guide for the pinned version.
 
-        **UX design fidelity**
+        **UX design fidelity** (only check if a UX design was provided above; otherwise auto-PASS all four)
         10. **Output format** — Does the plan implement the exact CLI output format specified in the UX design? Compare output examples.
         11. **Error messages** — Does the plan implement every error message from the UX design verbatim?
         12. **Edge cases** — Does the plan handle every edge case specified in the UX design?

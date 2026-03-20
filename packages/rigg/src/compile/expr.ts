@@ -16,6 +16,7 @@ export const ResultShapeKind = {
   Array: "array",
   Boolean: "boolean",
   Integer: "integer",
+  Null: "null",
   None: "none",
   Number: "number",
   Object: "object",
@@ -24,6 +25,7 @@ export const ResultShapeKind = {
 
 export type ResultShape =
   | { kind: "any_json" }
+  | { kind: "null" }
   | { kind: "none" }
   | { kind: "string" }
   | { kind: "integer" }
@@ -33,6 +35,7 @@ export type ResultShape =
   | { kind: "object"; fields: Record<string, ResultShape> }
 
 export const AnyJsonShape: ResultShape = { kind: "any_json" }
+export const NullShape: ResultShape = { kind: "null" }
 export const NoneShape: ResultShape = { kind: "none" }
 export const StringShape: ResultShape = { kind: "string" }
 export const IntegerShape: ResultShape = { kind: "integer" }
@@ -181,7 +184,7 @@ export function inferExpressionResultShape(
 
 export function resultShapeFromJsonValue(value: JsonValue): ResultShape {
   if (value === null) {
-    return AnyJsonShape
+    return NullShape
   }
 
   if (typeof value === "string") {
@@ -215,6 +218,9 @@ export function resultShapeFromJsonValue(value: JsonValue): ResultShape {
 export function mergeResultShapes(left: ResultShape, right: ResultShape): ResultShape {
   if (left.kind === "any_json" || right.kind === "any_json") {
     return AnyJsonShape
+  }
+  if (left.kind === "null" || right.kind === "null") {
+    return left.kind === right.kind ? left : AnyJsonShape
   }
   if (left.kind === "none" || right.kind === "none") {
     return AnyJsonShape

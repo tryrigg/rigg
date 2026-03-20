@@ -311,6 +311,7 @@ export async function runRunCommand(
     const runSession = deps.createRunSession({
       barrierMode: options.autoContinue ? "auto_continue" : "manual",
       interrupt: interrupt.interrupt,
+      project: projectResult.project,
       workflow,
     })
     const runResult = await (async () => {

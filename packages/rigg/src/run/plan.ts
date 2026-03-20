@@ -1,5 +1,6 @@
 import { renderTemplate, renderTemplateString } from "../compile/expr"
 import {
+  childWorkflowFrameId,
   childLoopScope,
   childNodePath,
   loopIterationFrameId,
@@ -12,15 +13,21 @@ import {
   type LoopNode,
   type NodePath,
   type ParallelNode,
+  type WorkflowDocument,
+  type WorkflowNode,
   type WorkflowStep,
 } from "../compile/schema"
+import type { WorkflowProject } from "../compile/project"
+import { workflowById } from "../compile/project"
 import { normalizeError } from "../util/error"
-import { createEvaluationError, createStepFailedError } from "./error"
+import { RunExecutionError, createEvaluationError, createStepFailedError } from "./error"
+import { normalizeInvocationInputs } from "./invocation"
 import { preview } from "./node"
 import type { RenderContext, StepBinding } from "./render"
 import type { FrontierNode } from "./schema"
 
 type PlannerScope = {
+  activeWorkflowIds: string[]
   env: Record<string, string | undefined>
   frameId: FrameId
   inputs: Record<string, unknown>
@@ -64,6 +71,14 @@ export type PreparedStep =
       step: LoopNode
     }
   | {
+      env: Record<string, string | undefined>
+      frontier: FrontierNode[]
+      inputs: Record<string, unknown>
+      kind: "workflow"
+      step: WorkflowNode
+      workflow?: WorkflowDocument | undefined
+    }
+  | {
       branchReleasedFrontierNodePaths: NodePath[][]
       env: Record<string, string | undefined>
       frontier: FrontierNode[]
@@ -76,7 +91,13 @@ export type PreparedStep =
       step: WorkflowStep
     }
 
-export function prepareStep(step: WorkflowStep, nodePath: NodePath, scope: PlannerScope, cwd: string): PreparedStep {
+export function prepareStep(
+  step: WorkflowStep,
+  nodePath: NodePath,
+  scope: PlannerScope,
+  cwd: string,
+  project?: WorkflowProject,
+): PreparedStep {
   const preparedContext = prepareStepContext(scope, step)
   if (preparedContext.kind === "skipped") {
     return { frontier: [], kind: "skipped", step }
@@ -119,6 +140,58 @@ export function prepareStep(step: WorkflowStep, nodePath: NodePath, scope: Plann
         kind: "loop",
         step,
       }
+    case "workflow": {
+      const inputs = renderWorkflowInputs(step.with.inputs ?? {}, context)
+      const workflow = project === undefined ? undefined : workflowById(project, step.with.workflow)
+      if (workflow !== undefined && scope.activeWorkflowIds.includes(workflow.id)) {
+        throw new RunExecutionError(
+          `Step \`${step.id ?? nodePath}\` creates a circular workflow reference: ${[
+            ...scope.activeWorkflowIds,
+            workflow.id,
+          ].join(" -> ")}.`,
+          {
+            runReason: "validation_error",
+          },
+        )
+      }
+      const normalizedInputs =
+        workflow === undefined ? undefined : normalizeWorkflowCallInputs(workflow, inputs, step, nodePath)
+      const frontier =
+        workflow === undefined || normalizedInputs === undefined
+          ? []
+          : planBlockFrontier(
+              workflow.steps,
+              nodePath,
+              {
+                activeWorkflowIds: [...scope.activeWorkflowIds, workflow.id],
+                frameId: childWorkflowFrameId(scope.frameId, nodePath),
+              },
+              createRenderContext(
+                {
+                  ...env,
+                  ...renderEnvironment(workflow.env ?? {}, {
+                    env,
+                    inputs: normalizedInputs,
+                    run: {},
+                    steps: {},
+                  }),
+                },
+                normalizedInputs,
+                {},
+                {},
+              ),
+              cwd,
+              project,
+            )
+      return {
+        env,
+        frontier,
+        inputs,
+        kind: "workflow",
+        step,
+        workflow,
+      }
+    }
     case "branch":
       return {
         env,
@@ -128,7 +201,17 @@ export function prepareStep(step: WorkflowStep, nodePath: NodePath, scope: Plann
         step,
       }
     case "parallel": {
-      const frontierPlans = planParallelFrontier(step, nodePath, scope.frameId, context, cwd)
+      const frontierPlans = planParallelFrontier(
+        step,
+        nodePath,
+        {
+          activeWorkflowIds: scope.activeWorkflowIds,
+          frameId: scope.frameId,
+        },
+        context,
+        cwd,
+        project,
+      )
       return {
         branchReleasedFrontierNodePaths: frontierPlans.map((plan) => plan.nodes.map((node) => node.node_path)),
         env,
@@ -150,6 +233,8 @@ export function frontierForPreparedStep(
     case "action":
       return prepared.frontier
     case "parallel":
+      return prepared.frontier
+    case "workflow":
       return prepared.frontier
     case "branch":
     case "group":
@@ -183,19 +268,24 @@ export function renderEnvironment(envMap: Record<string, string>, context: Rende
 function planParallelFrontier(
   step: ParallelNode,
   nodePath: NodePath,
-  frameId: FrameId,
+  scope: Pick<PlannerScope, "activeWorkflowIds" | "frameId">,
   context: RenderContext,
   cwd: string,
+  project?: WorkflowProject,
 ): ExecutableFrontierPlan[] {
   return step.branches.map((branch, index) => {
-    const branchFrameId = parallelBranchFrameId(frameId, nodePath, index)
+    const branchFrameId = parallelBranchFrameId(scope.frameId, nodePath, index)
     return {
       nodes: planBlockFrontier(
         branch.steps,
         `${nodePath}/${index}`,
-        branchFrameId,
+        {
+          activeWorkflowIds: scope.activeWorkflowIds,
+          frameId: branchFrameId,
+        },
         context,
         cwd,
+        project,
         `branch=${branch.id}`,
       ),
     }
@@ -205,13 +295,22 @@ function planParallelFrontier(
 function planBlockFrontier(
   steps: WorkflowStep[],
   pathPrefix: NodePath,
-  frameId: FrameId,
+  scope: Pick<PlannerScope, "activeWorkflowIds" | "frameId">,
   context: RenderContext,
   cwd: string,
+  project?: WorkflowProject,
   detailOverride?: string,
 ): FrontierNode[] {
   for (const [index, step] of steps.entries()) {
-    const frontier = planStepFrontier(step, childNodePath(pathPrefix, index), frameId, context, cwd, detailOverride)
+    const frontier = planStepFrontier(
+      step,
+      childNodePath(pathPrefix, index),
+      scope,
+      context,
+      cwd,
+      project,
+      detailOverride,
+    )
     if (frontier.length > 0) {
       return frontier
     }
@@ -223,22 +322,25 @@ function planBlockFrontier(
 function planStepFrontier(
   step: WorkflowStep,
   nodePath: NodePath,
-  frameId: FrameId,
+  scope: Pick<PlannerScope, "activeWorkflowIds" | "frameId">,
   context: RenderContext,
   cwd: string,
+  project?: WorkflowProject,
   detailOverride?: string,
 ): FrontierNode[] {
   const prepared = prepareStep(
     step,
     nodePath,
     {
+      activeWorkflowIds: scope.activeWorkflowIds,
       env: context.env,
-      frameId,
+      frameId: scope.frameId,
       inputs: context.inputs,
       run: context.run,
       steps: context.steps,
     },
     cwd,
+    project,
   )
 
   switch (prepared.kind) {
@@ -252,7 +354,7 @@ function planStepFrontier(
         createFrontierNode(
           prepared.step,
           nodePath,
-          frameId,
+          scope.frameId,
           prepared.env,
           context.inputs,
           context.run,
@@ -265,17 +367,21 @@ function planStepFrontier(
       return planBlockFrontier(
         prepared.step.steps,
         nodePath,
-        frameId,
+        scope,
         createRenderContext(prepared.env, context.inputs, context.run, context.steps),
         cwd,
+        project,
         detailOverride,
       )
     case "loop": {
-      const iterationFrameId = loopIterationFrameId(childLoopScope(frameId, nodePath), 1)
+      const iterationFrameId = loopIterationFrameId(childLoopScope(scope.frameId, nodePath), 1)
       return planBlockFrontier(
         prepared.step.steps,
         nodePath,
-        iterationFrameId,
+        {
+          activeWorkflowIds: scope.activeWorkflowIds,
+          frameId: iterationFrameId,
+        },
         createRenderContext(
           prepared.env,
           context.inputs,
@@ -287,6 +393,49 @@ function planStepFrontier(
           context.steps,
         ),
         cwd,
+        project,
+        detailOverride,
+      )
+    }
+    case "workflow": {
+      if (prepared.workflow === undefined) {
+        return []
+      }
+
+      if (scope.activeWorkflowIds.includes(prepared.workflow.id)) {
+        throw new RunExecutionError(
+          `Step \`${prepared.step.id ?? nodePath}\` creates a circular workflow reference: ${[
+            ...scope.activeWorkflowIds,
+            prepared.workflow.id,
+          ].join(" -> ")}.`,
+          {
+            runReason: "validation_error",
+          },
+        )
+      }
+
+      const normalizedInputs = normalizeWorkflowCallInputs(prepared.workflow, prepared.inputs, prepared.step, nodePath)
+
+      const childEnv = {
+        ...prepared.env,
+        ...renderEnvironment(prepared.workflow.env ?? {}, {
+          env: prepared.env,
+          inputs: normalizedInputs,
+          run: {},
+          steps: {},
+        }),
+      }
+
+      return planBlockFrontier(
+        prepared.workflow.steps,
+        nodePath,
+        {
+          activeWorkflowIds: [...scope.activeWorkflowIds, prepared.workflow.id],
+          frameId: childWorkflowFrameId(scope.frameId, nodePath),
+        },
+        createRenderContext(childEnv, normalizedInputs, {}, {}),
+        cwd,
+        project,
         detailOverride,
       )
     }
@@ -299,9 +448,10 @@ function planStepFrontier(
       return planBlockFrontier(
         selection.caseNode.steps,
         `${nodePath}/${selection.index}`,
-        frameId,
+        scope,
         createRenderContext(prepared.env, context.inputs, context.run, context.steps),
         cwd,
+        project,
         detailOverride,
       )
     }
@@ -311,11 +461,51 @@ function planStepFrontier(
         : planParallelFrontier(
             prepared.step,
             nodePath,
-            frameId,
+            {
+              activeWorkflowIds: scope.activeWorkflowIds,
+              frameId: scope.frameId,
+            },
             createRenderContext(prepared.env, context.inputs, context.run, context.steps),
             cwd,
+            project,
           ).flatMap((plan) => plan.nodes)
   }
+}
+
+function renderWorkflowInputs(inputs: Record<string, unknown>, context: RenderContext): Record<string, unknown> {
+  const renderedInputs: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(inputs)) {
+    if (typeof value === "string") {
+      try {
+        renderedInputs[key] = renderTemplate(value, context)
+      } catch (error) {
+        throw createEvaluationError(error)
+      }
+      continue
+    }
+
+    renderedInputs[key] = value
+  }
+
+  return renderedInputs
+}
+
+function normalizeWorkflowCallInputs(
+  workflow: WorkflowDocument,
+  inputs: Record<string, unknown>,
+  step: WorkflowNode,
+  nodePath: NodePath,
+): Record<string, unknown> {
+  const normalized = normalizeInvocationInputs(workflow, inputs)
+  if (normalized.kind === "invalid") {
+    throw new RunExecutionError(
+      `Step \`${step.id ?? nodePath}\` cannot invoke workflow \`${workflow.id}\`: ${normalized.errors.join("; ")}`,
+      {
+        runReason: "validation_error",
+      },
+    )
+  }
+  return normalized.inputs
 }
 
 function prepareStepContext(

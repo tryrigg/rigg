@@ -3,6 +3,7 @@ import { render } from "ink"
 
 import type { CodexInteractionResolution } from "../codex/interaction"
 import type { CodexProviderEvent } from "../codex/event"
+import type { WorkflowProject } from "../compile/project"
 import type { WorkflowDocument } from "../compile/schema"
 import type { RunControlHandler, RunControlRequest, RunControlResolution, RunEvent, StreamKind } from "../run/progress"
 import type { FrontierNode, RunSnapshot } from "../run/schema"
@@ -251,6 +252,7 @@ export function createControlResolverRegistry(): ControlResolverRegistry {
 export function createInkRunSession(options: {
   barrierMode: BarrierApprovalMode
   interrupt: WorkflowInterruptHandler
+  project?: WorkflowProject | undefined
   renderApp?: InkRenderFunction
   terminal?: InteractiveTerminal
   workflow: WorkflowDocument
@@ -270,6 +272,7 @@ export function createInkRunSession(options: {
         controlResolvers.resolveBarrier(barrierId, action),
       onResolveInteraction: (interactionId: string, resolution: CodexInteractionResolution) =>
         controlResolvers.resolveInteraction(interactionId, resolution),
+      project: options.project,
       store,
       workflow: options.workflow,
     }),

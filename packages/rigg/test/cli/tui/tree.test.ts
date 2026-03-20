@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test"
 import type { WorkflowDocument, WorkflowStep } from "../../../src/compile/schema"
 import type { RunSnapshot } from "../../../src/run/schema"
 import { buildTree, extractDetail } from "../../../src/cli/tui/tree"
-import { runSnapshot } from "../../fixture/builders"
+import { runSnapshot, workflowProject } from "../../fixture/builders"
 
 function workflow(steps: WorkflowStep[]): WorkflowDocument {
   return { id: "test", steps }
@@ -644,5 +644,65 @@ describe("container meta", () => {
 
     const entries = buildTree(wf, null)
     expect(entries[0]?.meta).toBe("3 branches")
+  })
+
+  test("workflow shows nested steps when project context is available", () => {
+    const project = workflowProject([
+      {
+        workflow: {
+          id: "child",
+          steps: [{ id: "inner", type: "shell", with: { command: "echo child" } }],
+        },
+      },
+      {
+        workflow: {
+          id: "parent",
+          steps: [
+            {
+              id: "call_child",
+              type: "workflow",
+              with: {
+                workflow: "child",
+              },
+            },
+          ],
+        },
+      },
+    ])
+    const wf = project.files.find((file) => file.workflow.id === "parent")?.workflow
+    expect(wf).toBeDefined()
+
+    const entries = buildTree(wf!, null, project)
+    expect(entries[0]).toMatchObject({
+      detail: "→ child",
+      meta: "child · 1 steps",
+      nodeKind: "workflow",
+    })
+    expect(entries[1]).toMatchObject({
+      depth: 1,
+      nodeKind: "shell",
+      nodePath: "/0/0",
+      prefix: "│  ",
+    })
+  })
+
+  test("workflow falls back to a single parent node without project context", () => {
+    const wf = workflow([
+      {
+        id: "call_child",
+        type: "workflow",
+        with: {
+          workflow: "child",
+        },
+      },
+    ])
+
+    const entries = buildTree(wf, null)
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({
+      detail: "→ child",
+      meta: "child · 0 steps",
+      nodeKind: "workflow",
+    })
   })
 })

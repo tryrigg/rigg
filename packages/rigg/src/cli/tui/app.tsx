@@ -2,6 +2,7 @@ import { Box, Text, useInput } from "ink"
 import { useMemo, useSyncExternalStore } from "react"
 
 import type { CodexInteractionResolution } from "../../codex/interaction"
+import type { WorkflowProject } from "../../compile/project"
 import type { WorkflowDocument } from "../../compile/schema"
 import type { BarrierApprovalMode } from "../run"
 import { BarrierPrompt } from "./barrier-prompt"
@@ -19,6 +20,7 @@ export function App({
   onInterrupt,
   onResolveBarrier,
   onResolveInteraction,
+  project,
   store,
   workflow,
 }: {
@@ -26,6 +28,7 @@ export function App({
   onInterrupt: () => void
   onResolveBarrier: (barrierId: string, action: "abort" | "continue") => void
   onResolveInteraction: (interactionId: string, resolution: CodexInteractionResolution) => void
+  project?: WorkflowProject | undefined
   store: TuiStore
   workflow: WorkflowDocument
 }) {
@@ -33,10 +36,10 @@ export function App({
   const { snapshot, liveOutputs, completedOutputs } = state
   const elapsed = formatElapsedClock(snapshot?.started_at ?? null, snapshot?.finished_at ?? null)
   const isFinished = snapshot !== null && snapshot.status !== "running"
-  const entries = useMemo(() => buildTree(workflow, snapshot), [workflow, snapshot])
+  const entries = useMemo(() => buildTree(workflow, snapshot, project), [workflow, snapshot, project])
   const stepProgress = useMemo(
-    () => formatStepProgress(summarizeStepProgress(workflow, snapshot)),
-    [workflow, snapshot],
+    () => formatStepProgress(summarizeStepProgress(workflow, snapshot, project)),
+    [workflow, snapshot, project],
   )
   const activeBarrier = snapshot?.active_barrier ?? null
   const activeInteraction = snapshot?.active_interaction ?? null

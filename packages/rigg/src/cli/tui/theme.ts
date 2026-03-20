@@ -14,6 +14,7 @@ export const kindColors: Record<string, string> = {
   write_file: "magenta",
   group: "dim",
   loop: "cyan",
+  workflow: "cyan",
   parallel: "dim",
   branch: "dim",
   branch_case: "dim",

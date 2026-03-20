@@ -1,8 +1,9 @@
 import { StepKind, childNodePath, rootNodePath } from "../../compile/schema"
 import type { WorkflowDocument, WorkflowStep } from "../../compile/schema"
+import type { WorkflowProject } from "../../compile/project"
 import type { NodeSnapshot, RunSnapshot } from "../../run/schema"
 
-const ACTION_STEP_KINDS = new Set<string>([StepKind.Shell, StepKind.Codex, StepKind.WriteFile])
+const ACTION_STEP_KINDS = new Set<string>([StepKind.Shell, StepKind.Codex, StepKind.WriteFile, StepKind.Workflow])
 
 export type StepProgressSummary = {
   completed: number
@@ -18,6 +19,7 @@ function collectActionNodes(
   parentPath: string | null,
   insideLoop: boolean,
   actionNodes: Map<string, ActionNodeInfo>,
+  project?: WorkflowProject,
 ): void {
   for (const [index, step] of steps.entries()) {
     const nodePath = parentPath === null ? rootNodePath(index) : childNodePath(parentPath, index)
@@ -25,22 +27,23 @@ function collectActionNodes(
       case "shell":
       case "codex":
       case "write_file":
+      case "workflow":
         actionNodes.set(nodePath, { insideLoop })
         break
       case "group":
-        collectActionNodes(step.steps, nodePath, insideLoop, actionNodes)
+        collectActionNodes(step.steps, nodePath, insideLoop, actionNodes, project)
         break
       case "loop":
-        collectActionNodes(step.steps, nodePath, true, actionNodes)
+        collectActionNodes(step.steps, nodePath, true, actionNodes, project)
         break
       case "branch":
         for (const [caseIndex, branchCase] of step.cases.entries()) {
-          collectActionNodes(branchCase.steps, childNodePath(nodePath, caseIndex), insideLoop, actionNodes)
+          collectActionNodes(branchCase.steps, childNodePath(nodePath, caseIndex), insideLoop, actionNodes, project)
         }
         break
       case "parallel":
         for (const [branchIndex, branch] of step.branches.entries()) {
-          collectActionNodes(branch.steps, childNodePath(nodePath, branchIndex), insideLoop, actionNodes)
+          collectActionNodes(branch.steps, childNodePath(nodePath, branchIndex), insideLoop, actionNodes, project)
         }
         break
     }
@@ -66,13 +69,14 @@ function knownExecutions(node: NodeSnapshot): number {
 export function summarizeStepProgress(
   workflow: WorkflowDocument,
   snapshot: RunSnapshot | null,
+  project?: WorkflowProject,
 ): StepProgressSummary | null {
   if (snapshot === null) {
     return null
   }
 
   const actionNodes = new Map<string, ActionNodeInfo>()
-  collectActionNodes(workflow.steps, null, false, actionNodes)
+  collectActionNodes(workflow.steps, null, false, actionNodes, project)
 
   let completed = 0
   let total = 0
@@ -90,7 +94,10 @@ export function summarizeStepProgress(
     }
 
     const info = actionNodes.get(node.node_path)
-    const staticExecutions = info === undefined || info.insideLoop ? 0 : 1
+    if (info === undefined) {
+      continue
+    }
+    const staticExecutions = info.insideLoop ? 0 : 1
     completed += completedExecutions(node)
     total += Math.max(0, knownExecutions(node) - staticExecutions)
   }
@@ -101,8 +108,11 @@ export function summarizeStepProgress(
     }
 
     const info = actionNodes.get(frontierNode.node_path)
+    if (info === undefined) {
+      continue
+    }
     const priorExecution = nodeMap.get(frontierNode.node_path)
-    if (info?.insideLoop === true || priorExecution !== undefined) {
+    if (info.insideLoop || priorExecution !== undefined) {
       total += 1
     }
   }

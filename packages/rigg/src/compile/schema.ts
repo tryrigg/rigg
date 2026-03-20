@@ -12,6 +12,7 @@ export const StepKind = {
   Loop: "loop",
   Parallel: "parallel",
   Shell: "shell",
+  Workflow: "workflow",
   WriteFile: "write_file",
 } as const
 
@@ -128,6 +129,10 @@ export function loopIterationFrameId(loopScope: string, iteration: number): Fram
 
 export function parallelBranchFrameId(parentFrameId: FrameId, nodePath: NodePath, branchIndex: number): FrameId {
   return `${parentFrameId}.parallel.${nodePathFileComponent(nodePath)}.branch.${branchIndex}`
+}
+
+export function childWorkflowFrameId(parentFrameId: FrameId, nodePath: NodePath): FrameId {
+  return `${parentFrameId}.workflow.${nodePathFileComponent(nodePath)}`
 }
 
 export function compareFrameId(left: FrameId, right: FrameId): number {
@@ -521,6 +526,10 @@ export function areResultShapesCompatible(left: ResultShape, right: ResultShape)
     return true
   }
 
+  if (left.kind === "null" || right.kind === "null") {
+    return left.kind === right.kind
+  }
+
   if ((left.kind === "integer" && right.kind === "number") || (left.kind === "number" && right.kind === "integer")) {
     return true
   }
@@ -553,6 +562,8 @@ export function validateResultShapePath(stepId: string, shape: ResultShape, segm
   }
 
   switch (shape.kind) {
+    case "null":
+      return `\`steps.${stepId}.result\` does not support nested field access`
     case "none":
       return `\`steps.${stepId}.result\` is not available for this node`
     case "string":
@@ -658,6 +669,13 @@ const WriteFileWithSchema = z
   })
   .strict()
 
+const WorkflowWithSchema = z
+  .object({
+    inputs: z.record(z.string(), z.unknown()).optional(),
+    workflow: z.string().min(1),
+  })
+  .strict()
+
 const BaseNodeSchema = z
   .object({
     env: EnvSchema.optional(),
@@ -721,7 +739,22 @@ export type ParallelNode = BaseNode & {
   type: "parallel"
 }
 
-export type WorkflowStep = BranchNode | CodexNode | GroupNode | LoopNode | ParallelNode | ShellNode | WriteFileNode
+export type WorkflowCallWith = z.infer<typeof WorkflowWithSchema>
+
+export type WorkflowNode = BaseNode & {
+  type: "workflow"
+  with: WorkflowCallWith
+}
+
+export type WorkflowStep =
+  | BranchNode
+  | CodexNode
+  | GroupNode
+  | LoopNode
+  | ParallelNode
+  | ShellNode
+  | WorkflowNode
+  | WriteFileNode
 
 export type WorkflowDocument = {
   env?: Record<string, string> | undefined
@@ -767,6 +800,11 @@ const WriteFileNodeSchema: z.ZodType<WriteFileNode> = BaseNodeSchema.extend({
   with: WriteFileWithSchema,
 }).strict()
 
+const WorkflowNodeSchema: z.ZodType<WorkflowNode> = BaseNodeSchema.extend({
+  type: z.literal("workflow"),
+  with: WorkflowWithSchema,
+}).strict()
+
 const GroupNodeSchema: z.ZodType<GroupNode> = z.lazy(() =>
   ControlBaseSchema.extend({
     exports: ExportsSchema.optional(),
@@ -805,6 +843,7 @@ export const WorkflowStepSchema: z.ZodType<WorkflowStep> = z.lazy(() =>
     ShellNodeSchema,
     CodexNodeSchema,
     WriteFileNodeSchema,
+    WorkflowNodeSchema,
     GroupNodeSchema,
     LoopNodeSchema,
     BranchNodeSchema,

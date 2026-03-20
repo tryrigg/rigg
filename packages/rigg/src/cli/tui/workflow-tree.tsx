@@ -14,6 +14,7 @@ const KIND_LABELS: Record<string, string> = {
   write_file: "write_file",
   group: "group",
   loop: "loop",
+  workflow: "workflow",
   parallel: "parallel",
   branch: "branch",
   branch_case: "case",

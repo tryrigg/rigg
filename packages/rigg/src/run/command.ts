@@ -39,6 +39,7 @@ export async function runWorkflowCommand(options: {
       invocationInputs: inputs.inputs,
       onEvent: options.onEvent,
       parentEnv: options.parentEnv,
+      project: options.project,
       projectRoot: options.project.workspace.rootDir,
       signal: options.signal,
       workflow,

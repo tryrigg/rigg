@@ -9,6 +9,7 @@ import { StepInterruptedError } from "../../src/run/error"
 import type { RunEvent } from "../../src/run/progress"
 import { executeWorkflow } from "../../src/run/execute"
 import { installFakeCodex } from "../fixture/fake-codex"
+import { workflowProject } from "../fixture/builders"
 
 const defaultRunControl = createNonInteractiveRunSession()
 
@@ -207,6 +208,528 @@ describe("run/execute", () => {
       expect(groupSnapshot.nodes.find((node) => node.user_id === "group")?.result).toBeNull()
       expect(branchSnapshot.nodes.find((node) => node.user_id === "branch")?.result).toBeNull()
       expect(parallelSnapshot.nodes.find((node) => node.user_id === "parallel")?.result).toBeNull()
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("executes nested workflows inside the same run snapshot", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-workflow-step-"))
+    const childContexts: Array<{ env: Record<string, string | undefined>; inputs: Record<string, unknown> }> = []
+
+    try {
+      const project = workflowProject([
+        {
+          workflow: {
+            env: {
+              CHILD_NAME: "${{ inputs.name }}",
+            },
+            id: "child",
+            inputs: {
+              count: { type: "integer" },
+              enabled: { type: "boolean" },
+              name: { type: "string" },
+            },
+            steps: [
+              {
+                id: "inner",
+                type: "shell",
+                with: {
+                  command: "echo inner",
+                  result: "text",
+                },
+              },
+            ],
+          },
+        },
+        {
+          workflow: {
+            id: "parent",
+            inputs: {
+              name: { type: "string" },
+            },
+            steps: [
+              {
+                id: "call_child",
+                type: "workflow",
+                with: {
+                  inputs: {
+                    count: 3,
+                    enabled: true,
+                    name: "${{ inputs.name }}",
+                  },
+                  workflow: "child",
+                },
+              },
+            ],
+          },
+        },
+      ])
+
+      const parentWorkflow = project.files.find((file) => file.workflow.id === "parent")?.workflow
+      expect(parentWorkflow).toBeDefined()
+
+      const snapshot = await runWorkflow({
+        internals: {
+          runActionStep: async (step, context) => {
+            if (step.id === "inner") {
+              childContexts.push({ env: context.env, inputs: context.inputs })
+            }
+
+            return {
+              exitCode: 0,
+              providerEvents: [],
+              result: step.id ?? "ok",
+              stderr: "",
+              stdout: "ok",
+              termination: "completed",
+            }
+          },
+        },
+        invocationInputs: {
+          name: "Rigg",
+        },
+        parentEnv: {
+          ...process.env,
+          SHARED_ENV: "shared",
+        },
+        project,
+        projectRoot: root,
+        workflow: parentWorkflow!,
+      })
+
+      expect(childContexts).toEqual([
+        {
+          env: expect.objectContaining({
+            CHILD_NAME: "Rigg",
+            SHARED_ENV: "shared",
+          }),
+          inputs: {
+            count: 3,
+            enabled: true,
+            name: "Rigg",
+          },
+        },
+      ])
+      expect(snapshot.nodes.find((node) => node.user_id === "call_child")).toMatchObject({
+        node_kind: "workflow",
+        node_path: "/0",
+        result: null,
+        status: "succeeded",
+      })
+      expect(snapshot.nodes.find((node) => node.user_id === "inner")).toMatchObject({
+        node_kind: "shell",
+        node_path: "/0/0",
+        result: "inner",
+        status: "succeeded",
+      })
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("does not re-request the first barrier inside nested workflow calls", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-workflow-barrier-"))
+    const barriers: string[][] = []
+
+    try {
+      const project = workflowProject([
+        {
+          workflow: {
+            id: "child",
+            steps: [
+              {
+                id: "child_first",
+                type: "shell",
+                with: {
+                  command: "child-first",
+                  result: "text",
+                },
+              },
+              {
+                id: "child_second",
+                type: "shell",
+                with: {
+                  command: "child-second",
+                  result: "text",
+                },
+              },
+            ],
+          },
+        },
+        {
+          workflow: {
+            id: "parent",
+            steps: [
+              {
+                id: "call_child",
+                type: "workflow",
+                with: {
+                  workflow: "child",
+                },
+              },
+            ],
+          },
+        },
+      ])
+
+      const workflow = project.files.find((file) => file.workflow.id === "parent")?.workflow
+      expect(workflow).toBeDefined()
+
+      await runWorkflow({
+        controlHandler: async (request) => {
+          if (request.kind === "step_barrier") {
+            barriers.push(request.barrier.next.map((step) => step.user_id ?? step.node_path))
+            return { action: "continue", kind: "step_barrier" }
+          }
+          throw new Error(`unexpected control request ${request.kind}`)
+        },
+        internals: {
+          runActionStep: async () => ({
+            exitCode: 0,
+            providerEvents: [],
+            result: "ok",
+            stderr: "",
+            stdout: "ok",
+            termination: "completed",
+          }),
+        },
+        invocationInputs: {},
+        parentEnv: process.env,
+        project,
+        projectRoot: root,
+        workflow: workflow!,
+      })
+
+      expect(barriers).toEqual([["child_first"], ["child_second"]])
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("recursively marks nested workflow descendants as skipped", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-workflow-skip-"))
+
+    try {
+      const project = workflowProject([
+        {
+          workflow: {
+            id: "child",
+            steps: [
+              {
+                id: "inner",
+                type: "shell",
+                with: {
+                  command: "echo inner",
+                },
+              },
+            ],
+          },
+        },
+        {
+          workflow: {
+            id: "parent",
+            steps: [
+              {
+                id: "call_child",
+                if: "${{ false }}",
+                type: "workflow",
+                with: {
+                  workflow: "child",
+                },
+              },
+            ],
+          },
+        },
+      ])
+
+      const parentWorkflow = project.files.find((file) => file.workflow.id === "parent")?.workflow
+      expect(parentWorkflow).toBeDefined()
+
+      const snapshot = await runWorkflow({
+        invocationInputs: {},
+        parentEnv: process.env,
+        project,
+        projectRoot: root,
+        workflow: parentWorkflow!,
+      })
+
+      expect(snapshot.nodes.find((node) => node.user_id === "call_child")).toMatchObject({
+        node_kind: "workflow",
+        node_path: "/0",
+        status: "skipped",
+      })
+      expect(snapshot.nodes.find((node) => node.user_id === "inner")).toMatchObject({
+        node_kind: "shell",
+        node_path: "/0/0",
+        status: "skipped",
+      })
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("rejects circular workflow references while expanding skipped descendants", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-workflow-skip-cycle-"))
+
+    try {
+      const project = workflowProject([
+        {
+          workflow: {
+            id: "a",
+            steps: [
+              {
+                id: "call_b",
+                if: "${{ false }}",
+                type: "workflow",
+                with: {
+                  workflow: "b",
+                },
+              },
+            ],
+          },
+        },
+        {
+          workflow: {
+            id: "b",
+            steps: [
+              {
+                id: "call_a",
+                type: "workflow",
+                with: {
+                  workflow: "a",
+                },
+              },
+            ],
+          },
+        },
+      ])
+
+      const workflow = project.files.find((file) => file.workflow.id === "a")?.workflow
+      expect(workflow).toBeDefined()
+
+      await expect(
+        runWorkflow({
+          invocationInputs: {},
+          parentEnv: process.env,
+          project,
+          projectRoot: root,
+          workflow: workflow!,
+        }),
+      ).rejects.toThrow("Step `call_b` creates a circular workflow reference: b -> a -> b.")
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("rejects circular workflow references before frontier planning recurses indefinitely", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-workflow-frontier-cycle-"))
+
+    try {
+      const project = workflowProject([
+        {
+          workflow: {
+            id: "a",
+            steps: [
+              {
+                id: "call_b",
+                type: "workflow",
+                with: {
+                  workflow: "b",
+                },
+              },
+            ],
+          },
+        },
+        {
+          workflow: {
+            id: "b",
+            steps: [
+              {
+                id: "call_a",
+                type: "workflow",
+                with: {
+                  workflow: "a",
+                },
+              },
+            ],
+          },
+        },
+      ])
+
+      const workflow = project.files.find((file) => file.workflow.id === "a")?.workflow
+      expect(workflow).toBeDefined()
+
+      await expect(
+        runWorkflow({
+          controlHandler: async (request) => {
+            if (request.kind === "step_barrier") {
+              return { action: "continue", kind: "step_barrier" }
+            }
+            throw new Error(`unexpected control request ${request.kind}`)
+          },
+          invocationInputs: {},
+          parentEnv: process.env,
+          project,
+          projectRoot: root,
+          workflow: workflow!,
+        }),
+      ).rejects.toThrow("Step `call_a` creates a circular workflow reference: a -> b -> a.")
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("rejects invalid nested workflow invocation inputs at runtime", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-workflow-invalid-input-"))
+
+    try {
+      const project = workflowProject([
+        {
+          workflow: {
+            id: "child",
+            inputs: {
+              enabled: { type: "boolean" },
+            },
+            steps: [
+              {
+                id: "inner",
+                type: "shell",
+                with: {
+                  command: "echo inner",
+                },
+              },
+            ],
+          },
+        },
+        {
+          workflow: {
+            id: "parent",
+            steps: [
+              {
+                id: "call_child",
+                type: "workflow",
+                with: {
+                  inputs: {
+                    enabled: "nope",
+                  },
+                  workflow: "child",
+                },
+              },
+            ],
+          },
+        },
+      ])
+
+      const parentWorkflow = project.files.find((file) => file.workflow.id === "parent")?.workflow
+      expect(parentWorkflow).toBeDefined()
+
+      await expect(
+        runWorkflow({
+          invocationInputs: {},
+          parentEnv: process.env,
+          project,
+          projectRoot: root,
+          workflow: parentWorkflow!,
+        }),
+      ).rejects.toThrow("inputs.enabled must be a boolean")
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("rejects invalid workflow-call inputs before parallel siblings start", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-parallel-invalid-workflow-input-"))
+    const startedSteps: string[] = []
+
+    try {
+      const project = workflowProject([
+        {
+          workflow: {
+            id: "child",
+            inputs: {
+              enabled: { type: "boolean" },
+            },
+            steps: [
+              {
+                id: "child_leaf",
+                type: "shell",
+                with: {
+                  command: "echo child",
+                },
+              },
+            ],
+          },
+        },
+        {
+          workflow: {
+            id: "parent",
+            steps: [
+              {
+                id: "fanout",
+                type: "parallel",
+                branches: [
+                  {
+                    id: "invalid",
+                    steps: [
+                      {
+                        id: "call_child",
+                        type: "workflow",
+                        with: {
+                          inputs: {
+                            enabled: "nope",
+                          },
+                          workflow: "child",
+                        },
+                      },
+                    ],
+                  },
+                  {
+                    id: "sibling",
+                    steps: [
+                      {
+                        id: "side_effect",
+                        type: "shell",
+                        with: {
+                          command: "echo sibling",
+                        },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      ])
+
+      const parentWorkflow = project.files.find((file) => file.workflow.id === "parent")?.workflow
+      expect(parentWorkflow).toBeDefined()
+
+      await expect(
+        runWorkflow({
+          internals: {
+            runActionStep: async (step) => {
+              startedSteps.push(step.id ?? "<anonymous>")
+              return {
+                exitCode: 0,
+                providerEvents: [],
+                result: null,
+                stderr: "",
+                stdout: "",
+                termination: "completed",
+              }
+            },
+          },
+          invocationInputs: {},
+          parentEnv: process.env,
+          project,
+          projectRoot: root,
+          workflow: parentWorkflow!,
+        }),
+      ).rejects.toThrow("Step `call_child` cannot invoke workflow `child`: inputs.enabled must be a boolean")
+
+      expect(startedSteps).toEqual([])
     } finally {
       await rm(root, { force: true, recursive: true })
     }
@@ -1220,6 +1743,102 @@ describe("run/execute", () => {
       })
 
       expect(barrierNext[0]).toEqual(["left_leaf", "loop_leaf", "branch_leaf"])
+      expect(barrierNext).toHaveLength(1)
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("includes workflow-backed branches in parallel barrier frontiers", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-parallel-workflow-frontier-"))
+    const barrierNext: string[][] = []
+
+    try {
+      const project = workflowProject([
+        {
+          workflow: {
+            id: "child",
+            steps: [
+              {
+                id: "child_leaf",
+                type: "shell",
+                with: {
+                  command: "child",
+                  result: "text",
+                },
+              },
+            ],
+          },
+        },
+        {
+          workflow: {
+            id: "parent",
+            steps: [
+              {
+                id: "fanout",
+                type: "parallel",
+                branches: [
+                  {
+                    id: "left",
+                    steps: [
+                      {
+                        id: "call_child",
+                        type: "workflow",
+                        with: {
+                          workflow: "child",
+                        },
+                      },
+                    ],
+                  },
+                  {
+                    id: "right",
+                    steps: [
+                      {
+                        id: "right_leaf",
+                        type: "shell",
+                        with: {
+                          command: "right",
+                          result: "text",
+                        },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      ])
+
+      const workflow = project.files.find((file) => file.workflow.id === "parent")?.workflow
+      expect(workflow).toBeDefined()
+
+      await runWorkflow({
+        controlHandler: async (request) => {
+          if (request.kind === "step_barrier") {
+            barrierNext.push(request.barrier.next.map((step) => step.user_id ?? step.node_path))
+            return { action: "continue", kind: "step_barrier" }
+          }
+          throw new Error(`unexpected control request ${request.kind}`)
+        },
+        internals: {
+          runActionStep: async () => ({
+            exitCode: 0,
+            providerEvents: [],
+            result: "ok",
+            stderr: "",
+            stdout: "ok",
+            termination: "completed",
+          }),
+        },
+        invocationInputs: {},
+        parentEnv: process.env,
+        project,
+        projectRoot: root,
+        workflow: workflow!,
+      })
+
+      expect(barrierNext[0]).toEqual(["child_leaf", "right_leaf"])
       expect(barrierNext).toHaveLength(1)
     } finally {
       await rm(root, { force: true, recursive: true })

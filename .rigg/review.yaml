@@ -9,7 +9,7 @@ steps:
   - id: remediation
     type: loop
     max: 6
-    until: ${{ len(steps.review.result.findings) == 0 }}
+    until: ${{ len(steps.review.result.findings) == 0 || len(steps.triage.result.findings) == 0 }}
     steps:
       - id: review
         type: codex
@@ -21,33 +21,157 @@ steps:
               type: base
               branch: main
 
+      - id: triage
+        type: shell
+        env:
+          FINDINGS: ${{ toJSON(steps.review.result) }}
+          GREENFIELD: ${{ inputs.greenfield }}
+          ITERATION: ${{ run.iteration }}
+          FINDING_COUNT: ${{ len(steps.review.result.findings) }}
+        with:
+          result: json
+          command: |
+            if [ "$FINDING_COUNT" -eq 0 ]; then
+              echo '{"findings":[],"directives":[],"discarded":[],"oscillations":[]}'
+              exit 0
+            fi
+            {
+              echo "=== CUMULATIVE DIFF (main...HEAD) ==="
+              git diff main...HEAD
+              echo ""
+              echo "=== REMEDIATION HISTORY ==="
+              git log main..HEAD --oneline
+              echo ""
+              for commit in $(git log main..HEAD --format=%H --reverse); do
+                echo "--- $(git log -1 --oneline "$commit") ---"
+                git diff "${commit}^".."${commit}" 2>/dev/null
+                echo ""
+              done
+            } | claude -p \
+              --model claude-opus-4-6 \
+              --append-system-prompt-file private/typescript-implementation-guide.md \
+              --tools "Read,Glob,Grep,WebSearch" \
+              --allowedTools "Read,Glob,Grep,WebSearch" \
+              --no-session-persistence \
+              --output-format text \
+              "You are a senior engineer triaging automated code review findings.
+            Stdin contains: (1) the cumulative diff against main, and (2) per-commit diffs
+            for each prior remediation iteration.
+            This is iteration $ITERATION.
+
+            ## Findings from automated review
+            $FINDINGS
+
+            ## Step 1: Oscillation detection
+            Analyze the per-iteration commit diffs to detect flip-flop patterns — cases where
+            a file or code region was changed in one direction in an earlier iteration, then
+            changed back (or in a conflicting direction) in a later iteration. Common patterns:
+            - Approach A in iteration 1 → approach B in iteration 2 → approach A again now
+            - A type/signature changed, then reverted, then the reviewer asks to change it again
+            - Error handling strategy toggling (throw vs Result, try-catch vs if-check)
+            - Import/export style going back and forth
+
+            For each oscillation detected:
+            1. Read the affected source file to understand current state
+            2. Evaluate BOTH approaches on their merits (correctness, type safety, consistency
+               with the rest of the codebase, alignment with the TypeScript implementation guide)
+            3. Pick the superior approach and record it as a **directive** — a binding instruction
+               for the fix step so it does not flip back
+
+            If a finding would cause oscillation (re-requesting an approach that was already
+            reverted), DISCARD it and note the chosen stable approach.
+
+            ## Step 2: Finding evaluation
+            For EACH remaining finding, read the actual source file and evaluate:
+
+            1. **Factual accuracy** — Does the code truly have this problem? Automated reviewers
+               often misread context, miss type narrowing, ignore surrounding guards, or flag
+               patterns that are correct for the framework in use.
+
+            2. **Severity classification**:
+               - CRITICAL: Bugs, security vulnerabilities, data loss, race conditions
+               - IMPORTANT: Correctness issues, meaningful performance problems, error handling
+                 gaps at system boundaries
+               - LOW: Style preferences, naming suggestions, overly cautious warnings,
+                 hypothetical edge cases unlikely to occur in practice
+
+            3. **Diff relevance** — Is the finding about code changed in this branch, or
+               pre-existing code the reviewer happened to notice? Only changes in the diff
+               are in scope.
+
+            4. **Actionability** — Is there a specific, concrete fix? Vague suggestions
+               like 'consider refactoring' or 'might want to add' are not actionable.
+
+            5. **Greenfield filter** — Greenfield mode: $GREENFIELD.
+               If true, also discard backward-compatibility, API stability, or migration findings.
+
+            ## Keep/Discard rules
+            KEEP: CRITICAL and IMPORTANT findings that are factually correct, about changed
+            code, and have a concrete fix.
+
+            DISCARD:
+            - LOW severity findings
+            - Factually incorrect findings (verified by reading source)
+            - Style/formatting issues (handled by linters and formatters)
+            - Findings about unchanged pre-existing code
+            - 'Add tests', 'add docs', 'add comments' suggestions
+            - Vague or non-actionable suggestions
+            - Findings that would cause oscillation with prior iterations
+
+            ## Output format
+            Your ENTIRE response must be a single JSON object. No text before or after.
+            No markdown fences. No explanation. ONLY the JSON object:
+            {
+              \"findings\": [<surviving findings, preserving original schema>],
+              \"directives\": [
+                {
+                  \"file\": \"path/to/file.ts\",
+                  \"approach\": \"description of the chosen stable approach\",
+                  \"reason\": \"why this approach wins over the alternative\",
+                  \"do_not\": \"description of the rejected approach — must not be applied\"
+                }
+              ],
+              \"discarded\": [
+                {\"id\": \"...\", \"reason\": \"one-line justification\"}
+              ],
+              \"oscillations\": [
+                {
+                  \"file\": \"path/to/file.ts\",
+                  \"pattern\": \"brief description of the back-and-forth\",
+                  \"resolution\": \"which approach was chosen and why\"
+                }
+              ]
+            }
+            If no findings survive triage, return {\"findings\": [], ...}.
+            If no oscillations were detected, return empty arrays for directives and oscillations." |
+            node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{const s=b.indexOf("{"),e=b.lastIndexOf("}");if(s>=0&&e>s)process.stdout.write(b.slice(s,e+1));else process.exit(1)})'
+
       - id: fix
-        if: ${{ len(steps.review.result.findings) > 0 }}
+        if: ${{ len(steps.triage.result.findings) > 0 }}
         type: codex
         with:
           action: run
           model: gpt-5.4
           prompt: |
-            You are a senior engineer. Below are code review findings for the current branch (diff against main).
+            You are a senior engineer. Below are triaged code review findings for the current branch
+            (diff against main). These have been validated as genuine issues worth fixing.
 
             ## Findings
-            ${{ toJSON(steps.review.result) }}
+            ${{ toJSON(steps.triage.result.findings) }}
+
+            ## Directives (BINDING — must follow)
+            ${{ toJSON(steps.triage.result.directives) }}
+
+            Directives are decisions made by a senior engineer after analyzing oscillation
+            patterns across prior remediation iterations. Each directive specifies:
+            - `approach`: the chosen implementation — you MUST use this approach
+            - `do_not`: the rejected alternative — you MUST NOT use this approach
+            If a finding conflicts with a directive, the directive wins.
 
             ## Task
-            For each finding:
-            1. **Evaluate validity** — Determine whether the finding is a genuine issue or a false positive.
-               Discard false positives silently.
-            2. **Greenfield filter** — This project is in greenfield mode: ${{ inputs.greenfield }}.
-               If greenfield mode is true, also discard any finding that is purely about
-               backward compatibility, API stability, or migration concerns — these are not
-               relevant for a new project. Keep everything else (bugs, correctness, security,
-               performance, design).
-            3. **Apply root-cause fixes** — For each remaining valid finding, make the optimal
-               fix that addresses the root cause. Do NOT apply superficial workarounds,
-               suppress warnings, or add band-aid patches. If the right fix requires restructuring
-               code, do it.
-
-            If no findings survive the triage, make no changes.
+            For each finding, apply the optimal root-cause fix. Do NOT apply superficial workarounds,
+            suppress warnings, or add band-aid patches. If the right fix requires restructuring
+            code, do it.
 
             After applying fixes, run these commands in order and fix any errors they produce:
             1. `bun run format`
@@ -55,10 +179,10 @@ steps:
             3. `bun test`
 
       - id: validate
-        if: ${{ len(steps.review.result.findings) > 0 }}
+        if: ${{ len(steps.triage.result.findings) > 0 }}
         type: shell
         env:
-          FINDINGS: ${{ toJSON(steps.review.result) }}
+          FINDINGS: ${{ toJSON(steps.triage.result) }}
         with:
           command: |
             git diff | claude -p \
@@ -72,7 +196,7 @@ steps:
 
             The diff of uncommitted changes is provided via stdin.
 
-            ## Original findings
+            ## Triaged findings
             $FINDINGS
 
             ## Task
@@ -94,7 +218,7 @@ steps:
             - One-line summary per fix evaluated"
 
       - id: commit
-        if: ${{ len(steps.review.result.findings) > 0 }}
+        if: ${{ len(steps.triage.result.findings) > 0 }}
         type: shell
         with:
           command: |
@@ -145,6 +269,11 @@ steps:
 
         ### Validation Notes
         Note any fixes that were corrected during validation (band-aids replaced with root-cause fixes).
+
+        ### Oscillation Resolution
+        If any flip-flop patterns were detected across iterations (same code changed back and forth),
+        document: which file, what the competing approaches were, and which was chosen as the stable solution.
+        If none, say 'No oscillations detected.'
 
         ### Remaining Risks
         Flag anything that looks incomplete, fragile, or worth watching.

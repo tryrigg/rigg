@@ -166,4 +166,42 @@ describe("summarizeStepProgress", () => {
 
     expect(summary).toEqual({ completed: 2, total: 3 })
   })
+
+  test("counts workflow steps as one unit even when nested child nodes exist", () => {
+    const summary = summarizeStepProgress(
+      workflow([
+        {
+          id: "call_child",
+          type: "workflow",
+          with: {
+            workflow: "child",
+          },
+        },
+      ]),
+      snapshot({
+        nodes: [
+          nodeSnapshot({
+            attempt: 1,
+            finished_at: "2026-03-17T00:00:01.000Z",
+            node_kind: "workflow",
+            node_path: "/0",
+            started_at: "2026-03-17T00:00:00.000Z",
+            status: "succeeded",
+            user_id: "call_child",
+          }),
+          nodeSnapshot({
+            attempt: 1,
+            finished_at: "2026-03-17T00:00:01.000Z",
+            node_kind: "shell",
+            node_path: "/0/0",
+            started_at: "2026-03-17T00:00:00.000Z",
+            status: "succeeded",
+            user_id: "inner",
+          }),
+        ],
+      }),
+    )
+
+    expect(summary).toEqual({ completed: 1, total: 1 })
+  })
 })

@@ -86,6 +86,17 @@ overall_confidence_score: number
 | `with.path`    | template | Yes      |
 | `with.content` | template | Yes      |
 
+## type: workflow
+
+| Field           | Type                       | Required |
+| --------------- | -------------------------- | -------- |
+| `with.workflow` | string                     | Yes      |
+| `with.inputs`   | map&lt;string, unknown&gt; | No       |
+
+`with.workflow` must be a static string, not a template expression.
+String `with.inputs` values are rendered as templates. Non-string YAML literals such as booleans and numbers pass through unchanged.
+`steps.<workflow_step_id>.result` is `null` in v1.
+
 ## type: group
 
 | Field     | Type                        | Required |
@@ -124,6 +135,8 @@ Each branch: `id` (required) + `steps`.
 1. Step IDs are unique across the entire workflow.
 2. `steps` arrays are non-empty except branch `else` cases.
 3. `steps.<id>.result` references previous steps only.
-4. Branch exports must have matching shapes across cases.
-5. `with` is required for all action types.
-6. Unknown YAML keys cause errors.
+4. `workflow` only references workflows in the same `.rigg` project.
+5. `workflow` input keys must match the callee input schema.
+6. Branch exports must have matching shapes across cases.
+7. `with` is required for all action types.
+8. Unknown YAML keys cause errors.

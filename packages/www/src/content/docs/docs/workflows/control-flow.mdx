@@ -1,9 +1,31 @@
 ---
 title: Control flow
-description: Structuring workflows with group, loop, branch, and parallel.
+description: Structuring workflows with workflow, group, loop, branch, and parallel.
 sidebar:
   order: 3
 ---
+
+## workflow
+
+Calls another workflow in the same `.rigg` project.
+
+```yaml
+- id: call_plan
+  type: workflow
+  with:
+    workflow: plan
+    inputs:
+      requirements: ${{ inputs.requirements }}
+      retries: 3
+      dry_run: true
+```
+
+Rules:
+
+- `with.workflow` must be a static string, not a template expression
+- String `with.inputs` values are rendered as templates in the caller scope
+- Boolean and number YAML literals pass through unchanged
+- `steps.call_plan.result` is `null` in v1, so workflows stay independent and share data through files or git state
 
 ## group
 

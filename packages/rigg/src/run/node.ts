@@ -1,6 +1,7 @@
 import { childNodePath, type BranchCase, type NodePath, type WorkflowStep } from "../compile/schema"
+import { workflowById, type WorkflowProject } from "../compile/project"
 import { elapsedMs, timestampNow } from "../util/time"
-import { isStepInterrupted, normalizeExecutionError } from "./error"
+import { RunExecutionError, isStepInterrupted, normalizeExecutionError } from "./error"
 import type { RunEvent } from "./progress"
 import type { StepBinding } from "./render"
 import type { CompletedNodeSummary, NodeProgress, NodeSnapshot, NodeStatus, RunSnapshot } from "./schema"
@@ -22,6 +23,7 @@ export function recordSkippedStep(
   step: WorkflowStep,
   nodePath: NodePath,
   reason: string,
+  project: WorkflowProject | undefined,
   emitEvent: EmitEvent,
 ): NodeSnapshot {
   const snapshot = createNodeSnapshot(step.id, nodePath, step.type, "skipped", {
@@ -34,17 +36,20 @@ export function recordSkippedStep(
   upsertNodeSnapshot(runState, snapshot)
 
   if (step.type === "group" || step.type === "loop") {
-    markBlockSkipped(runState, step.steps, nodePath)
+    markBlockSkipped(runState, step.steps, nodePath, project)
   }
   if (step.type === "branch") {
     for (const [index, caseNode] of step.cases.entries()) {
-      markCaseSkipped(runState, caseNode, `${nodePath}/${index}`)
+      markCaseSkipped(runState, caseNode, `${nodePath}/${index}`, project)
     }
   }
   if (step.type === "parallel") {
     for (const [index, branch] of step.branches.entries()) {
-      markBlockSkipped(runState, branch.steps, `${nodePath}/${index}`)
+      markBlockSkipped(runState, branch.steps, `${nodePath}/${index}`, project)
     }
+  }
+  if (step.type === "workflow") {
+    markSkippedWorkflow(runState, step, nodePath, project, [])
   }
 
   emitEvent({
@@ -181,7 +186,13 @@ export function statusForBinding(status: NodeStatus): StepBinding["status"] {
   throw new Error(`node status ${status} cannot be stored in step bindings`)
 }
 
-export function markCaseSkipped(runState: RunSnapshot, caseNode: BranchCase, pathPrefix: string): void {
+export function markCaseSkipped(
+  runState: RunSnapshot,
+  caseNode: BranchCase,
+  pathPrefix: string,
+  project?: WorkflowProject,
+  activeWorkflowIds: string[] = [],
+): void {
   const snapshot = createNodeSnapshot(undefined, pathPrefix, "branch_case", "skipped", {
     attempt: nextNodeAttempt(runState, pathPrefix),
     startedAt: timestampNow(),
@@ -189,7 +200,7 @@ export function markCaseSkipped(runState: RunSnapshot, caseNode: BranchCase, pat
   snapshot.duration_ms = 0
   snapshot.finished_at = snapshot.started_at
   upsertNodeSnapshot(runState, snapshot)
-  markBlockSkipped(runState, caseNode.steps, pathPrefix)
+  markBlockSkipped(runState, caseNode.steps, pathPrefix, project, activeWorkflowIds)
 }
 
 export function setNodeProgress(runState: RunSnapshot, nodePath: NodePath, progress: NodeProgress | undefined): void {
@@ -202,7 +213,13 @@ export function setNodeProgress(runState: RunSnapshot, nodePath: NodePath, progr
   upsertNodeSnapshot(runState, snapshot)
 }
 
-function markBlockSkipped(runState: RunSnapshot, steps: WorkflowStep[], pathPrefix: string): void {
+function markBlockSkipped(
+  runState: RunSnapshot,
+  steps: WorkflowStep[],
+  pathPrefix: string,
+  project?: WorkflowProject,
+  activeWorkflowIds: string[] = [],
+): void {
   for (const [index, step] of steps.entries()) {
     const nodePath = childNodePath(pathPrefix, index)
     const snapshot = createNodeSnapshot(step.id, nodePath, step.type, "skipped", {
@@ -214,17 +231,55 @@ function markBlockSkipped(runState: RunSnapshot, steps: WorkflowStep[], pathPref
     upsertNodeSnapshot(runState, snapshot)
 
     if (step.type === "group" || step.type === "loop") {
-      markBlockSkipped(runState, step.steps, nodePath)
+      markBlockSkipped(runState, step.steps, nodePath, project, activeWorkflowIds)
     }
     if (step.type === "branch") {
       for (const [caseIndex, caseNode] of step.cases.entries()) {
-        markCaseSkipped(runState, caseNode, `${nodePath}/${caseIndex}`)
+        markCaseSkipped(runState, caseNode, `${nodePath}/${caseIndex}`, project, activeWorkflowIds)
       }
     }
     if (step.type === "parallel") {
       for (const [branchIndex, branch] of step.branches.entries()) {
-        markBlockSkipped(runState, branch.steps, `${nodePath}/${branchIndex}`)
+        markBlockSkipped(runState, branch.steps, `${nodePath}/${branchIndex}`, project, activeWorkflowIds)
       }
     }
+    if (step.type === "workflow") {
+      markSkippedWorkflow(runState, step, nodePath, project, activeWorkflowIds)
+    }
   }
+}
+
+function markSkippedWorkflow(
+  runState: RunSnapshot,
+  step: Extract<WorkflowStep, { type: "workflow" }>,
+  nodePath: NodePath,
+  project: WorkflowProject | undefined,
+  activeWorkflowIds: string[],
+): void {
+  if (project === undefined) {
+    return
+  }
+
+  const workflow = workflowById(project, step.with.workflow)
+  if (workflow === undefined) {
+    return
+  }
+
+  if (activeWorkflowIds.includes(workflow.id)) {
+    throw new RunExecutionError(
+      `Step \`${step.id ?? nodePath}\` creates a circular workflow reference: ${formatWorkflowCycle([
+        ...activeWorkflowIds,
+        workflow.id,
+      ])}.`,
+      {
+        runReason: "validation_error",
+      },
+    )
+  }
+
+  markBlockSkipped(runState, workflow.steps, nodePath, project, [...activeWorkflowIds, workflow.id])
+}
+
+function formatWorkflowCycle(workflowIds: string[]): string {
+  return workflowIds.join(" -> ")
 }

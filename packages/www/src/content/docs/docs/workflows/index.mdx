@@ -72,4 +72,7 @@ ID rules: starts with ASCII letter or `_`, then alphanumeric, `_`, or `-`.
 - **Step results** are visible only to subsequent steps in the same scope
 - **Exports** promote results through container boundaries (group, loop, branch, parallel)
 - Access exports via `steps.<container_id>.result.<export_name>`
+- **Workflow composition** uses `type: workflow` to call another workflow in the same `.rigg` project
+- Workflow inputs can mix string templates with YAML literals such as booleans and numbers
+- `steps.<workflow_step_id>.result` is `null` in v1, so workflows hand off through the filesystem or git state
 - Step IDs must be unique across the **entire** workflow, not just within a scope

@@ -1,5 +1,6 @@
 import { StepKind, rootNodePath, childNodePath } from "../../compile/schema"
 import type { WorkflowStep, WorkflowDocument } from "../../compile/schema"
+import { workflowById, type WorkflowProject } from "../../compile/project"
 import type { NodeStatus, RunSnapshot, NodeSnapshot } from "../../run/schema"
 import { formatDuration } from "./symbols"
 
@@ -12,6 +13,7 @@ export const SUMMARY_KINDS = new Set<string>([
   StepKind.Loop,
   StepKind.Branch,
   StepKind.Parallel,
+  StepKind.Workflow,
 ])
 
 export type TreeEntry = {
@@ -148,6 +150,7 @@ function walkSteps(
   depth: number,
   prefix: string,
   entries: TreeEntry[],
+  project?: WorkflowProject,
 ): void {
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i]
@@ -155,7 +158,7 @@ function walkSteps(
       continue
     }
     const nodePath = parentPath === null ? rootNodePath(i) : childNodePath(parentPath, i)
-    walkStep(step, nodeMap, nodePath, depth, prefix, entries)
+    walkStep(step, nodeMap, nodePath, depth, prefix, entries, project)
   }
 }
 
@@ -166,6 +169,7 @@ function walkStep(
   depth: number,
   prefix: string,
   entries: TreeEntry[],
+  project?: WorkflowProject,
 ): void {
   const status = nodeStatus(nodeMap, nodePath)
   const label = step.id ?? step.type
@@ -205,7 +209,7 @@ function walkStep(
         isNext: false,
         meta,
       })
-      walkSteps(step.steps, nodeMap, nodePath, depth + 1, prefix + "│  ", entries)
+      walkSteps(step.steps, nodeMap, nodePath, depth + 1, prefix + "│  ", entries, project)
       return
     }
     case "loop": {
@@ -239,7 +243,29 @@ function walkStep(
           isNext: false,
         })
       }
-      walkSteps(step.steps, nodeMap, nodePath, depth + 1, prefix + "│  ", entries)
+      walkSteps(step.steps, nodeMap, nodePath, depth + 1, prefix + "│  ", entries, project)
+      return
+    }
+    case "workflow": {
+      const workflow = project === undefined ? undefined : workflowById(project, step.with.workflow)
+      const childStepCount = workflow?.steps.length ?? 0
+      entries.push({
+        entryType: "step",
+        depth,
+        prefix,
+        status,
+        label,
+        suffix,
+        nodePath,
+        nodeKind: "workflow",
+        isActive,
+        isNext: false,
+        detail: `→ ${step.with.workflow}`,
+        meta: `${step.with.workflow} · ${childStepCount} steps`,
+      })
+      if (workflow !== undefined) {
+        walkSteps(workflow.steps, nodeMap, nodePath, depth + 1, prefix + "│  ", entries, project)
+      }
       return
     }
     case "branch":
@@ -274,7 +300,7 @@ function walkStep(
           isActive: false,
           isNext: false,
         })
-        walkSteps(branchCase.steps, nodeMap, casePath, depth + 2, prefix + "│     ", entries)
+        walkSteps(branchCase.steps, nodeMap, casePath, depth + 2, prefix + "│     ", entries, project)
       }
       return
     case "parallel": {
@@ -312,7 +338,7 @@ function walkStep(
             isNext: false,
           })
         }
-        walkSteps(branch.steps, nodeMap, branchPath, depth + 1, prefix + "│  ", entries)
+        walkSteps(branch.steps, nodeMap, branchPath, depth + 1, prefix + "│  ", entries, project)
       }
       return
     }
@@ -335,10 +361,14 @@ function annotateNext(entries: TreeEntry[], snapshot: RunSnapshot | null): void 
   }
 }
 
-export function buildTree(workflow: WorkflowDocument, snapshot: RunSnapshot | null): TreeEntry[] {
+export function buildTree(
+  workflow: WorkflowDocument,
+  snapshot: RunSnapshot | null,
+  project?: WorkflowProject,
+): TreeEntry[] {
   const entries: TreeEntry[] = []
   const nodeMap = buildNodeMap(snapshot)
-  walkSteps(workflow.steps, nodeMap, null, 0, "", entries)
+  walkSteps(workflow.steps, nodeMap, null, 0, "", entries, project)
   annotateNext(entries, snapshot)
   return entries
 }

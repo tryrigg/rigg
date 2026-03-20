@@ -99,6 +99,13 @@ describe("cli/command", () => {
     expect(await Bun.file(join(cwd, ".gitignore")).exists()).toBe(false)
   })
 
+  test("generated docs describe workflow composition", () => {
+    expect(workflowSyntaxDoc).toContain("type: workflow")
+    expect(workflowSyntaxDoc).toContain("steps.<workflow_step_id>.result` is `null` in v1")
+    expect(schemaReferenceDoc).toContain("with.workflow")
+    expect(schemaReferenceDoc).toContain("`with.workflow` must be a static string")
+  })
+
   test("run requires interactive stdin and stderr", async () => {
     const cwd = await createTempWorkspace()
     await runInitCommand(cwd)

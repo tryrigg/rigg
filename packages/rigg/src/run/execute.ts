@@ -1,6 +1,7 @@
-import { renderTemplate } from "../compile/expr"
+import { extractTemplateExpressions, renderTemplate } from "../compile/expr"
 import { onAbort } from "../util/abort"
 import {
+  childWorkflowFrameId,
   childLoopScope,
   childNodePath,
   loopIterationFrameId,
@@ -16,13 +17,16 @@ import {
   type NodePath,
   type ParallelNode,
   type WorkflowDocument,
+  type WorkflowNode,
   type WorkflowStep,
 } from "../compile/schema"
+import { workflowById, type WorkflowProject } from "../compile/project"
 import { v7 as uuidv7 } from "uuid"
 import { runActionStep, type ActionStepOutput } from "./action"
 import { createControlBroker, resolveInteraction, waitForBarrier, type ControlBroker } from "./control"
 import {
   LoopExhaustedError,
+  RunExecutionError,
   StepInterruptedError,
   createEvaluationError,
   isStepInterrupted,
@@ -49,10 +53,11 @@ import type { BarrierReason, CompletedNodeSummary, RunReason, RunSnapshot } from
 import type { RenderContext, StepBinding } from "./render"
 import { createInitialRunState, setRunFinished } from "./state"
 import { elapsedMs, timestampNow } from "../util/time"
+import { normalizeInvocationInputs } from "./invocation"
 
 type ActionStepRunner = typeof runActionStep
 type ExecutionDisposition = "completed" | "failed" | "interrupted"
-type ControlNode = BranchNode | GroupNode | LoopNode | ParallelNode
+type ControlNode = BranchNode | GroupNode | LoopNode | ParallelNode | WorkflowNode
 
 type ExecutionResult = {
   barrierContext: BarrierContext
@@ -74,6 +79,7 @@ type ExecutionEnvironment = {
   controlHandler: RunControlHandler
   cwd: string
   emitEvent: (event: RunEvent) => void
+  project?: WorkflowProject | undefined
   runActionStep: ActionStepRunner
   runState: RunSnapshot
 }
@@ -81,6 +87,7 @@ type ExecutionEnvironment = {
 type ExecutionScope = {
   barrierMode: "default" | "suppressed"
   barrierContext: BarrierContext
+  activeWorkflowIds: string[]
   env: Record<string, string | undefined>
   frameId: FrameId
   inputs: Record<string, unknown>
@@ -101,6 +108,7 @@ export async function executeWorkflow(options: {
   invocationInputs: Record<string, unknown>
   onEvent?: ((event: RunEvent) => void) | undefined
   parentEnv: Record<string, string | undefined>
+  project?: WorkflowProject | undefined
   projectRoot: string
   signal?: AbortSignal | undefined
   workflow: WorkflowDocument
@@ -114,6 +122,7 @@ export async function executeWorkflow(options: {
     controlBroker: createControlBroker(),
     cwd: options.projectRoot,
     emitEvent: (event) => options.onEvent?.(snapshotRunEvent(event)),
+    project: options.project,
     runActionStep: resolvedRunActionStep,
     runState,
   }
@@ -132,6 +141,7 @@ export async function executeWorkflow(options: {
       {
         barrierMode: "default",
         barrierContext: { completed: null, reason: "run_started" },
+        activeWorkflowIds: [options.workflow.id],
         env: { ...options.parentEnv, ...workflowEnv },
         frameId: rootFrameId(),
         inputs: options.invocationInputs,
@@ -184,6 +194,7 @@ async function executeBlock(
       step,
       nodePath,
       {
+        activeWorkflowIds: scope.activeWorkflowIds,
         env: scope.env,
         frameId: scope.frameId,
         inputs: scope.inputs,
@@ -191,6 +202,7 @@ async function executeBlock(
         steps: bindings,
       },
       environment.cwd,
+      environment.project,
     )
     const frontier = prepared.frontier
     if (frontier.length > 0) {
@@ -284,6 +296,7 @@ async function executePreparedStep(
         prepared.step,
         nodePath,
         "condition evaluated to false",
+        environment.project,
         environment.emitEvent,
       )
       return {
@@ -300,6 +313,17 @@ async function executePreparedStep(
       return executeGroup(environment, scope, prepared.step, nodePath, prepared.env)
     case "loop":
       return executeLoop(environment, scope, prepared.step, nodePath, prepared.env)
+    case "workflow":
+      return executeWorkflowStep(
+        environment,
+        scope,
+        prepared.step,
+        nodePath,
+        prepared.frontier.map((node) => node.node_path),
+        prepared.env,
+        prepared.workflow,
+        prepared.inputs,
+      )
     case "branch":
       return executeBranch(environment, scope, prepared.step, nodePath, prepared.env, prepared.selection)
     case "parallel":
@@ -469,6 +493,7 @@ async function executeLoop(
         {
           barrierMode: scope.barrierMode,
           barrierContext: iterationBarrierContext,
+          activeWorkflowIds: scope.activeWorkflowIds,
           env,
           frameId: iterationFrameId,
           inputs: scope.inputs,
@@ -518,6 +543,46 @@ async function executeLoop(
   })
 }
 
+async function executeWorkflowStep(
+  environment: ExecutionEnvironment,
+  scope: ExecutionScope,
+  step: WorkflowNode,
+  nodePath: NodePath,
+  releasedFrontierNodePaths: NodePath[],
+  env: Record<string, string | undefined>,
+  workflow: WorkflowDocument | undefined,
+  inputs: Record<string, unknown>,
+): Promise<StepExecutionOutcome> {
+  return await executeControlNode(environment, step, nodePath, async (lifecycle) => {
+    const invocation = resolveWorkflowInvocation(environment, scope, step, nodePath, env, workflow, inputs)
+    const childExecution = await executeBlock(
+      environment,
+      {
+        ...scope,
+        activeWorkflowIds: [...scope.activeWorkflowIds, invocation.workflow.id],
+        env: invocation.env,
+        frameId: childWorkflowFrameId(scope.frameId, nodePath),
+        inputs: invocation.inputs,
+        releasedFrontierNodePaths: new Set(releasedFrontierNodePaths),
+        run: {},
+        steps: {},
+      },
+      invocation.workflow.steps,
+      nodePath,
+    )
+
+    return finalizeControlStep(
+      environment,
+      step,
+      nodePath,
+      lifecycle,
+      childExecution.disposition,
+      childExecution.reason,
+      null,
+    )
+  })
+}
+
 async function executeBranch(
   environment: ExecutionEnvironment,
   scope: ExecutionScope,
@@ -529,7 +594,7 @@ async function executeBranch(
   return await executeControlNode(environment, step, nodePath, async (lifecycle) => {
     if (selection === null) {
       for (const [index, caseNode] of step.cases.entries()) {
-        markCaseSkipped(environment.runState, caseNode, `${nodePath}/${index}`)
+        markCaseSkipped(environment.runState, caseNode, `${nodePath}/${index}`, environment.project)
       }
       const snapshot = createNodeSnapshot(step.id, nodePath, step.type, "skipped", lifecycle)
       snapshot.duration_ms = 0
@@ -548,7 +613,7 @@ async function executeBranch(
       if (index === selection.index) {
         continue
       }
-      markCaseSkipped(environment.runState, caseNode, `${nodePath}/${index}`)
+      markCaseSkipped(environment.runState, caseNode, `${nodePath}/${index}`, environment.project)
     }
 
     const casePath = `${nodePath}/${selection.index}`
@@ -830,6 +895,88 @@ function evaluateExports(exportsMap: Record<string, string> | undefined, context
     }
   }
   return output
+}
+
+function resolveWorkflowInvocation(
+  environment: ExecutionEnvironment,
+  scope: ExecutionScope,
+  step: WorkflowNode,
+  nodePath: NodePath,
+  env: Record<string, string | undefined>,
+  workflow: WorkflowDocument | undefined,
+  inputs: Record<string, unknown>,
+): {
+  env: Record<string, string | undefined>
+  inputs: Record<string, unknown>
+  workflow: WorkflowDocument
+} {
+  if (extractTemplateExpressions(step.with.workflow).length > 0) {
+    throw new RunExecutionError("workflow reference must be a static string, not a template expression.", {
+      runReason: "validation_error",
+    })
+  }
+
+  const targetWorkflow = workflow ?? resolveWorkflow(environment, step, nodePath)
+  if (scope.activeWorkflowIds.includes(targetWorkflow.id)) {
+    throw new RunExecutionError(
+      `Step \`${step.id ?? nodePath}\` creates a circular workflow reference: ${[
+        ...scope.activeWorkflowIds,
+        targetWorkflow.id,
+      ].join(" -> ")}.`,
+      {
+        runReason: "validation_error",
+      },
+    )
+  }
+
+  const normalizedInputs = normalizeInvocationInputs(targetWorkflow, inputs)
+  if (normalizedInputs.kind === "invalid") {
+    throw new RunExecutionError(
+      `Step \`${step.id ?? nodePath}\` cannot invoke workflow \`${targetWorkflow.id}\`: ${normalizedInputs.errors.join("; ")}`,
+      {
+        runReason: "validation_error",
+      },
+    )
+  }
+
+  const workflowEnv = renderEnvironment(targetWorkflow.env ?? {}, {
+    env,
+    inputs: normalizedInputs.inputs,
+    run: {},
+    steps: {},
+  })
+
+  return {
+    env: { ...env, ...workflowEnv },
+    inputs: normalizedInputs.inputs,
+    workflow: targetWorkflow,
+  }
+}
+
+function resolveWorkflow(environment: ExecutionEnvironment, step: WorkflowNode, nodePath: NodePath): WorkflowDocument {
+  if (environment.project === undefined) {
+    throw new RunExecutionError(
+      `Step \`${step.id ?? nodePath}\` cannot resolve workflow \`${step.with.workflow}\` without project context.`,
+      {
+        runReason: "validation_error",
+      },
+    )
+  }
+
+  const workflow = workflowById(environment.project, step.with.workflow)
+  if (workflow === undefined) {
+    throw new RunExecutionError(
+      `Step \`${step.id ?? nodePath}\` references workflow \`${step.with.workflow}\` which does not exist. Available workflows: ${environment.project.files
+        .map((file) => file.workflow.id)
+        .sort()
+        .join(", ")}.`,
+      {
+        runReason: "validation_error",
+      },
+    )
+  }
+
+  return workflow
 }
 
 function nextBarrierContext(completed: CompletedNodeSummary): BarrierContext {

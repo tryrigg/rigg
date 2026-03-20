@@ -34,7 +34,14 @@ steps:
         $REQUIREMENTS
 
         # Task
-        Explore the codebase to gather ALL context needed for UX design — focusing on the user, the experience, and how the product communicates.
+        Explore the codebase AND the external tools/protocols referenced in the requirements to gather ALL context needed for UX design.
+
+        ## External tool research (do this FIRST)
+        1. WebSearch for official documentation of every external tool, protocol, or service mentioned in the requirements
+        2. Understand what the tool actually does — its native CLI, interaction model, capabilities, and constraints
+        3. Identify where the tool DIFFERS from existing Rigg integrations — not just where it's similar
+        4. Document the tool's native concepts that have NO equivalent in Rigg today
+        5. If the requirements reference a protocol (ACP, LSP, JSON-RPC, etc.), read its spec and understand the actual capability surface
 
         ## Persona research
         1. Read the CLI entry point, README, docs site, and any user-facing help text to understand who uses Rigg
@@ -94,10 +101,16 @@ steps:
         |------|---------|-------|
         Every file relevant to the user experience.
 
+        ### External tool analysis
+        For each external tool/protocol referenced in the requirements:
+        | Tool/Protocol | What it actually does | Native concepts | Differs from existing Rigg integrations |
+        |---------------|----------------------|-----------------|----------------------------------------|
+        Based on official documentation, not assumptions about similarity to existing integrations.
+
         ### Constraints and opportunities
         UX constraints from the codebase. Opportunities for improvement.
 
-        Base everything on what you actually read. No assumptions."
+        Base everything on what you actually read and researched. No assumptions. Do NOT assume an external tool works the same way as an existing integration just because they belong to the same category."
 
   - id: designs
     type: parallel
@@ -130,20 +143,27 @@ steps:
                 Create a comprehensive UX design from scratch.
 
                 ## Design approach
-                1. **Start from the PERSONA.** Who is this person? What concepts do they already carry from tools
+                1. **Design the optimal experience for THIS feature first.** Before considering consistency with
+                   existing features, ask: what is the best possible UX for this specific capability? What would
+                   a user expect this tool to do, based on what the tool actually is? Start from the tool's real
+                   nature and capabilities — not from how another tool in Rigg happens to work.
+                2. **Start from the PERSONA.** Who is this person? What concepts do they already carry from tools
                    like git, npm, docker, CI systems? What mental models are already in their head? The design
                    must build on what they know — every new concept you introduce is cognitive debt.
-                2. **Reuse familiar concepts.** Map features to concepts the user already understands from their
-                   existing toolkit. Prefer familiar terminology and patterns. If git calls it a 'branch', don't
-                   invent a new name. Rigg-specific vocabulary is a last resort — justify every new concept.
-                3. **Design for predictability.** If the user learns how one feature works, they should be able to
-                   predict how the next one works. Consistent patterns enable analogical reasoning: 'A works like
-                   X, so B should work like X too.' Surprises are bugs.
-                4. **Fewer concepts, more power.** Resist adding a specialized feature for every use case. Find the
-                   smallest set of composable primitives that covers multiple scenarios. One well-designed concept
-                   serving three use cases beats three dedicated features.
+                3. **Validate analogies before applying them.** When reusing a pattern from an existing Rigg feature,
+                   verify the analogy actually holds. Two tools being in the same category (e.g., both are 'AI coding
+                   agents') does NOT mean they have the same capabilities, protocol, or interaction model. If the
+                   analogy breaks, design for the tool's actual nature. A provider-specific design that fits is
+                   better than a 'consistent' design that misrepresents the tool.
+                4. **Fewer concepts, more power — but not at the cost of correctness.** Minimize new concepts, but
+                   if the tool being integrated has capabilities that genuinely don't map to existing concepts,
+                   introduce new ones rather than pretending the tool works the same as something else. Forced
+                   uniformity is worse than honest complexity.
                 5. **Make every moment obvious.** At each step, there should be exactly one obvious next action.
                    Defaults should be right 90% of the time. Errors tell the user exactly what to do next.
+                6. **Consistency is earned, not assumed.** After designing the optimal experience, check where it
+                   naturally aligns with existing Rigg patterns. Adopt consistency where it doesn't compromise the
+                   feature's integrity. Document intentional departures with rationale.
 
                 # Output format
                 Produce ONLY this structured document. No preamble, no meta-commentary.
@@ -199,9 +219,11 @@ steps:
 
                 ### Concept inventory
                 Every concept the user needs to know to use this feature:
-                | Concept | Familiar from | New to Rigg? | Justification if new |
-                |---------|--------------|-------------|---------------------|
-                Minimize new concepts. If the total exceeds 2 new concepts, reconsider the design.
+                | Concept | Source | Reused from existing Rigg feature? | Reused from external tool? | Genuinely new? | Justification |
+                |---------|--------|-----------------------------------|---------------------------|----------------|---------------|
+                Prefer reusing concepts from the external tool's own vocabulary over forcing Rigg-internal patterns.
+                New concepts are acceptable when they reflect real capabilities. Flag any concept borrowed from
+                another Rigg feature — verify the analogy holds.
 
                 ### Extensibility
                 How this design accommodates future growth through general primitives:
@@ -209,10 +231,12 @@ steps:
                 - How existing concepts extend to cover future use cases
                 - Design boundaries (what would require a rethink)
 
-                ### Consistency
-                How this aligns with existing Rigg UX patterns.
-                Can a user who knows existing features predict how this one works?
-                Any intentional departures and the rationale."
+                ### Consistency audit
+                After completing the design above, compare it to existing Rigg UX patterns:
+                | Pattern | Existing behavior | This feature | Same? | If different, why |
+                |---------|------------------|--------------|-------|-------------------|
+                Consistency is desirable where the underlying capabilities are genuinely the same.
+                Where they differ, the design SHOULD differ — document why."
 
       - id: codex_branch
         steps:
@@ -236,21 +260,25 @@ steps:
                 Create a comprehensive UX design from scratch.
 
                 ## Design approach
-                1. **Build the PERSONA from evidence.** Don't invent a generic user. What does the documentation
+                1. **Design for THIS tool's actual nature.** Before looking at existing Rigg patterns, understand
+                   what the tool in the requirements actually does — its real capabilities, protocol, and interaction
+                   model. Design the best experience for what the tool IS, not for what another tool in Rigg does.
+                   The optimal UX for this specific feature is the top priority.
+                2. **Build the PERSONA from evidence.** Don't invent a generic user. What does the documentation
                    assume? What tools does this person already use daily (git, docker, npm, CI)? What concepts
                    and vocabulary do they carry? Your design must extend their existing mental model, not replace it.
-                2. **Reuse the user's vocabulary.** Every concept must map to something the user already knows.
-                   Don't invent terminology when existing dev vocabulary works. Count the new concepts you
-                   introduce — if it's more than one, you're probably overdesigning.
-                3. **Design for analogical reasoning.** Patterns must be consistent enough that users can predict
-                   behavior. If `rigg run X` works a certain way, `rigg run Y` should work the same way. When
-                   the user thinks 'if A works like this, B should too' — they should be right.
-                4. **Minimize the concept surface.** Instead of a feature for each use case, find the smallest
-                   set of composable primitives. One mechanism serving three use cases > three specialized
-                   mechanisms. This is how extensibility works — general patterns accommodate future needs.
-                5. **Map the STATE MACHINE.** Every user interaction is a state machine. Make states, transitions,
+                3. **Validate before reusing.** When you see a pattern from an existing Rigg feature that seems
+                   applicable, verify the analogy holds. Same category ≠ same capabilities. If the tool works
+                   differently, the UX should reflect that. Never force-fit a tool into another tool's interface.
+                4. **Map the STATE MACHINE.** Every user interaction is a state machine. Make states, transitions,
                    and outputs explicit. Ambiguous states = confused users. Progressive disclosure: start simple,
                    reveal complexity only when needed.
+                5. **Minimize concepts — but accept honest complexity.** Find the smallest set of composable
+                   primitives, but don't erase real differences between tools for the sake of uniformity. If the
+                   tool has a capability with no existing equivalent, give it a proper concept rather than hiding
+                   it behind a false analogy.
+                6. **Consistency is a secondary constraint.** After designing the optimal experience, adopt existing
+                   patterns where they naturally fit. Where they don't fit, diverge and explain why.
 
                 CRITICAL: Your response is saved directly. Output ONLY the design document.
                 No preamble, no thinking, no meta-commentary. Start with "### Persona".
@@ -312,9 +340,11 @@ steps:
                 - Intentional seams for future features
                 - Design boundaries (what would require a rethink)
 
-                ### Consistency
-                How this aligns with existing Rigg UX patterns.
-                Any intentional departures and the rationale.
+                ### Consistency audit
+                After completing the design above, compare it to existing Rigg UX patterns:
+                - Where does this design naturally align? (adopt these)
+                - Where does it diverge? (keep these — explain why the tool's nature demands it)
+                - Where was consistency tempting but wrong? (document the trap)
     exports:
       claude: ${{ steps.claude_design.result }}
       codex: ${{ steps.codex_design.result }}
@@ -353,26 +383,33 @@ steps:
 
         # Evaluation criteria (apply to both designs before synthesizing)
         Before merging, score each design on these dimensions to identify strengths and weaknesses:
+        - **Feature fidelity** — Does the design reflect what the tool ACTUALLY does? Or does it force the tool
+          into another tool's mold? This is the #1 criterion. A design that misrepresents the tool's capabilities
+          is wrong regardless of how clean it looks.
         - **Persona specificity** — Concrete, evidence-based, includes user's existing knowledge?
-        - **Familiar vocabulary** — Reuses concepts from user's toolkit? New concepts justified?
-        - **Predictability** — Patterns consistent enough for analogical reasoning?
         - **Happy path** — Most common use case is effortless?
         - **Output clarity** — Specific and example-driven with exact terminal output?
         - **Error actionability** — Every error tells the user what to DO?
         - **Edge case coverage** — Explicitly addressed?
-        - **Conceptual economy** — Minimum concepts? General primitives over specialized features?
-        - **Consistency** — Matches existing Rigg CLI patterns?
+        - **Conceptual economy** — Minimum concepts? But NOT at the cost of hiding real capabilities.
+        - **Consistency** — Where it naturally aligns with existing Rigg patterns, does it adopt them?
+          Where the tool genuinely differs, does it diverge honestly?
         - **Specificity** — Decisions justified and concrete, not abstract?
 
         # Synthesis rules
-        1. Take the strongest elements from each design — this is curating, not averaging
-        2. When designs conflict, choose what's best for the USER (not what's easier to implement)
-        3. Nothing valuable from either design should be lost
-        4. The result must feel like one coherent vision, not a Frankenstein of two
-        5. Concrete beats abstract — prefer the design with more specific output examples
-        6. Prefer the design that reuses more familiar concepts from the user's existing toolkit
-        7. Prefer the design with fewer total concepts — general primitives over specialized features
-        8. Ensure patterns are consistent enough that learning one feature predicts the next
+        1. **Feature-optimal experience first.** The best design for THIS specific feature wins over the most
+           consistent design. If one design accurately represents the tool and the other forces it into an
+           existing mold, choose the accurate one.
+        2. Take the strongest elements from each design — this is curating, not averaging
+        3. When designs conflict, choose what's best for the USER (not what's easier to implement)
+        4. Nothing valuable from either design should be lost
+        5. The result must feel like one coherent vision, not a Frankenstein of two
+        6. Concrete beats abstract — prefer the design with more specific output examples
+        7. Never unify interfaces at the cost of accuracy. If two providers genuinely work differently,
+           the design SHOULD reflect that. 'Same shape' is only desirable when the underlying capabilities
+           are actually the same.
+        8. Consistency with existing Rigg patterns is desirable but secondary. Adopt it where it fits
+           naturally; diverge where the tool's nature demands it.
 
         CRITICAL: Your response is saved directly to a file. Output ONLY the design document.
         No preamble, no meta-commentary. Start with '### 1. Persona'.
@@ -427,9 +464,11 @@ steps:
 
         ### 8. Concept inventory
         Every concept the user needs to know:
-        | Concept | Familiar from | New to Rigg? | Justification if new |
-        |---------|--------------|-------------|---------------------|
-        Minimize new concepts. General primitives over specialized features.
+        | Concept | Source | Reused from existing Rigg feature? | Reused from external tool? | Genuinely new? | Justification |
+        |---------|--------|-----------------------------------|---------------------------|----------------|---------------|
+        Prefer the external tool's own vocabulary over forcing Rigg-internal patterns.
+        New concepts are acceptable when they reflect real capabilities.
+        Flag any concept borrowed from another Rigg feature and verify the analogy holds.
 
         ### 9. Extensibility
         How this design grows through general primitives:
@@ -437,10 +476,13 @@ steps:
         - How existing concepts extend to cover future use cases
         - Design boundaries and what would require a rethink
 
-        ### 10. Consistency
-        How this aligns with existing Rigg UX patterns.
-        Can a user who knows existing features predict how this one works?
-        Any intentional departures and the rationale."
+        ### 10. Consistency audit
+        Compare the final design to existing Rigg UX patterns:
+        | Pattern | Existing behavior | This feature | Same? | If different, why |
+        |---------|------------------|--------------|-------|-------------------|
+        Consistency is adopted where the underlying capabilities are genuinely the same.
+        Where they differ, the design SHOULD differ — document why.
+        Flag any place where consistency was tempting but would have misrepresented the tool."
 
   - id: write_output
     type: write_file

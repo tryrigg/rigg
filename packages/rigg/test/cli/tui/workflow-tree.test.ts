@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import type { ActiveLiveOutput, CompletedOutput } from "../../../src/cli/state"
+import type { CompletedOutput, LiveOutput } from "../../../src/cli/state"
 import { completedOutputToLines, countLiveOutputs } from "../../../src/cli/tui/workflow-tree"
 
 describe("completedOutputToLines", () => {
@@ -111,7 +111,7 @@ describe("completedOutputToLines", () => {
 
 describe("countLiveOutputs", () => {
   test("counts only live outputs with visible lines", () => {
-    const liveOutputs: Record<string, ActiveLiveOutput> = {
+    const liveOutputs: Record<string, LiveOutput> = {
       "/group": { entries: [] },
       "/shell": {
         entries: [

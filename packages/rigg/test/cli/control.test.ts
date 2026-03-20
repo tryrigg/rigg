@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test"
 
-import { createControlResolverRegistry } from "../../src/cli/control"
+import { createRegistry } from "../../src/cli/control"
 import { runSnapshot } from "../fixture/builders"
 
 describe("cli/control", () => {
   test("control resolver registry rejects stale requests when the signal aborts", async () => {
-    const registry = createControlResolverRegistry()
+    const registry = createRegistry()
     const controller = new AbortController()
 
     const pending = registry.register({
@@ -28,7 +28,7 @@ describe("cli/control", () => {
   })
 
   test("control resolver registry preserves aborts that land during listener setup", async () => {
-    const registry = createControlResolverRegistry()
+    const registry = createRegistry()
     const controller = new AbortController()
     const originalAddEventListener = AbortSignal.prototype.addEventListener
 

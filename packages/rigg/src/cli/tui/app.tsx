@@ -4,7 +4,7 @@ import { useMemo, useSyncExternalStore } from "react"
 import type { InteractionResolution } from "../../session/interaction"
 import type { WorkflowProject } from "../../project"
 import type { WorkflowDocument } from "../../workflow/schema"
-import type { BarrierApprovalMode } from "../state"
+import type { ApprovalMode } from "../state"
 import { Barrier } from "./barrier"
 import { Header } from "./header"
 import { Interaction } from "./interaction"
@@ -24,7 +24,7 @@ export function App({
   store,
   workflow,
 }: {
-  barrierMode: BarrierApprovalMode
+  barrierMode: ApprovalMode
   onInterrupt: () => void
   onResolveBarrier: (barrierId: string, action: "abort" | "continue") => void
   onResolveInteraction: (interactionId: string, resolution: InteractionResolution) => void

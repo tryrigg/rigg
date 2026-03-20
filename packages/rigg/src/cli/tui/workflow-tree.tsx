@@ -3,7 +3,7 @@ import Spinner from "ink-spinner"
 import { useMemo } from "react"
 
 import type { NodeStatus } from "../../session/schema"
-import type { ActiveLiveOutput, CompletedOutput, LiveLogEntry, OutputPreview } from "../state"
+import type { CompletedOutput, LiveLogEntry, LiveOutput, OutputPreview } from "../state"
 import { statusSymbol, kindColor } from "./symbols"
 import { chars, colors } from "./theme"
 import type { TreeEntry } from "./tree"
@@ -50,7 +50,7 @@ function flattenEntriesToLines(entries: LiveLogEntry[], options: { labelStderr: 
   return lines
 }
 
-function liveOutputToLines(live: ActiveLiveOutput | undefined): FlatLine[] | null {
+function liveOutputToLines(live: LiveOutput | undefined): FlatLine[] | null {
   if (live === undefined) {
     return null
   }
@@ -59,7 +59,7 @@ function liveOutputToLines(live: ActiveLiveOutput | undefined): FlatLine[] | nul
   return lines.length > 0 ? lines : null
 }
 
-export function countLiveOutputs(liveOutputs: Record<string, ActiveLiveOutput>): number {
+export function countLiveOutputs(liveOutputs: Record<string, LiveOutput>): number {
   let count = 0
   for (const live of Object.values(liveOutputs)) {
     if (liveOutputToLines(live) !== null) {
@@ -243,7 +243,7 @@ function InlineOutput({
   prefix: string
   rail: string
   railColors: (string | undefined)[]
-  liveOutputs: Record<string, ActiveLiveOutput>
+  liveOutputs: Record<string, LiveOutput>
   completedOutputs: Record<string, CompletedOutput>
   maxLiveLines: number
 }) {
@@ -390,7 +390,7 @@ export function WorkflowTree({
   completedOutputs,
 }: {
   entries: TreeEntry[]
-  liveOutputs: Record<string, ActiveLiveOutput>
+  liveOutputs: Record<string, LiveOutput>
   completedOutputs: Record<string, CompletedOutput>
 }) {
   if (entries.length === 0) {

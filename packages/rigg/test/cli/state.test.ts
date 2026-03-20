@@ -1,19 +1,19 @@
 import { describe, expect, test } from "bun:test"
 
-import { applyRunEvent, createTerminalUiState, previewNodeOutput } from "../../src/cli/state"
+import { applyEvent, createState, previewOutput } from "../../src/cli/state"
 import { runSnapshot } from "../fixture/builders"
 
 describe("cli/state", () => {
-  test("applyRunEvent updates snapshot on run_started", () => {
-    const state = createTerminalUiState()
+  test("applyEvent updates snapshot on run_started", () => {
+    const state = createState()
     const snapshot = runSnapshot()
-    applyRunEvent(state, { kind: "run_started", snapshot })
+    applyEvent(state, { kind: "run_started", snapshot })
     expect(state.snapshot).toBe(snapshot)
     expect(state.lastCompletedNodePath).toBeNull()
   })
 
-  test("applyRunEvent does not allocate live output buckets before output arrives", () => {
-    const state = createTerminalUiState()
+  test("applyEvent does not allocate live output buckets before output arrives", () => {
+    const state = createState()
     const snapshot = runSnapshot({
       nodes: [
         {
@@ -34,8 +34,8 @@ describe("cli/state", () => {
       ],
     })
 
-    applyRunEvent(state, { kind: "run_started", snapshot })
-    applyRunEvent(state, {
+    applyEvent(state, { kind: "run_started", snapshot })
+    applyEvent(state, {
       kind: "node_started",
       node: snapshot.nodes[0]!,
       snapshot,
@@ -43,7 +43,7 @@ describe("cli/state", () => {
     expect(state.liveOutputs["/0"]).toBeUndefined()
 
     const completedNode = { ...snapshot.nodes[0]!, status: "succeeded" as const, duration_ms: 1000 }
-    applyRunEvent(state, {
+    applyEvent(state, {
       kind: "node_completed",
       node: completedNode,
       snapshot: runSnapshot({ nodes: [completedNode] }),
@@ -52,11 +52,11 @@ describe("cli/state", () => {
     expect(state.lastCompletedNodePath).toBe("/0")
   })
 
-  test("applyRunEvent accumulates step_output chunks", () => {
-    const state = createTerminalUiState()
+  test("applyEvent accumulates step_output chunks", () => {
+    const state = createState()
     const snapshot = runSnapshot()
-    applyRunEvent(state, { kind: "run_started", snapshot })
-    applyRunEvent(state, {
+    applyEvent(state, { kind: "run_started", snapshot })
+    applyEvent(state, {
       kind: "node_started",
       node: {
         attempt: 1,
@@ -76,14 +76,14 @@ describe("cli/state", () => {
       snapshot,
     })
 
-    applyRunEvent(state, {
+    applyEvent(state, {
       chunk: "hello ",
       kind: "step_output",
       node_path: "/0",
       stream: "stdout",
       user_id: "step-1",
     })
-    applyRunEvent(state, {
+    applyEvent(state, {
       chunk: "world",
       kind: "step_output",
       node_path: "/0",
@@ -97,11 +97,11 @@ describe("cli/state", () => {
     expect(entries[0]?.stream).toBe("stdout")
   })
 
-  test("applyRunEvent keeps stdout and stderr chunks in separate entries", () => {
-    const state = createTerminalUiState()
+  test("applyEvent keeps stdout and stderr chunks in separate entries", () => {
+    const state = createState()
     const snapshot = runSnapshot()
-    applyRunEvent(state, { kind: "run_started", snapshot })
-    applyRunEvent(state, {
+    applyEvent(state, { kind: "run_started", snapshot })
+    applyEvent(state, {
       kind: "node_started",
       node: {
         attempt: 1,
@@ -121,14 +121,14 @@ describe("cli/state", () => {
       snapshot,
     })
 
-    applyRunEvent(state, {
+    applyEvent(state, {
       chunk: "hello",
       kind: "step_output",
       node_path: "/0",
       stream: "stdout",
       user_id: "step-1",
     })
-    applyRunEvent(state, {
+    applyEvent(state, {
       chunk: "permission denied",
       kind: "step_output",
       node_path: "/0",
@@ -152,11 +152,11 @@ describe("cli/state", () => {
     ])
   })
 
-  test("applyRunEvent keeps stderr previews for stderr-only failures", () => {
-    const state = createTerminalUiState()
+  test("applyEvent keeps stderr previews for stderr-only failures", () => {
+    const state = createState()
     const snapshot = runSnapshot()
-    applyRunEvent(state, { kind: "run_started", snapshot })
-    applyRunEvent(state, {
+    applyEvent(state, { kind: "run_started", snapshot })
+    applyEvent(state, {
       kind: "node_started",
       node: {
         attempt: 1,
@@ -192,7 +192,7 @@ describe("cli/state", () => {
       waiting_for: null,
     }
 
-    applyRunEvent(state, {
+    applyEvent(state, {
       kind: "node_completed",
       node: failedNode,
       snapshot: runSnapshot({ nodes: [failedNode] }),
@@ -204,9 +204,9 @@ describe("cli/state", () => {
     })
   })
 
-  test("previewNodeOutput prefers stderr for failed nodes and stdout for succeeded nodes", () => {
+  test("previewOutput prefers stderr for failed nodes and stdout for succeeded nodes", () => {
     expect(
-      previewNodeOutput({
+      previewOutput({
         status: "failed",
         stderr: "permission denied",
         stdout: "partial output",
@@ -217,7 +217,7 @@ describe("cli/state", () => {
     })
 
     expect(
-      previewNodeOutput({
+      previewOutput({
         status: "succeeded",
         stderr: "warning",
         stdout: "done",
@@ -228,9 +228,9 @@ describe("cli/state", () => {
     })
   })
 
-  test("previewNodeOutput prefers stderr for interrupted nodes", () => {
+  test("previewOutput prefers stderr for interrupted nodes", () => {
     expect(
-      previewNodeOutput({
+      previewOutput({
         status: "interrupted",
         stderr: "cancelled by sibling failure",
         stdout: "partial output",
@@ -241,9 +241,9 @@ describe("cli/state", () => {
     })
   })
 
-  test("previewNodeOutput keeps the latest lines for long output", () => {
+  test("previewOutput keeps the latest lines for long output", () => {
     expect(
-      previewNodeOutput({
+      previewOutput({
         status: "failed",
         stderr: "line 1\nline 2\nline 3\nline 4",
       }),
@@ -253,11 +253,11 @@ describe("cli/state", () => {
     })
   })
 
-  test("applyRunEvent clears live outputs on run_finished", () => {
-    const state = createTerminalUiState()
+  test("applyEvent clears live outputs on run_finished", () => {
+    const state = createState()
     const snapshot = runSnapshot()
-    applyRunEvent(state, { kind: "run_started", snapshot })
-    applyRunEvent(state, {
+    applyEvent(state, { kind: "run_started", snapshot })
+    applyEvent(state, {
       kind: "node_started",
       node: {
         attempt: 1,
@@ -278,13 +278,13 @@ describe("cli/state", () => {
     })
 
     const finishedSnapshot = runSnapshot({ status: "succeeded", phase: "completed" })
-    applyRunEvent(state, { kind: "run_finished", snapshot: finishedSnapshot })
+    applyEvent(state, { kind: "run_finished", snapshot: finishedSnapshot })
     expect(Object.keys(state.liveOutputs).length).toBe(0)
     expect(state.snapshot?.status).toBe("succeeded")
   })
 
-  test("applyRunEvent appends an auto-continue event for completed barriers", () => {
-    const state = createTerminalUiState("auto_continue")
+  test("applyEvent appends an auto-continue event for completed barriers", () => {
+    const state = createState("auto_continue")
     const completedNode = {
       attempt: 1,
       duration_ms: 1200,
@@ -302,13 +302,13 @@ describe("cli/state", () => {
     }
     const completedSnapshot = runSnapshot({ nodes: [completedNode] })
 
-    applyRunEvent(state, { kind: "run_started", snapshot: completedSnapshot })
-    applyRunEvent(state, {
+    applyEvent(state, { kind: "run_started", snapshot: completedSnapshot })
+    applyEvent(state, {
       kind: "node_completed",
       node: completedNode,
       snapshot: completedSnapshot,
     })
-    applyRunEvent(state, {
+    applyEvent(state, {
       barrier: {
         barrier_id: "barrier-1",
         completed: {
@@ -396,8 +396,8 @@ describe("cli/state", () => {
     })
   })
 
-  test("applyRunEvent leaves manual barriers unchanged", () => {
-    const state = createTerminalUiState("manual")
+  test("applyEvent leaves manual barriers unchanged", () => {
+    const state = createState("manual")
     const completedNode = {
       attempt: 1,
       duration_ms: 1200,
@@ -415,13 +415,13 @@ describe("cli/state", () => {
     }
     const completedSnapshot = runSnapshot({ nodes: [completedNode] })
 
-    applyRunEvent(state, { kind: "run_started", snapshot: completedSnapshot })
-    applyRunEvent(state, {
+    applyEvent(state, { kind: "run_started", snapshot: completedSnapshot })
+    applyEvent(state, {
       kind: "node_completed",
       node: completedNode,
       snapshot: completedSnapshot,
     })
-    applyRunEvent(state, {
+    applyEvent(state, {
       barrier: {
         barrier_id: "barrier-1",
         completed: {

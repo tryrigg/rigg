@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { buildOmittedInputQuestion, createInterrupt, runRunCommand } from "../../src/cli/run"
+import { buildQuestion, createInterrupt, runCommand } from "../../src/cli/run"
 import { interrupt } from "../../src/session/error"
 import { runSnapshot, workflowProject } from "../fixture/builders"
 
@@ -67,7 +67,7 @@ describe("cli/run", () => {
     )
 
     await withTTYState({ stderr: true, stdin: false }, async () => {
-      const result = await runRunCommand(cwd, "plan", { autoContinue: false, inputs: [] })
+      const result = await runCommand(cwd, "plan", { autoContinue: false, inputs: [] })
       expect(result.exitCode).toBe(1)
       expect(result.stderrLines).toEqual([
         "`rigg run` requires a TTY because step barriers and workflow input prompts are interactive. Re-run in an interactive terminal. `--auto-continue` only works in an interactive terminal.",
@@ -84,7 +84,7 @@ describe("cli/run", () => {
     )
 
     await withTTYState({ stderr: false, stdin: true }, async () => {
-      const result = await runRunCommand(cwd, "plan", { autoContinue: true, inputs: [] })
+      const result = await runCommand(cwd, "plan", { autoContinue: true, inputs: [] })
       expect(result.exitCode).toBe(1)
       expect(result.stderrLines).toEqual([
         "`rigg run` requires a TTY because step barriers and workflow input prompts are interactive. Re-run in an interactive terminal. `--auto-continue` only works in an interactive terminal.",
@@ -103,7 +103,7 @@ describe("cli/run", () => {
     await withTTYState({ stderr: true, stdin: true }, async () => {
       const createRunSessionCalls: string[] = []
 
-      const result = await runRunCommand(
+      const result = await runCommand(
         cwd,
         "prompt",
         { autoContinue: true, inputs: [] },
@@ -170,7 +170,7 @@ describe("cli/run", () => {
 
   test("builds workflow input questions with type, description, and JSON hints", () => {
     expect(
-      buildOmittedInputQuestion("count", {
+      buildQuestion("count", {
         description: "How many iterations to run.",
         type: "integer",
       }),
@@ -188,7 +188,7 @@ describe("cli/run", () => {
     })
 
     expect(
-      buildOmittedInputQuestion("name", {
+      buildQuestion("name", {
         description: "Display name.",
         type: "string",
       }),
@@ -205,7 +205,7 @@ describe("cli/run", () => {
     })
 
     expect(
-      buildOmittedInputQuestion("config", {
+      buildQuestion("config", {
         default: { enabled: true },
         type: "object",
       }),
@@ -249,7 +249,7 @@ describe("cli/run", () => {
       const handledRequests: any[] = []
       const runWorkflowCalls: Array<Record<string, unknown>> = []
 
-      const result = await runRunCommand(
+      const result = await runCommand(
         cwd,
         "prompt",
         { autoContinue: false, inputs: ["name=cli-name"] },
@@ -356,7 +356,7 @@ describe("cli/run", () => {
       let handleCount = 0
       const runWorkflowCalls: Array<Record<string, unknown>> = []
 
-      const result = await runRunCommand(
+      const result = await runCommand(
         cwd,
         "prompt",
         { autoContinue: false, inputs: ["name=cli-name", 'config={\"enabled\":true}'] },
@@ -430,7 +430,7 @@ describe("cli/run", () => {
     await withTTYState({ stderr: true, stdin: true }, async () => {
       const runWorkflowCalls: Array<Record<string, unknown>> = []
 
-      const result = await runRunCommand(
+      const result = await runCommand(
         cwd,
         "prompt",
         { autoContinue: false, inputs: [] },
@@ -500,7 +500,7 @@ describe("cli/run", () => {
     )
 
     await withTTYState({ stderr: true, stdin: true }, async () => {
-      const result = await runRunCommand(
+      const result = await runCommand(
         cwd,
         "prompt",
         { autoContinue: false, inputs: [] },
@@ -574,7 +574,7 @@ describe("cli/run", () => {
     await withTTYState({ stderr: true, stdin: true }, async () => {
       const controller = new AbortController()
 
-      const result = await runRunCommand(
+      const result = await runCommand(
         cwd,
         "prompt",
         { autoContinue: false, inputs: [] },

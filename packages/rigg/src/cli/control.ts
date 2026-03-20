@@ -19,14 +19,14 @@ type ResolverEntry =
       resolve: (resolution: Extract<RunControlResolution, { kind: "step_barrier" }>) => void
     }
 
-export type ControlResolverRegistry = {
+export type ResolverRegistry = {
   clear: (reason?: unknown) => void
   register: (request: RunControlRequest) => Promise<RunControlResolution>
   resolveBarrier: (barrierId: string, action: "abort" | "continue") => void
   resolveInteraction: (interactionId: string, resolution: InteractionResolution) => void
 }
 
-export function resolveImmediateControlRequest(request: RunControlRequest): RunControlResolution | null {
+export function resolveImmediate(request: RunControlRequest): RunControlResolution | null {
   if (request.kind === "step_barrier") {
     return null
   }
@@ -42,16 +42,13 @@ export function resolveImmediateControlRequest(request: RunControlRequest): RunC
   return null
 }
 
-export function withSyntheticActiveInteraction(
-  snapshot: RunSnapshot,
-  request: RunControlRequest & { kind: "interaction" },
-): RunSnapshot {
+export function addSynthetic(snapshot: RunSnapshot, request: RunControlRequest & { kind: "interaction" }): RunSnapshot {
   const next = structuredClone(snapshot)
   setInteraction(next, structuredClone(request.interaction))
   return next
 }
 
-export function withoutSyntheticActiveInteraction(snapshot: RunSnapshot, interactionId: string): RunSnapshot {
+export function removeSynthetic(snapshot: RunSnapshot, interactionId: string): RunSnapshot {
   const next = structuredClone(snapshot)
   if (next.active_interaction?.interaction_id === interactionId) {
     setInteraction(next, null)
@@ -59,7 +56,7 @@ export function withoutSyntheticActiveInteraction(snapshot: RunSnapshot, interac
   return next
 }
 
-export function createControlResolverRegistry(): ControlResolverRegistry {
+export function createRegistry(): ResolverRegistry {
   const entries = new Map<string, ResolverEntry>()
 
   function release(id: string): ResolverEntry | undefined {

@@ -7,13 +7,8 @@ import type { WorkflowDocument } from "../workflow/schema"
 import type { RunControlHandler, RunEvent } from "../session/event"
 import { App } from "./tui/app"
 import { createStore } from "./tui/store"
-import {
-  createControlResolverRegistry,
-  resolveImmediateControlRequest,
-  withSyntheticActiveInteraction,
-  withoutSyntheticActiveInteraction,
-} from "./control"
-import { type BarrierApprovalMode } from "./state"
+import { addSynthetic, createRegistry, removeSynthetic, resolveImmediate } from "./control"
+import { type ApprovalMode } from "./state"
 
 export type RunSession = {
   close: () => void
@@ -21,7 +16,7 @@ export type RunSession = {
   handle: RunControlHandler
 }
 
-export type WorkflowInterruptHandler = () => void
+export type InterruptHandler = () => void
 
 type InteractiveTerminal = {
   stderr: NodeJS.WriteStream
@@ -30,7 +25,7 @@ type InteractiveTerminal = {
 
 type InkRenderFunction = typeof render
 
-export function createNonInteractiveRunSession(): RunSession {
+export function createNonInteractive(): RunSession {
   return {
     close: () => {},
     emit: () => {},
@@ -46,7 +41,7 @@ export function createNonInteractiveRunSession(): RunSession {
   }
 }
 
-export function createInkRenderOptions(terminal: InteractiveTerminal): NonNullable<Parameters<InkRenderFunction>[1]> {
+export function createRenderOptions(terminal: InteractiveTerminal): NonNullable<Parameters<InkRenderFunction>[1]> {
   return {
     exitOnCtrlC: false,
     stderr: terminal.stderr,
@@ -55,16 +50,16 @@ export function createInkRenderOptions(terminal: InteractiveTerminal): NonNullab
   }
 }
 
-export function createInkRunSession(options: {
-  barrierMode: BarrierApprovalMode
-  interrupt: WorkflowInterruptHandler
+export function createInkSession(options: {
+  barrierMode: ApprovalMode
+  interrupt: InterruptHandler
   project?: WorkflowProject | undefined
   renderApp?: InkRenderFunction
   terminal?: InteractiveTerminal
   workflow: WorkflowDocument
 }): RunSession {
   const store = createStore({ barrierMode: options.barrierMode })
-  const controlResolvers = createControlResolverRegistry()
+  const controlResolvers = createRegistry()
   const terminal = options.terminal ?? {
     stderr: process.stderr,
     stdin: process.stdin,
@@ -82,7 +77,7 @@ export function createInkRunSession(options: {
       store,
       workflow: options.workflow,
     }),
-    createInkRenderOptions(terminal),
+    createRenderOptions(terminal),
   )
 
   return {
@@ -105,7 +100,7 @@ export function createInkRunSession(options: {
         return { action: "continue", kind: "step_barrier" }
       }
 
-      const immediateResolution = resolveImmediateControlRequest(request)
+      const immediateResolution = resolveImmediate(request)
       if (immediateResolution !== null) {
         return immediateResolution
       }
@@ -114,24 +109,20 @@ export function createInkRunSession(options: {
         return controlResolvers.register(request)
       }
 
-      store.replaceSnapshot(withSyntheticActiveInteraction(request.snapshot, request))
+      store.replaceSnapshot(addSynthetic(request.snapshot, request))
 
       return Promise.resolve(controlResolvers.register(request)).then(
         (resolution) => {
           const currentSnapshot = store.getSnapshot().state.snapshot
           if (currentSnapshot !== null) {
-            store.replaceSnapshot(
-              withoutSyntheticActiveInteraction(currentSnapshot, request.interaction.interaction_id),
-            )
+            store.replaceSnapshot(removeSynthetic(currentSnapshot, request.interaction.interaction_id))
           }
           return resolution
         },
         (error) => {
           const currentSnapshot = store.getSnapshot().state.snapshot
           if (currentSnapshot !== null) {
-            store.replaceSnapshot(
-              withoutSyntheticActiveInteraction(currentSnapshot, request.interaction.interaction_id),
-            )
+            store.replaceSnapshot(removeSynthetic(currentSnapshot, request.interaction.interaction_id))
           }
           throw error
         },

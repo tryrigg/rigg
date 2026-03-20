@@ -1,33 +1,27 @@
 import { describe, expect, test } from "bun:test"
 
-import {
-  createInstallerEnv,
-  inferInstallDir,
-  isDevelopmentBuildVersion,
-  parseUpgradeArgs,
-  runUpgradeCommand,
-} from "../../src/cli/upgrade"
+import { createInstallerEnv, inferInstallDir, isDevBuild, parseArgs, runCommand } from "../../src/cli/upgrade"
 
 describe("cli/upgrade", () => {
-  test("parseUpgradeArgs parses an optional positional target", () => {
-    expect(parseUpgradeArgs([])).toEqual({ target: undefined })
-    expect(parseUpgradeArgs(["1.2.3"])).toEqual({ target: "1.2.3" })
-    expect(parseUpgradeArgs(["v1.2.3"])).toEqual({ target: "1.2.3" })
+  test("parseArgs parses an optional positional target", () => {
+    expect(parseArgs([])).toEqual({ target: undefined })
+    expect(parseArgs(["1.2.3"])).toEqual({ target: "1.2.3" })
+    expect(parseArgs(["v1.2.3"])).toEqual({ target: "1.2.3" })
   })
 
-  test("parseUpgradeArgs rejects unknown options", () => {
-    expect(() => parseUpgradeArgs(["--version", "1.2.3"])).toThrow("Unknown upgrade option: --version")
+  test("parseArgs rejects unknown options", () => {
+    expect(() => parseArgs(["--version", "1.2.3"])).toThrow("Unknown upgrade option: --version")
   })
 
-  test("parseUpgradeArgs rejects multiple positionals", () => {
-    expect(() => parseUpgradeArgs(["1.2.3", "2.0.0"])).toThrow("`rigg upgrade` accepts at most one version target.")
+  test("parseArgs rejects multiple positionals", () => {
+    expect(() => parseArgs(["1.2.3", "2.0.0"])).toThrow("`rigg upgrade` accepts at most one version target.")
   })
 
-  test("isDevelopmentBuildVersion detects local dev build versions", () => {
-    expect(isDevelopmentBuildVersion("dev")).toBe(true)
-    expect(isDevelopmentBuildVersion("1.2.3-dev.4+abc123")).toBe(true)
-    expect(isDevelopmentBuildVersion("0.0.0-dev+abc123.dirty")).toBe(true)
-    expect(isDevelopmentBuildVersion("1.2.3")).toBe(false)
+  test("isDevBuild detects local dev build versions", () => {
+    expect(isDevBuild("dev")).toBe(true)
+    expect(isDevBuild("1.2.3-dev.4+abc123")).toBe(true)
+    expect(isDevBuild("0.0.0-dev+abc123.dirty")).toBe(true)
+    expect(isDevBuild("1.2.3")).toBe(false)
   })
 
   test("inferInstallDir skips dev builds", () => {
@@ -80,16 +74,16 @@ describe("cli/upgrade", () => {
     expect(env["RIGG_INSTALL_DIR"]).toBe("/Users/me/.local/bin")
   })
 
-  test("runUpgradeCommand skips when the requested version is already installed", async () => {
-    const result = await runUpgradeCommand({ target: "v1.2.3" }, { currentVersion: "1.2.3", execPath: "/tmp/rigg" })
+  test("runCommand skips when the requested version is already installed", async () => {
+    const result = await runCommand({ target: "v1.2.3" }, { currentVersion: "1.2.3", execPath: "/tmp/rigg" })
 
     expect(result.exitCode).toBe(0)
     expect(result.stdoutLines).toEqual(["rigg upgrade skipped: v1.2.3 is already installed."])
     expect(result.stderrLines).toEqual([])
   })
 
-  test("runUpgradeCommand fails fast for dev builds", async () => {
-    const result = await runUpgradeCommand({ target: undefined }, { currentVersion: "dev", execPath: "/tmp/rigg" })
+  test("runCommand fails fast for dev builds", async () => {
+    const result = await runCommand({ target: undefined }, { currentVersion: "dev", execPath: "/tmp/rigg" })
 
     expect(result.exitCode).toBe(1)
     expect(result.stderrLines).toEqual([
@@ -97,8 +91,8 @@ describe("cli/upgrade", () => {
     ])
   })
 
-  test("runUpgradeCommand fails fast for local compiled dev builds", async () => {
-    const result = await runUpgradeCommand(
+  test("runCommand fails fast for local compiled dev builds", async () => {
+    const result = await runCommand(
       { target: undefined },
       { currentVersion: "1.2.3-dev.4+abc123", execPath: "/tmp/rigg" },
     )
@@ -109,8 +103,8 @@ describe("cli/upgrade", () => {
     ])
   })
 
-  test("runUpgradeCommand fails fast for bun executables", async () => {
-    const result = await runUpgradeCommand({ target: undefined }, { currentVersion: "1.0.0", execPath: "/tmp/bun" })
+  test("runCommand fails fast for bun executables", async () => {
+    const result = await runCommand({ target: undefined }, { currentVersion: "1.0.0", execPath: "/tmp/bun" })
 
     expect(result.exitCode).toBe(1)
     expect(result.stderrLines).toEqual([
@@ -118,23 +112,23 @@ describe("cli/upgrade", () => {
     ])
   })
 
-  test("runUpgradeCommand fetches the installer and executes it with prepared env", async () => {
+  test("runCommand fetches the installer and executes it with prepared env", async () => {
     let fetchedUrl = ""
     let scriptValue = ""
     const logs: string[] = []
     const capture: { env?: NodeJS.ProcessEnv } = {}
 
-    const result = await runUpgradeCommand(
+    const result = await runCommand(
       { target: "v3.0.0" },
       {
         currentVersion: "1.0.0",
         env: { PATH: "/usr/bin", RIGG_INSTALL_REPO: "tryrigg/rigg" },
         execPath: "/Users/me/.local/bin/rigg",
-        fetchInstallScript: async (url) => {
+        fetchScript: async (url) => {
           fetchedUrl = url
           return "#!/usr/bin/env bash\necho install"
         },
-        runInstallerScript: async (script, env) => {
+        runScript: async (script, env) => {
           scriptValue = script
           capture.env = env
         },
@@ -151,10 +145,10 @@ describe("cli/upgrade", () => {
     expect(logs).toEqual(["Upgrading rigg to v3.0.0...", "Upgrade complete."])
   })
 
-  test("runUpgradeCommand does not forward inherited installer overrides", async () => {
+  test("runCommand does not forward inherited installer overrides", async () => {
     const capture: { env?: NodeJS.ProcessEnv } = {}
 
-    const result = await runUpgradeCommand(
+    const result = await runCommand(
       { target: undefined },
       {
         currentVersion: "1.0.0",
@@ -164,8 +158,8 @@ describe("cli/upgrade", () => {
           RIGG_VERSION: "9.9.9",
         },
         execPath: "/Users/me/.local/bin/rigg",
-        fetchInstallScript: async () => "#!/usr/bin/env bash\necho install",
-        runInstallerScript: async (_script, env) => {
+        fetchScript: async () => "#!/usr/bin/env bash\necho install",
+        runScript: async (_script, env) => {
           capture.env = env
         },
       },

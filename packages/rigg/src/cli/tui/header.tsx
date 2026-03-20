@@ -1,7 +1,7 @@
 import { Box, Text, useStdout } from "ink"
 
 import type { RunSnapshot, RunStatus } from "../../session/schema"
-import type { BarrierApprovalMode } from "../state"
+import type { ApprovalMode } from "../state"
 import { headerLine, renderRule } from "./layout"
 
 function statusColor(status: RunStatus | string): string {
@@ -18,7 +18,7 @@ function statusColor(status: RunStatus | string): string {
   }
 }
 
-function statusLabel(snapshot: RunSnapshot, barrierMode: BarrierApprovalMode): string {
+function statusLabel(snapshot: RunSnapshot, barrierMode: ApprovalMode): string {
   if (snapshot.active_interaction !== null) {
     return "waiting for input"
   }
@@ -34,7 +34,7 @@ export function Header({
   elapsed,
   stepProgress,
 }: {
-  barrierMode: BarrierApprovalMode
+  barrierMode: ApprovalMode
   snapshot: RunSnapshot | null
   elapsed: string
   stepProgress?: string | undefined

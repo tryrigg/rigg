@@ -2,7 +2,7 @@ import type { CodexProviderEvent } from "../codex/event"
 import type { RunEvent, StreamKind } from "../session/event"
 import type { FrontierNode, RunSnapshot } from "../session/schema"
 
-export type BarrierApprovalMode = "manual" | "auto_continue"
+export type ApprovalMode = "manual" | "auto_continue"
 
 export type LiveLogEntry = {
   key: string | null
@@ -11,7 +11,7 @@ export type LiveLogEntry = {
   variant: "assistant" | "event" | "stream"
 }
 
-export type ActiveLiveOutput = {
+export type LiveOutput = {
   entries: LiveLogEntry[]
 }
 
@@ -25,11 +25,11 @@ export type CompletedOutput = {
   preview: OutputPreview | null
 }
 
-export type TerminalUiState = {
-  barrierMode: BarrierApprovalMode
+export type UiState = {
+  barrierMode: ApprovalMode
   completedOutputs: Record<string, CompletedOutput>
   lastCompletedNodePath: string | null
-  liveOutputs: Record<string, ActiveLiveOutput>
+  liveOutputs: Record<string, LiveOutput>
   snapshot: RunSnapshot | null
 }
 
@@ -39,7 +39,7 @@ const labels: Record<string, string> = {
   write_file: "write_file",
 }
 
-export function createTerminalUiState(barrierMode: BarrierApprovalMode = "manual"): TerminalUiState {
+export function createState(barrierMode: ApprovalMode = "manual"): UiState {
   return {
     barrierMode,
     completedOutputs: {},
@@ -49,7 +49,7 @@ export function createTerminalUiState(barrierMode: BarrierApprovalMode = "manual
   }
 }
 
-export function previewNodeOutput(node: { status: string; stderr?: unknown; stdout?: unknown }): OutputPreview | null {
+export function previewOutput(node: { status: string; stderr?: unknown; stdout?: unknown }): OutputPreview | null {
   const order =
     node.status === "failed" || node.status === "interrupted"
       ? (["stderr", "stdout"] as const)
@@ -70,7 +70,7 @@ export function previewNodeOutput(node: { status: string; stderr?: unknown; stdo
   return null
 }
 
-export function applyRunEvent(state: TerminalUiState, event: RunEvent): void {
+export function applyEvent(state: UiState, event: RunEvent): void {
   switch (event.kind) {
     case "run_started":
       state.liveOutputs = {}
@@ -87,7 +87,7 @@ export function applyRunEvent(state: TerminalUiState, event: RunEvent): void {
       const live = state.liveOutputs[event.node.node_path]
       state.completedOutputs[event.node.node_path] = {
         entries: live?.entries ?? [],
-        preview: previewNodeOutput(event.node),
+        preview: previewOutput(event.node),
       }
       delete state.liveOutputs[event.node.node_path]
       return
@@ -117,7 +117,7 @@ export function applyRunEvent(state: TerminalUiState, event: RunEvent): void {
         const node = event.snapshot.nodes.find((item) => item.node_path === nodePath)
         state.completedOutputs[nodePath] = {
           entries: live.entries,
-          preview: node ? previewNodeOutput(node) : null,
+          preview: node ? previewOutput(node) : null,
         }
       }
       state.liveOutputs = {}
@@ -136,7 +136,7 @@ function truncate(raw: string): string | null {
   return [`... +${lines.length - 3} earlier lines`, ...lines.slice(-3)].join("\n")
 }
 
-function appendAutoContinue(state: TerminalUiState, event: Extract<RunEvent, { kind: "barrier_reached" }>): void {
+function appendAutoContinue(state: UiState, event: Extract<RunEvent, { kind: "barrier_reached" }>): void {
   if (state.barrierMode !== "auto_continue") {
     return
   }
@@ -159,7 +159,7 @@ function appendAutoContinue(state: TerminalUiState, event: Extract<RunEvent, { k
   })
 }
 
-function ensureCompletedOutput(state: TerminalUiState, nodePath: string): CompletedOutput {
+function ensureCompletedOutput(state: UiState, nodePath: string): CompletedOutput {
   const current = state.completedOutputs[nodePath]
   if (current !== undefined) {
     return current
@@ -168,7 +168,7 @@ function ensureCompletedOutput(state: TerminalUiState, nodePath: string): Comple
   const node = state.snapshot?.nodes.find((item) => item.node_path === nodePath)
   const output = {
     entries: [],
-    preview: node ? previewNodeOutput(node) : null,
+    preview: node ? previewOutput(node) : null,
   }
   state.completedOutputs[nodePath] = output
   return output
@@ -193,7 +193,7 @@ function frontierLabel(node: FrontierNode): string {
   return parts.join(" · ")
 }
 
-function appendLiveStream(state: TerminalUiState, nodePath: string, chunk: string, stream: StreamKind): void {
+function appendLiveStream(state: UiState, nodePath: string, chunk: string, stream: StreamKind): void {
   const output = ensureLiveOutput(state, nodePath)
   const last = output.entries.at(-1)
   if (last !== undefined && last.variant === "stream" && last.stream === stream) {
@@ -209,7 +209,7 @@ function appendLiveStream(state: TerminalUiState, nodePath: string, chunk: strin
   })
 }
 
-function appendProviderEvent(state: TerminalUiState, nodePath: string, event: CodexProviderEvent): void {
+function appendProviderEvent(state: UiState, nodePath: string, event: CodexProviderEvent): void {
   const output = ensureLiveOutput(state, nodePath)
 
   switch (event.kind) {
@@ -254,7 +254,7 @@ function appendProviderEvent(state: TerminalUiState, nodePath: string, event: Co
   }
 }
 
-function ensureLiveOutput(state: TerminalUiState, nodePath: string): ActiveLiveOutput {
+function ensureLiveOutput(state: UiState, nodePath: string): LiveOutput {
   const current = state.liveOutputs[nodePath]
   if (current !== undefined) {
     return current
@@ -265,7 +265,7 @@ function ensureLiveOutput(state: TerminalUiState, nodePath: string): ActiveLiveO
   return output
 }
 
-function upsertAssistant(output: ActiveLiveOutput, key: string, update: (current: string) => string): void {
+function upsertAssistant(output: LiveOutput, key: string, update: (current: string) => string): void {
   for (let i = output.entries.length - 1; i >= 0; i -= 1) {
     const item = output.entries[i]
     if (item === undefined) {

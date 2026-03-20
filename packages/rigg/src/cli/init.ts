@@ -2,9 +2,9 @@ import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
 
 import { normalizeError } from "../util/error"
-import { examplesDoc, schemaReferenceDoc, workflowSyntaxDoc } from "./docs"
+import { examplesDoc, schemaDoc, syntaxDoc } from "./docs"
 import { skillDoc } from "./skill"
-import { planTemplate, reviewBranchTemplate, reviewCommitTemplate, reviewUncommittedTemplate } from "./templates"
+import { branchTemplate, commitTemplate, planTemplate, uncommittedTemplate } from "./templates"
 import { writeIfMissing } from "./write"
 
 type CommandResult = {
@@ -28,11 +28,11 @@ async function writeInitialWorkspace(cwd: string): Promise<string[]> {
 
   await Promise.all([
     writeIfMissing(join(riggDir, "plan.yaml"), planTemplate),
-    writeIfMissing(join(riggDir, "review-uncommitted.yaml"), reviewUncommittedTemplate),
-    writeIfMissing(join(riggDir, "review-branch.yaml"), reviewBranchTemplate),
-    writeIfMissing(join(riggDir, "review-commit.yaml"), reviewCommitTemplate),
-    writeIfMissing(join(docsDir, "workflow-syntax.md"), workflowSyntaxDoc),
-    writeIfMissing(join(docsDir, "schema-reference.md"), schemaReferenceDoc),
+    writeIfMissing(join(riggDir, "review-uncommitted.yaml"), uncommittedTemplate),
+    writeIfMissing(join(riggDir, "review-branch.yaml"), branchTemplate),
+    writeIfMissing(join(riggDir, "review-commit.yaml"), commitTemplate),
+    writeIfMissing(join(docsDir, "workflow-syntax.md"), syntaxDoc),
+    writeIfMissing(join(docsDir, "schema-reference.md"), schemaDoc),
     writeIfMissing(join(docsDir, "examples.md"), examplesDoc),
   ])
 
@@ -52,7 +52,7 @@ async function writeInitialWorkspace(cwd: string): Promise<string[]> {
   ]
 }
 
-export async function runInitCommand(cwd: string): Promise<CommandResult> {
+export async function runCommand(cwd: string): Promise<CommandResult> {
   try {
     return success(await writeInitialWorkspace(cwd))
   } catch (error) {

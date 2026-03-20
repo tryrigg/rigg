@@ -3,8 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { runInitCommand } from "../../src/cli/init"
-import { runValidateCommand } from "../../src/cli/validate"
+import * as init from "../../src/cli/init"
+import * as validate from "../../src/cli/validate"
 
 const tempDirs: string[] = []
 
@@ -21,9 +21,9 @@ async function createTempWorkspace(): Promise<string> {
 describe("cli/validate", () => {
   test("reports discovered workflows in plain text", async () => {
     const cwd = await createTempWorkspace()
-    await runInitCommand(cwd)
+    await init.runCommand(cwd)
 
-    const result = await runValidateCommand(cwd)
+    const result = await validate.runCommand(cwd)
     expect(result.exitCode).toBe(0)
     expect(result.stdoutLines.join("\n")).toContain("plan")
     expect(result.stdoutLines.join("\n")).toContain("review-uncommitted")
@@ -33,9 +33,9 @@ describe("cli/validate", () => {
 
   test("renders machine-readable json output", async () => {
     const cwd = await createTempWorkspace()
-    await runInitCommand(cwd)
+    await init.runCommand(cwd)
 
-    const result = await runValidateCommand(cwd, true)
+    const result = await validate.runCommand(cwd, true)
     expect(result.exitCode).toBe(0)
 
     const payload = JSON.parse(result.stdoutLines[0] ?? "{}") as {

@@ -11,7 +11,7 @@ import type { WorkflowDocument } from "../workflow/schema"
 import { normalizeError } from "../util/error"
 import { compactJson } from "../util/json"
 import { renderErrors } from "./out"
-import { createInkRunSession } from "./session"
+import { createInkSession } from "./session"
 
 type CommandResult = {
   exitCode: number
@@ -38,13 +38,13 @@ function toPascalCase(value: string): string {
     .join("")
 }
 
-export type WorkflowInterruptController = {
+export type InterruptController = {
   dispose: () => void
   interrupt: () => void
   signal: AbortSignal
 }
 
-export function createInterrupt(): WorkflowInterruptController {
+export function createInterrupt(): InterruptController {
   const controller = new AbortController()
 
   const onSigint = () => {
@@ -65,17 +65,17 @@ export function createInterrupt(): WorkflowInterruptController {
   }
 }
 
-export type RunCommandDependencies = {
-  createInterruptController: () => WorkflowInterruptController
-  createRunSession: typeof createInkRunSession
+export type Dependencies = {
+  createInterruptController: () => InterruptController
+  createRunSession: typeof createInkSession
   loadProjectImpl: typeof loadProject
   now: () => string
   runWorkflowImpl: typeof runWorkflow
 }
 
-const defaultRunCommandDependencies: RunCommandDependencies = {
+const defaultDependencies: Dependencies = {
   createInterruptController: createInterrupt,
-  createRunSession: createInkRunSession,
+  createRunSession: createInkSession,
   loadProjectImpl: loadProject,
   now: () => new Date().toISOString(),
   runWorkflowImpl: runWorkflow,
@@ -97,7 +97,7 @@ function promptInitialValue(schema: InputDefinition): string | undefined {
   return compactJson(schema.default)
 }
 
-export function buildOmittedInputQuestion(key: string, schema: InputDefinition): UserInputQuestion {
+export function buildQuestion(key: string, schema: InputDefinition): UserInputQuestion {
   const lines = [`Input: ${key}`, `Type: ${schema.type}`]
   if (schema.description !== undefined) {
     lines.push(`Description: ${schema.description}`)
@@ -134,9 +134,9 @@ function answersFromPromptResolution(resolution: UserInputResolution): Record<st
 
 async function promptForOmittedInvocationInputs(options: {
   invocationInputs: Record<string, unknown>
-  interrupt: WorkflowInterruptController
+  interrupt: InterruptController
   now: () => string
-  runSession: ReturnType<typeof createInkRunSession>
+  runSession: ReturnType<typeof createInkSession>
   workflow: WorkflowDocument
 }): Promise<Record<string, unknown>> {
   const omittedInputs = findOmitted(options.workflow, options.invocationInputs)
@@ -154,7 +154,7 @@ async function promptForOmittedInvocationInputs(options: {
       request: {
         itemId: requestId,
         kind: "user_input",
-        questions: omittedInputs.map(({ key, schema }) => buildOmittedInputQuestion(key, schema)),
+        questions: omittedInputs.map(({ key, schema }) => buildQuestion(key, schema)),
         requestId,
         turnId: requestId,
       },
@@ -174,18 +174,18 @@ async function promptForOmittedInvocationInputs(options: {
 
 const PROJECT_NOT_FOUND_MESSAGE = "Could not find a .rigg directory from the current working directory."
 
-export async function runRunCommand(
+export async function runCommand(
   cwd: string,
   workflowId: string | undefined,
   options: { autoContinue: boolean; inputs: string[] },
-  dependencies: Partial<RunCommandDependencies> = {},
+  dependencies: Partial<Dependencies> = {},
 ): Promise<CommandResult> {
   if (workflowId === undefined) {
     return failure(["Usage: rigg run <workflow_id>"])
   }
 
   try {
-    const deps = { ...defaultRunCommandDependencies, ...dependencies }
+    const deps = { ...defaultDependencies, ...dependencies }
     const projectResult = await deps.loadProjectImpl(cwd)
     if (projectResult.kind === "not_found") {
       return failure([PROJECT_NOT_FOUND_MESSAGE])

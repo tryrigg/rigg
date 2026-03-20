@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test"
 
 import type { WorkflowDocument } from "../../src/workflow/schema"
-import { createInkRenderOptions, createInkRunSession, createNonInteractiveRunSession } from "../../src/cli/session"
+import { createInkSession, createNonInteractive, createRenderOptions } from "../../src/cli/session"
 import { runSnapshot } from "../fixture/builders"
 
 describe("cli/session", () => {
   test("uses an explicit non-interactive control policy", async () => {
-    const session = createNonInteractiveRunSession()
+    const session = createNonInteractive()
     const snapshot = runSnapshot()
 
     await expect(
@@ -61,7 +61,7 @@ describe("cli/session", () => {
       stdin: { isTTY: true } as unknown as NodeJS.ReadStream,
     }
 
-    expect(createInkRenderOptions(terminal)).toMatchObject({
+    expect(createRenderOptions(terminal)).toMatchObject({
       exitOnCtrlC: false,
       stderr: terminal.stderr,
       stdin: terminal.stdin,
@@ -79,7 +79,7 @@ describe("cli/session", () => {
     let unmounted = false
     let interrupted = 0
 
-    const session = createInkRunSession({
+    const session = createInkSession({
       barrierMode: "manual",
       interrupt: () => {
         interrupted += 1
@@ -128,7 +128,7 @@ describe("cli/session", () => {
     }
     let renderedTree: any
 
-    const session = createInkRunSession({
+    const session = createInkSession({
       barrierMode: "auto_continue",
       interrupt: () => {},
       renderApp: ((tree: unknown) => {
@@ -195,7 +195,7 @@ describe("cli/session", () => {
       stdin: { isTTY: true } as unknown as NodeJS.ReadStream,
     }
 
-    const session = createInkRunSession({
+    const session = createInkSession({
       barrierMode: "manual",
       interrupt: () => {},
       renderApp: (() => ({ unmount: () => {} })) as any,
@@ -239,7 +239,7 @@ describe("cli/session", () => {
     }
     let renderedTree: any
 
-    const session = createInkRunSession({
+    const session = createInkSession({
       barrierMode: "manual",
       interrupt: () => {},
       renderApp: ((tree: unknown) => {
@@ -306,7 +306,7 @@ describe("cli/session", () => {
     }
     let renderedTree: any
 
-    const session = createInkRunSession({
+    const session = createInkSession({
       barrierMode: "manual",
       interrupt: () => {},
       renderApp: ((tree: unknown) => {

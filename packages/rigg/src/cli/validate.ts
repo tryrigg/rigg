@@ -19,7 +19,7 @@ function failure(stderrLines: string[] = [], exitCode = 1, stdoutLines: string[]
 
 const PROJECT_NOT_FOUND_MESSAGE = "Could not find a .rigg directory from the current working directory."
 
-export async function runValidateCommand(cwd: string, json = false): Promise<CommandResult> {
+export async function runCommand(cwd: string, json = false): Promise<CommandResult> {
   try {
     const result = await loadProject(cwd)
     if (result.kind === "not_found") {

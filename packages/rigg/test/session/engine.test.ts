@@ -4,14 +4,14 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 
 import type { WorkflowDocument } from "../../src/workflow/schema"
-import { createNonInteractiveRunSession } from "../../src/cli/session"
+import { createNonInteractive } from "../../src/cli/session"
 import { interrupt } from "../../src/session/error"
 import type { RunEvent } from "../../src/session/event"
 import { executeWorkflow } from "../../src/session/engine"
 import { installFakeCodex } from "../fixture/fake-codex"
 import { workflowProject } from "../fixture/builders"
 
-const defaultRunControl = createNonInteractiveRunSession()
+const defaultRunControl = createNonInteractive()
 
 type ExecuteWorkflowInput = Parameters<typeof executeWorkflow>[0]
 

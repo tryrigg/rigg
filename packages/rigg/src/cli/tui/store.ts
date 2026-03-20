@@ -1,9 +1,9 @@
 import type { RunEvent } from "../../session/event"
 import type { RunSnapshot } from "../../session/schema"
-import { applyRunEvent, createTerminalUiState, type BarrierApprovalMode, type TerminalUiState } from "../state"
+import { applyEvent, createState, type ApprovalMode, type UiState } from "../state"
 
 export type StoreSnapshot = {
-  state: TerminalUiState
+  state: UiState
   timerTick: number
 }
 
@@ -16,8 +16,8 @@ export type Store = {
   stopTimer: () => void
 }
 
-export function createStore(options: { barrierMode?: BarrierApprovalMode } = {}): Store {
-  const uiState = createTerminalUiState(options.barrierMode)
+export function createStore(options: { barrierMode?: ApprovalMode } = {}): Store {
+  const uiState = createState(options.barrierMode)
 
   let timerTick = 0
   let timerInterval: ReturnType<typeof setInterval> | null = null
@@ -51,7 +51,7 @@ export function createStore(options: { barrierMode?: BarrierApprovalMode } = {})
       }
     },
     dispatch: (event) => {
-      applyRunEvent(uiState, event)
+      applyEvent(uiState, event)
       notify()
     },
     replaceSnapshot: (snapshot) => {

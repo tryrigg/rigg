@@ -26,7 +26,7 @@ steps:
       content: \${{ steps.draft.result }}
 `.trimStart()
 
-export const reviewUncommittedTemplate = `
+export const uncommittedTemplate = `
 id: review-uncommitted
 steps:
   - id: remediation
@@ -58,7 +58,7 @@ steps:
       finding_count: \${{ len(steps.review.result.findings) }}
 `.trimStart()
 
-export const reviewBranchTemplate = `
+export const branchTemplate = `
 id: review-branch
 inputs:
   base_branch:
@@ -95,7 +95,7 @@ steps:
       finding_count: \${{ len(steps.review.result.findings) }}
 `.trimStart()
 
-export const reviewCommitTemplate = `
+export const commitTemplate = `
 id: review-commit
 inputs:
   commit_sha:

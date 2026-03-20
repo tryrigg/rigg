@@ -2,7 +2,7 @@ import { Box, Text, useStdout } from "ink"
 
 import type { RunSnapshot, RunStatus } from "../../session/schema"
 import type { BarrierApprovalMode } from "../state"
-import { layoutHeaderLine, renderRule } from "./layout"
+import { headerLine, renderRule } from "./layout"
 
 function statusColor(status: RunStatus | string): string {
   switch (status) {
@@ -43,7 +43,7 @@ export function Header({
   const cols = stdout?.columns ?? 80
 
   if (snapshot === null) {
-    const layout = layoutHeaderLine({
+    const layout = headerLine({
       cols,
       elapsed: "",
       status: "waiting",
@@ -64,7 +64,7 @@ export function Header({
 
   const status = statusLabel(snapshot, barrierMode)
   const color = statusColor(status)
-  const layout = layoutHeaderLine({
+  const layout = headerLine({
     cols,
     elapsed,
     status,

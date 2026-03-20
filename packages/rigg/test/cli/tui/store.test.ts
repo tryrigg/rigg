@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test"
 
-import { createTuiStore } from "../../../src/cli/tui/store"
+import { createStore } from "../../../src/cli/tui/store"
 import { runSnapshot } from "../../fixture/builders"
 
-describe("TuiStore", () => {
+describe("Store", () => {
   let timerCleanup: (() => void) | null = null
 
   afterEach(() => {
@@ -12,14 +12,14 @@ describe("TuiStore", () => {
   })
 
   test("dispatch updates state snapshot", () => {
-    const store = createTuiStore()
+    const store = createStore()
     const snapshot = runSnapshot()
     store.dispatch({ kind: "run_started", snapshot })
     expect(store.getSnapshot().state.snapshot).toBe(snapshot)
   })
 
   test("subscribe notifies on dispatch", () => {
-    const store = createTuiStore()
+    const store = createStore()
     let called = 0
     store.subscribe(() => {
       called++
@@ -30,7 +30,7 @@ describe("TuiStore", () => {
   })
 
   test("unsubscribe stops notifications", () => {
-    const store = createTuiStore()
+    const store = createStore()
     let called = 0
     const unsub = store.subscribe(() => {
       called++
@@ -42,7 +42,7 @@ describe("TuiStore", () => {
   })
 
   test("dispatch saves completed outputs on node_completed", () => {
-    const store = createTuiStore()
+    const store = createStore()
     const snapshot = runSnapshot()
     store.dispatch({ kind: "run_started", snapshot })
 
@@ -77,7 +77,7 @@ describe("TuiStore", () => {
   })
 
   test("dispatch saves completed outputs for control nodes too", () => {
-    const store = createTuiStore()
+    const store = createStore()
     store.dispatch({ kind: "run_started", snapshot: runSnapshot() })
 
     const groupNode = {
@@ -108,7 +108,7 @@ describe("TuiStore", () => {
   })
 
   test("dispatch preserves control-node stderr previews", () => {
-    const store = createTuiStore()
+    const store = createStore()
     store.dispatch({ kind: "run_started", snapshot: runSnapshot() })
 
     const groupNode = {
@@ -140,7 +140,7 @@ describe("TuiStore", () => {
   })
 
   test("startTimer increments timerTick", async () => {
-    const store = createTuiStore()
+    const store = createStore()
     timerCleanup = () => store.stopTimer()
 
     const initialTick = store.getSnapshot().timerTick

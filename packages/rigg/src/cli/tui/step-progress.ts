@@ -5,7 +5,7 @@ import type { NodeSnapshot, RunSnapshot } from "../../session/schema"
 
 const ACTION_STEP_KINDS = new Set<string>([StepKind.Shell, StepKind.Codex, StepKind.WriteFile, StepKind.Workflow])
 
-export type StepProgressSummary = {
+export type ProgressSummary = {
   completed: number
   total: number
 }
@@ -66,11 +66,11 @@ function knownExecutions(node: NodeSnapshot): number {
   return node.attempt
 }
 
-export function summarizeStepProgress(
+export function summarize(
   workflow: WorkflowDocument,
   snapshot: RunSnapshot | null,
   project?: WorkflowProject,
-): StepProgressSummary | null {
+): ProgressSummary | null {
   if (snapshot === null) {
     return null
   }
@@ -120,7 +120,7 @@ export function summarizeStepProgress(
   return total > 0 ? { completed, total } : null
 }
 
-export function formatStepProgress(summary: StepProgressSummary | null): string | undefined {
+export function formatProgress(summary: ProgressSummary | null): string | undefined {
   if (summary === null || summary.total === 0) {
     return undefined
   }

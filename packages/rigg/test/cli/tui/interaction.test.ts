@@ -1,49 +1,49 @@
 import { describe, expect, test } from "bun:test"
 
 import {
-  buildApprovalPromptChoices,
+  buildChoices,
   findClosestChoice,
-  resolveApprovalChoice,
-  resolveUserInputAnswer,
-  shouldAutoSubmitApprovalChoice,
-} from "../../../src/cli/tui/interaction-prompt"
+  resolveAnswer,
+  resolveChoice,
+  shouldAutoSubmit,
+} from "../../../src/cli/tui/interaction"
 
 describe("approval prompt choices", () => {
   test("resolves multi-character numeric choices", () => {
-    const choices = buildApprovalPromptChoices(
+    const choices = buildChoices(
       Array.from({ length: 10 }, (_, index) => ({
         intent: null,
         value: `option-${index + 1}`,
       })),
     )
 
-    expect(resolveApprovalChoice(choices, "10")).toBe("option-10")
-    expect(shouldAutoSubmitApprovalChoice(choices, "1")).toBe(false)
-    expect(shouldAutoSubmitApprovalChoice(choices, "10")).toBe(true)
+    expect(resolveChoice(choices, "10")).toBe("option-10")
+    expect(shouldAutoSubmit(choices, "1")).toBe(false)
+    expect(shouldAutoSubmit(choices, "10")).toBe(true)
   })
 
   test("resolves exact decision labels case-insensitively", () => {
-    const choices = buildApprovalPromptChoices([
+    const choices = buildChoices([
       { intent: "approve", value: "Allow" },
       { intent: null, value: "Ask User" },
     ])
 
-    expect(resolveApprovalChoice(choices, "allow")).toBe("Allow")
-    expect(resolveApprovalChoice(choices, "  ask user  ")).toBe("Ask User")
+    expect(resolveChoice(choices, "allow")).toBe("Allow")
+    expect(resolveChoice(choices, "  ask user  ")).toBe("Ask User")
   })
 
   test("keeps ambiguous prefixes pending until the token is complete", () => {
-    const choices = buildApprovalPromptChoices([
+    const choices = buildChoices([
       { intent: null, value: "approve" },
       { intent: null, value: "approved" },
     ])
 
-    expect(shouldAutoSubmitApprovalChoice(choices, "approve")).toBe(false)
-    expect(shouldAutoSubmitApprovalChoice(choices, "approved")).toBe(true)
+    expect(shouldAutoSubmit(choices, "approve")).toBe(false)
+    expect(shouldAutoSubmit(choices, "approved")).toBe(true)
   })
 
   test("includes intent in built choices", () => {
-    const choices = buildApprovalPromptChoices([
+    const choices = buildChoices([
       { intent: "approve", value: "Allow" },
       { intent: "deny", value: "Deny" },
     ])
@@ -55,7 +55,7 @@ describe("approval prompt choices", () => {
 
 describe("findClosestChoice", () => {
   test("suggests the closest match for typos", () => {
-    const choices = buildApprovalPromptChoices([
+    const choices = buildChoices([
       { intent: "approve", value: "approve" },
       { intent: "deny", value: "deny" },
     ])
@@ -65,7 +65,7 @@ describe("findClosestChoice", () => {
   })
 
   test("returns undefined when no close match exists", () => {
-    const choices = buildApprovalPromptChoices([
+    const choices = buildChoices([
       { intent: "approve", value: "approve" },
       { intent: "deny", value: "deny" },
     ])
@@ -85,8 +85,8 @@ describe("user input answers", () => {
       question: "Enter a name",
     } as const
 
-    expect(resolveUserInputAnswer(question, "  Rigg  ")).toBe("Rigg")
-    expect(resolveUserInputAnswer(question, "   ")).toBeUndefined()
+    expect(resolveAnswer(question, "  Rigg  ")).toBe("Rigg")
+    expect(resolveAnswer(question, "   ")).toBeUndefined()
   })
 
   test("preserves raw workflow input answers, including empty and whitespace-only strings", () => {
@@ -101,8 +101,8 @@ describe("user input answers", () => {
       question: "Enter a note",
     } as const
 
-    expect(resolveUserInputAnswer(question, "")).toBe("")
-    expect(resolveUserInputAnswer(question, "   ")).toBe("   ")
-    expect(resolveUserInputAnswer(question, "  hello  ")).toBe("  hello  ")
+    expect(resolveAnswer(question, "")).toBe("")
+    expect(resolveAnswer(question, "   ")).toBe("   ")
+    expect(resolveAnswer(question, "  hello  ")).toBe("  hello  ")
   })
 })

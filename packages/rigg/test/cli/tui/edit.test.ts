@@ -1,13 +1,9 @@
 import { describe, expect, test } from "bun:test"
 
-import {
-  applyPromptTextInputKey,
-  applyPromptTextInputSegmentsKey,
-  type PromptTextInputKey,
-} from "../../../src/cli/tui/prompt-text-edit"
-import { getPromptTextInputDisplayValue, getPromptTextInputExpandedValue } from "../../../src/cli/tui/prompt-text-paste"
+import { applyKey, applySegmentsKey, type InputKey } from "../../../src/cli/tui/edit"
+import { displayValue, expandedValue } from "../../../src/cli/tui/paste"
 
-function createKey(overrides: Partial<PromptTextInputKey> = {}): PromptTextInputKey {
+function createKey(overrides: Partial<InputKey> = {}): InputKey {
   return {
     backspace: false,
     ctrl: false,
@@ -27,10 +23,10 @@ function createKey(overrides: Partial<PromptTextInputKey> = {}): PromptTextInput
   }
 }
 
-describe("cli/tui/prompt-text-edit", () => {
+describe("cli/tui/edit", () => {
   test("submits on plain return", () => {
     expect(
-      applyPromptTextInputKey({
+      applyKey({
         cursorOffset: 5,
         input: "\r",
         key: createKey({ return: true }),
@@ -41,7 +37,7 @@ describe("cli/tui/prompt-text-edit", () => {
 
   test("inserts a newline on shift+return", () => {
     expect(
-      applyPromptTextInputKey({
+      applyKey({
         cursorOffset: 5,
         input: "\r",
         key: createKey({ return: true, shift: true }),
@@ -56,7 +52,7 @@ describe("cli/tui/prompt-text-edit", () => {
   })
 
   test("collapses multiline paste into a numbered placeholder while keeping expanded text", () => {
-    const action = applyPromptTextInputSegmentsKey({
+    const action = applySegmentsKey({
       cursorOffset: 0,
       input: "alpha\r\nbeta",
       key: createKey(),
@@ -70,14 +66,14 @@ describe("cli/tui/prompt-text-edit", () => {
       return
     }
 
-    expect(getPromptTextInputDisplayValue(action.segments)).toBe("[Pasted text #1 +1 lines]")
-    expect(getPromptTextInputExpandedValue(action.segments)).toBe("alpha\nbeta")
+    expect(displayValue(action.segments)).toBe("[Pasted text #1 +1 lines]")
+    expect(expandedValue(action.segments)).toBe("alpha\nbeta")
     expect(action.cursorOffset).toBe("[Pasted text #1 +1 lines]".length)
     expect(action.nextPasteId).toBe(2)
   })
 
   test("keeps consecutive multiline paste placeholders adjacent and increments numbering", () => {
-    const first = applyPromptTextInputSegmentsKey({
+    const first = applySegmentsKey({
       cursorOffset: 0,
       input: "alpha\nbeta",
       key: createKey(),
@@ -90,7 +86,7 @@ describe("cli/tui/prompt-text-edit", () => {
       return
     }
 
-    const second = applyPromptTextInputSegmentsKey({
+    const second = applySegmentsKey({
       cursorOffset: first.cursorOffset,
       input: "gamma\r\ndelta\r\nepsilon",
       key: createKey(),
@@ -103,13 +99,13 @@ describe("cli/tui/prompt-text-edit", () => {
       return
     }
 
-    expect(getPromptTextInputDisplayValue(second.segments)).toBe("[Pasted text #1 +1 lines][Pasted text #2 +2 lines]")
-    expect(getPromptTextInputExpandedValue(second.segments)).toBe("alpha\nbetagamma\ndelta\nepsilon")
+    expect(displayValue(second.segments)).toBe("[Pasted text #1 +1 lines][Pasted text #2 +2 lines]")
+    expect(expandedValue(second.segments)).toBe("alpha\nbetagamma\ndelta\nepsilon")
     expect(second.nextPasteId).toBe(3)
   })
 
   test("single-line paste stays literal while shift+return inserts a literal newline", () => {
-    const singleLine = applyPromptTextInputSegmentsKey({
+    const singleLine = applySegmentsKey({
       cursorOffset: 0,
       input: "alpha beta",
       key: createKey(),
@@ -121,10 +117,10 @@ describe("cli/tui/prompt-text-edit", () => {
       return
     }
 
-    expect(getPromptTextInputDisplayValue(singleLine.segments)).toBe("alpha beta")
-    expect(getPromptTextInputExpandedValue(singleLine.segments)).toBe("alpha beta")
+    expect(displayValue(singleLine.segments)).toBe("alpha beta")
+    expect(expandedValue(singleLine.segments)).toBe("alpha beta")
 
-    const newline = applyPromptTextInputSegmentsKey({
+    const newline = applySegmentsKey({
       cursorOffset: singleLine.cursorOffset,
       input: "\r",
       key: createKey({ return: true, shift: true }),
@@ -136,11 +132,11 @@ describe("cli/tui/prompt-text-edit", () => {
       return
     }
 
-    expect(getPromptTextInputDisplayValue(newline.segments)).toBe("alpha beta\n")
+    expect(displayValue(newline.segments)).toBe("alpha beta\n")
   })
 
   test("deletes a placeholder atomically from either edge", () => {
-    const pasted = applyPromptTextInputSegmentsKey({
+    const pasted = applySegmentsKey({
       cursorOffset: 0,
       input: "alpha\nbeta",
       key: createKey(),
@@ -153,7 +149,7 @@ describe("cli/tui/prompt-text-edit", () => {
       return
     }
 
-    const backspace = applyPromptTextInputSegmentsKey({
+    const backspace = applySegmentsKey({
       cursorOffset: pasted.cursorOffset,
       input: "\u007f",
       key: createKey({ backspace: true }),
@@ -166,7 +162,7 @@ describe("cli/tui/prompt-text-edit", () => {
     }
     expect(backspace.segments).toEqual([])
 
-    const pastedAgain = applyPromptTextInputSegmentsKey({
+    const pastedAgain = applySegmentsKey({
       cursorOffset: 0,
       input: "alpha\nbeta",
       key: createKey(),
@@ -179,7 +175,7 @@ describe("cli/tui/prompt-text-edit", () => {
       return
     }
 
-    const deleteFromTrail = applyPromptTextInputSegmentsKey({
+    const deleteFromTrail = applySegmentsKey({
       cursorOffset: pastedAgain.cursorOffset,
       input: "\u007f",
       key: createKey({ delete: true }),
@@ -194,7 +190,7 @@ describe("cli/tui/prompt-text-edit", () => {
   })
 
   test("moves vertically while preserving the preferred column", () => {
-    const down = applyPromptTextInputKey({
+    const down = applyKey({
       cursorOffset: 2,
       input: "",
       key: createKey({ downArrow: true }),
@@ -210,7 +206,7 @@ describe("cli/tui/prompt-text-edit", () => {
 
   test("uses meta+left and meta+right for word jumps", () => {
     expect(
-      applyPromptTextInputKey({
+      applyKey({
         cursorOffset: 11,
         input: "",
         key: createKey({ leftArrow: true, meta: true }),
@@ -224,7 +220,7 @@ describe("cli/tui/prompt-text-edit", () => {
     })
 
     expect(
-      applyPromptTextInputKey({
+      applyKey({
         cursorOffset: 6,
         input: "",
         key: createKey({ meta: true, rightArrow: true }),
@@ -240,7 +236,7 @@ describe("cli/tui/prompt-text-edit", () => {
 
   test("moves to line start and end with home/end and ctrl+a/e", () => {
     expect(
-      applyPromptTextInputKey({
+      applyKey({
         cursorOffset: 7,
         input: "",
         key: createKey({ home: true }),
@@ -254,7 +250,7 @@ describe("cli/tui/prompt-text-edit", () => {
     })
 
     expect(
-      applyPromptTextInputKey({
+      applyKey({
         cursorOffset: 5,
         input: "e",
         key: createKey({ ctrl: true }),
@@ -270,7 +266,7 @@ describe("cli/tui/prompt-text-edit", () => {
 
   test("deletes the previous word with meta+backspace and ctrl+w", () => {
     expect(
-      applyPromptTextInputKey({
+      applyKey({
         cursorOffset: 11,
         input: "\u007f",
         key: createKey({ backspace: true, meta: true }),
@@ -286,7 +282,7 @@ describe("cli/tui/prompt-text-edit", () => {
 
   test("ignores kitty release events", () => {
     expect(
-      applyPromptTextInputKey({
+      applyKey({
         cursorOffset: 0,
         input: "a",
         key: createKey({ eventType: "release" }),

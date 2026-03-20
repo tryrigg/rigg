@@ -5,13 +5,13 @@ import type { InteractionResolution } from "../../session/interaction"
 import type { WorkflowProject } from "../../project"
 import type { WorkflowDocument } from "../../workflow/schema"
 import type { BarrierApprovalMode } from "../state"
-import { BarrierPrompt } from "./barrier-prompt"
+import { Barrier } from "./barrier"
 import { Header } from "./header"
-import { InteractionPrompt } from "./interaction-prompt"
-import { formatStepProgress, summarizeStepProgress } from "./step-progress"
-import type { TuiStore } from "./store"
+import { Interaction } from "./interaction"
+import { formatProgress, summarize } from "./step-progress"
+import type { Store } from "./store"
 import { Summary } from "./summary"
-import { formatElapsedClock } from "./time"
+import { formatElapsed } from "./time"
 import { buildTree } from "./tree"
 import { WorkflowTree } from "./workflow-tree"
 
@@ -29,16 +29,16 @@ export function App({
   onResolveBarrier: (barrierId: string, action: "abort" | "continue") => void
   onResolveInteraction: (interactionId: string, resolution: InteractionResolution) => void
   project?: WorkflowProject | undefined
-  store: TuiStore
+  store: Store
   workflow: WorkflowDocument
 }) {
   const { state } = useSyncExternalStore(store.subscribe, store.getSnapshot)
   const { snapshot, liveOutputs, completedOutputs } = state
-  const elapsed = formatElapsedClock(snapshot?.started_at ?? null, snapshot?.finished_at ?? null)
+  const elapsed = formatElapsed(snapshot?.started_at ?? null, snapshot?.finished_at ?? null)
   const isFinished = snapshot !== null && snapshot.status !== "running"
   const entries = useMemo(() => buildTree(workflow, snapshot, project), [workflow, snapshot, project])
   const stepProgress = useMemo(
-    () => formatStepProgress(summarizeStepProgress(workflow, snapshot, project)),
+    () => formatProgress(summarize(workflow, snapshot, project)),
     [workflow, snapshot, project],
   )
   const activeBarrier = snapshot?.active_barrier ?? null
@@ -60,7 +60,7 @@ export function App({
             <Text inverse color="yellow">
               {" ⚠ ACTION REQUIRED "}
             </Text>
-            <BarrierPrompt
+            <Barrier
               key={activeBarrier.barrier_id}
               barrier={activeBarrier}
               onResolve={(action) => onResolveBarrier(activeBarrier.barrier_id, action)}
@@ -74,7 +74,7 @@ export function App({
             <Text inverse color="cyan">
               {" ◇ INPUT NEEDED "}
             </Text>
-            <InteractionPrompt
+            <Interaction
               key={activeInteraction.interaction_id}
               interaction={activeInteraction}
               onResolve={(resolution) => onResolveInteraction(activeInteraction.interaction_id, resolution)}

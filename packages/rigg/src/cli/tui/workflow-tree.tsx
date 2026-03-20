@@ -59,7 +59,7 @@ function liveOutputToLines(live: ActiveLiveOutput | undefined): FlatLine[] | nul
   return lines.length > 0 ? lines : null
 }
 
-export function countRenderableLiveOutputs(liveOutputs: Record<string, ActiveLiveOutput>): number {
+export function countLiveOutputs(liveOutputs: Record<string, ActiveLiveOutput>): number {
   let count = 0
   for (const live of Object.values(liveOutputs)) {
     if (liveOutputToLines(live) !== null) {
@@ -397,7 +397,7 @@ export function WorkflowTree({
     return null
   }
 
-  const activeCount = countRenderableLiveOutputs(liveOutputs)
+  const activeCount = countLiveOutputs(liveOutputs)
   const maxLiveLines = activeCount > 1 ? Math.max(3, Math.floor(16 / activeCount)) : 8
   const nextSibling = useMemo(() => computeHasNextSibling(entries), [entries])
   const entryColors = useMemo(() => computeEntryColors(entries), [entries])

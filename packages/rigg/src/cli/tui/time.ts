@@ -13,7 +13,7 @@ export function runDurationMs(snapshot: RunSnapshot, nowMs = Date.now()): number
   return elapsedClockMs(snapshot.started_at, snapshot.finished_at ?? null, nowMs)
 }
 
-export function formatElapsedClock(startedAt: string | null, finishedAt: string | null, nowMs = Date.now()): string {
+export function formatElapsed(startedAt: string | null, finishedAt: string | null, nowMs = Date.now()): string {
   const elapsed = Math.floor(elapsedClockMs(startedAt, finishedAt, nowMs) / 1000)
   const minutes = Math.floor(elapsed / 60)
   const seconds = elapsed % 60

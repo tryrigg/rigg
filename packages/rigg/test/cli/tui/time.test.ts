@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { formatElapsedClock, runDurationMs } from "../../../src/cli/tui/time"
+import { formatElapsed, runDurationMs } from "../../../src/cli/tui/time"
 import { runSnapshot } from "../../fixture/builders"
 
 describe("tui/time", () => {
@@ -47,10 +47,10 @@ describe("tui/time", () => {
   })
 
   test("uses finished_at when available for elapsed labels", () => {
-    expect(formatElapsedClock("2026-03-15T10:00:00.000Z", "2026-03-15T10:01:05.000Z")).toBe("01:05")
+    expect(formatElapsed("2026-03-15T10:00:00.000Z", "2026-03-15T10:01:05.000Z")).toBe("01:05")
   })
 
   test("uses current time for active runs", () => {
-    expect(formatElapsedClock("2026-03-15T10:00:00.000Z", null, Date.parse("2026-03-15T10:00:42.000Z"))).toBe("00:42")
+    expect(formatElapsed("2026-03-15T10:00:00.000Z", null, Date.parse("2026-03-15T10:00:42.000Z"))).toBe("00:42")
   })
 })

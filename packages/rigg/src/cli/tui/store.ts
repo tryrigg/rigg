@@ -2,13 +2,13 @@ import type { RunEvent } from "../../session/event"
 import type { RunSnapshot } from "../../session/schema"
 import { applyRunEvent, createTerminalUiState, type BarrierApprovalMode, type TerminalUiState } from "../state"
 
-export type TuiStoreSnapshot = {
+export type StoreSnapshot = {
   state: TerminalUiState
   timerTick: number
 }
 
-export type TuiStore = {
-  getSnapshot: () => TuiStoreSnapshot
+export type Store = {
+  getSnapshot: () => StoreSnapshot
   subscribe: (listener: () => void) => () => void
   dispatch: (event: RunEvent) => void
   replaceSnapshot: (snapshot: RunSnapshot | null) => void
@@ -16,19 +16,19 @@ export type TuiStore = {
   stopTimer: () => void
 }
 
-export function createTuiStore(options: { barrierMode?: BarrierApprovalMode } = {}): TuiStore {
+export function createStore(options: { barrierMode?: BarrierApprovalMode } = {}): Store {
   const uiState = createTerminalUiState(options.barrierMode)
 
   let timerTick = 0
   let timerInterval: ReturnType<typeof setInterval> | null = null
   const listeners = new Set<() => void>()
 
-  let snapshot: TuiStoreSnapshot = {
+  let snapshot: StoreSnapshot = {
     state: { ...uiState },
     timerTick: 0,
   }
 
-  function buildSnapshot(): TuiStoreSnapshot {
+  function buildSnapshot(): StoreSnapshot {
     return {
       state: { ...uiState },
       timerTick,

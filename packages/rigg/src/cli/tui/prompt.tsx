@@ -1,20 +1,20 @@
 import { Text, useInput, useStdout } from "ink"
 import { useEffect, useRef, useState } from "react"
 
-import { renderPromptTextValue, snapPromptTextInputCursorOffset } from "./prompt-text-cursor"
-import { applyPromptTextInputSegmentsKey, type PromptTextInputKey } from "./prompt-text-edit"
+import { renderValue, snapSegments } from "./cursor"
+import { applySegmentsKey, type InputKey } from "./edit"
 import {
-  acquirePromptTextInputBracketedPaste,
-  createPromptTextInputSegments,
-  detectPromptPasteControl,
-  getPromptTextInputDisplayLength,
-  getPromptTextInputDisplayValue,
-  getPromptTextInputExpandedValue,
-  normalizePromptInputChunk,
-  reconcilePromptTextInputControlledState,
-  releasePromptTextInputBracketedPaste,
-  type PromptTextInputSegment,
-} from "./prompt-text-paste"
+  acquirePaste,
+  createSegments,
+  detectPaste,
+  displayLength,
+  displayValue,
+  expandedValue,
+  normalizeChunk,
+  reconcileState,
+  releasePaste,
+  type Segment,
+} from "./paste"
 
 export function PromptTextInput({
   focus = true,
@@ -28,11 +28,9 @@ export function PromptTextInput({
   value: string
 }) {
   const { stdout, write } = useStdout()
-  const normalizedValue = normalizePromptInputChunk(value)
-  const [segments, setSegments] = useState<PromptTextInputSegment[]>(() =>
-    createPromptTextInputSegments(normalizedValue),
-  )
-  const [cursorOffset, setCursorOffset] = useState(() => getPromptTextInputDisplayLength(segments))
+  const normalizedValue = normalizeChunk(value)
+  const [segments, setSegments] = useState<Segment[]>(() => createSegments(normalizedValue))
+  const [cursorOffset, setCursorOffset] = useState(() => displayLength(segments))
   const cursorOffsetRef = useRef(cursorOffset)
   const bracketedPasteBufferRef = useRef("")
   const isBracketedPasteRef = useRef(false)
@@ -41,12 +39,12 @@ export function PromptTextInput({
   const segmentsRef = useRef(segments)
 
   useEffect(() => {
-    const nextState = reconcilePromptTextInputControlledState({
+    const nextState = reconcileState({
       cursorOffset: cursorOffsetRef.current,
       segments: segmentsRef.current,
       value: normalizedValue,
     })
-    nextState.cursorOffset = snapPromptTextInputCursorOffset(nextState.segments, nextState.cursorOffset, "nearest")
+    nextState.cursorOffset = snapSegments(nextState.segments, nextState.cursorOffset, "nearest")
 
     if (nextState.segments === segmentsRef.current) {
       return
@@ -65,19 +63,19 @@ export function PromptTextInput({
       return
     }
 
-    acquirePromptTextInputBracketedPaste({ isTTY: stdout.isTTY, write })
+    acquirePaste({ isTTY: stdout.isTTY, write })
     return () => {
-      releasePromptTextInputBracketedPaste({ isTTY: stdout.isTTY, write })
+      releasePaste({ isTTY: stdout.isTTY, write })
     }
   }, [focus, stdout.isTTY, write])
 
   useInput(
     (input, key) => {
       const applyInput = (inputChunk: string, treatAsPaste: boolean) => {
-        const action = applyPromptTextInputSegmentsKey({
+        const action = applySegmentsKey({
           cursorOffset: cursorOffsetRef.current,
           input: inputChunk,
-          key: key as PromptTextInputKey,
+          key: key as InputKey,
           nextPasteId: nextPasteIdRef.current,
           preferredColumn: preferredColumnRef.current,
           segments: segmentsRef.current,
@@ -89,11 +87,11 @@ export function PromptTextInput({
         }
 
         if (action.kind === "submit") {
-          onSubmit(getPromptTextInputExpandedValue(segmentsRef.current))
+          onSubmit(expandedValue(segmentsRef.current))
           return
         }
 
-        const nextExpandedValue = getPromptTextInputExpandedValue(action.segments)
+        const nextExpandedValue = expandedValue(action.segments)
         segmentsRef.current = action.segments
         cursorOffsetRef.current = action.cursorOffset
         nextPasteIdRef.current = action.nextPasteId
@@ -105,7 +103,7 @@ export function PromptTextInput({
         }
       }
 
-      const pasteControl = detectPromptPasteControl(input)
+      const pasteControl = detectPaste(input)
       if (pasteControl === "start") {
         isBracketedPasteRef.current = true
         bracketedPasteBufferRef.current = ""
@@ -132,5 +130,5 @@ export function PromptTextInput({
     { isActive: focus },
   )
 
-  return <Text>{renderPromptTextValue(getPromptTextInputDisplayValue(segments), cursorOffset)}</Text>
+  return <Text>{renderValue(displayValue(segments), cursorOffset)}</Text>
 }

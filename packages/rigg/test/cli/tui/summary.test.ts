@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { countSummaryStatuses } from "../../../src/cli/tui/summary"
+import { countStatuses } from "../../../src/cli/tui/summary"
 import type { TreeEntry } from "../../../src/cli/tui/tree"
 
 function treeEntry(overrides: Partial<TreeEntry>): TreeEntry {
@@ -21,7 +21,7 @@ function treeEntry(overrides: Partial<TreeEntry>): TreeEntry {
 
 describe("cli/tui/summary", () => {
   test("counts failed control nodes in the final summary", () => {
-    const counts = countSummaryStatuses([
+    const counts = countStatuses([
       treeEntry({ nodeKind: "shell", status: "succeeded" }),
       treeEntry({ nodeKind: "group", nodePath: "/1", status: "failed" }),
       treeEntry({ nodeKind: "parallel", nodePath: "/2", status: "skipped" }),

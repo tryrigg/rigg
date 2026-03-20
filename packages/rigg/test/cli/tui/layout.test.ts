@@ -1,15 +1,15 @@
 import { describe, expect, test } from "bun:test"
 
-import { layoutHeaderLine, renderRule } from "../../../src/cli/tui/layout"
+import { headerLine, renderRule } from "../../../src/cli/tui/layout"
 
-function renderHeader(layout: ReturnType<typeof layoutHeaderLine>): string {
+function renderHeader(layout: ReturnType<typeof headerLine>): string {
   const right = layout.elapsedText.length > 0 ? `${layout.elapsedText} ${layout.statusText}` : layout.statusText
   return `${layout.left}${" ".repeat(layout.gap)}${right}`.trimEnd()
 }
 
-describe("layoutHeaderLine", () => {
+describe("headerLine", () => {
   test("keeps header content inside the terminal width budget", () => {
-    const layout = layoutHeaderLine({
+    const layout = headerLine({
       cols: 40,
       elapsed: "01:08",
       status: "running",
@@ -21,7 +21,7 @@ describe("layoutHeaderLine", () => {
   })
 
   test("truncates long workflow ids before the right status block wraps", () => {
-    const layout = layoutHeaderLine({
+    const layout = headerLine({
       cols: 36,
       elapsed: "01:08",
       status: "running",
@@ -33,7 +33,7 @@ describe("layoutHeaderLine", () => {
   })
 
   test("shows step progress when it exactly fits the left header budget", () => {
-    const layout = layoutHeaderLine({
+    const layout = headerLine({
       cols: 36,
       elapsed: "00:01",
       status: "running",
@@ -47,7 +47,7 @@ describe("layoutHeaderLine", () => {
   })
 
   test("drops left content before exceeding the width budget on very narrow terminals", () => {
-    const layout = layoutHeaderLine({
+    const layout = headerLine({
       cols: 24,
       elapsed: "01:08",
       status: "running",
@@ -61,7 +61,7 @@ describe("layoutHeaderLine", () => {
   })
 
   test("keeps status visible when the full right block does not fit", () => {
-    const layout = layoutHeaderLine({
+    const layout = headerLine({
       cols: 16,
       elapsed: "01:08",
       status: "running",
@@ -74,7 +74,7 @@ describe("layoutHeaderLine", () => {
   })
 
   test("keeps the waiting header inside the width budget", () => {
-    const layout = layoutHeaderLine({
+    const layout = headerLine({
       cols: 16,
       elapsed: "",
       status: "waiting",

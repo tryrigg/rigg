@@ -15,7 +15,7 @@ function formatFrontierLabel(node: FrontierNode): string {
   return parts.join(" · ")
 }
 
-export function BarrierPrompt({
+export function Barrier({
   barrier,
   onResolve,
 }: {

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import type { WorkflowDocument, WorkflowStep } from "../../../src/workflow/schema"
-import { formatStepProgress, summarizeStepProgress } from "../../../src/cli/tui/step-progress"
+import { formatProgress, summarize } from "../../../src/cli/tui/step-progress"
 import type { FrontierNode, NodeSnapshot, RunSnapshot } from "../../../src/session/schema"
 import { runSnapshot } from "../../fixture/builders"
 
@@ -42,9 +42,9 @@ function snapshot(overrides: Partial<RunSnapshot> = {}): RunSnapshot {
   return runSnapshot(overrides)
 }
 
-describe("summarizeStepProgress", () => {
+describe("summarize", () => {
   test("counts static non-loop actions before they start", () => {
-    const summary = summarizeStepProgress(
+    const summary = summarize(
       workflow([
         { id: "first", type: "shell", with: { command: "echo first" } },
         { id: "second", type: "shell", with: { command: "echo second" } },
@@ -53,11 +53,11 @@ describe("summarizeStepProgress", () => {
     )
 
     expect(summary).toEqual({ completed: 0, total: 2 })
-    expect(formatStepProgress(summary)).toBe("0/2 steps")
+    expect(formatProgress(summary)).toBe("0/2 steps")
   })
 
   test("counts queued loop iterations as additional runtime work", () => {
-    const summary = summarizeStepProgress(
+    const summary = summarize(
       workflow([
         {
           id: "loop",
@@ -93,7 +93,7 @@ describe("summarizeStepProgress", () => {
   })
 
   test("keeps future non-loop actions in the total while loops expand at runtime", () => {
-    const summary = summarizeStepProgress(
+    const summary = summarize(
       workflow([
         {
           id: "loop",
@@ -130,7 +130,7 @@ describe("summarizeStepProgress", () => {
   })
 
   test("uses action attempts for partially completed loop bodies", () => {
-    const summary = summarizeStepProgress(
+    const summary = summarize(
       workflow([
         {
           id: "loop",
@@ -168,7 +168,7 @@ describe("summarizeStepProgress", () => {
   })
 
   test("counts workflow steps as one unit even when nested child nodes exist", () => {
-    const summary = summarizeStepProgress(
+    const summary = summarize(
       workflow([
         {
           id: "call_child",

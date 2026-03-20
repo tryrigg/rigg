@@ -10,7 +10,7 @@ import type {
 import type { PendingInteraction } from "../../session/schema"
 import { compactJson, tryParseJson } from "../../util/json"
 import { matchesShortcut } from "./input"
-import { PromptTextInput } from "./prompt-text-input"
+import { PromptTextInput } from "./prompt"
 import { chars } from "./theme"
 
 function approvalShortcut(decision: ApprovalDecision, index: number): string {
@@ -26,7 +26,7 @@ function approvalShortcut(decision: ApprovalDecision, index: number): string {
   }
 }
 
-export type ApprovalPromptChoice = {
+export type PromptChoice = {
   decision: string
   intent: ApprovalDecision["intent"]
   shortcut: string
@@ -37,8 +37,8 @@ function normalizeApprovalChoiceInput(input: string): string {
   return input.trim().toLowerCase()
 }
 
-export function buildApprovalPromptChoices(decisions: ReadonlyArray<ApprovalDecision>): ApprovalPromptChoice[] {
-  const choices: ApprovalPromptChoice[] = []
+export function buildChoices(decisions: ReadonlyArray<ApprovalDecision>): PromptChoice[] {
+  const choices: PromptChoice[] = []
   for (const [index, decision] of decisions.entries()) {
     const tokens = new Set<string>()
     const normalizedValue = normalizeApprovalChoiceInput(decision.value)
@@ -57,7 +57,7 @@ export function buildApprovalPromptChoices(decisions: ReadonlyArray<ApprovalDeci
   return choices
 }
 
-export function resolveApprovalChoice(choices: ReadonlyArray<ApprovalPromptChoice>, input: string): string | undefined {
+export function resolveChoice(choices: ReadonlyArray<PromptChoice>, input: string): string | undefined {
   const normalized = normalizeApprovalChoiceInput(input)
   if (normalized.length === 0) {
     return undefined
@@ -72,9 +72,9 @@ export function resolveApprovalChoice(choices: ReadonlyArray<ApprovalPromptChoic
   return undefined
 }
 
-export function shouldAutoSubmitApprovalChoice(choices: ReadonlyArray<ApprovalPromptChoice>, input: string): boolean {
+export function shouldAutoSubmit(choices: ReadonlyArray<PromptChoice>, input: string): boolean {
   const normalized = normalizeApprovalChoiceInput(input)
-  if (normalized.length === 0 || resolveApprovalChoice(choices, normalized) === undefined) {
+  if (normalized.length === 0 || resolveChoice(choices, normalized) === undefined) {
     return false
   }
 
@@ -103,7 +103,7 @@ function normalizeQuestionAnswer(
   return answer
 }
 
-export function resolveUserInputAnswer(question: UserInputQuestion, value: string): string | undefined {
+export function resolveAnswer(question: UserInputQuestion, value: string): string | undefined {
   if (!question.allowEmpty && value.trim().length === 0) {
     return undefined
   }
@@ -127,7 +127,7 @@ function editDistance(a: string, b: string): number {
   return dp[m]![n]!
 }
 
-export function findClosestChoice(choices: ReadonlyArray<ApprovalPromptChoice>, input: string): string | undefined {
+export function findClosestChoice(choices: ReadonlyArray<PromptChoice>, input: string): string | undefined {
   const normalized = normalizeApprovalChoiceInput(input)
   if (normalized.length === 0) return undefined
 
@@ -145,19 +145,19 @@ export function findClosestChoice(choices: ReadonlyArray<ApprovalPromptChoice>, 
   return best
 }
 
-function ApprovalPrompt({
+function ApprovalPanel({
   request,
   onResolve,
 }: {
   request: Extract<InteractionRequest, { kind: "approval" }>
   onResolve: (resolution: InteractionResolution) => void
 }) {
-  const choices = useMemo(() => buildApprovalPromptChoices(request.decisions), [request.decisions])
+  const choices = useMemo(() => buildChoices(request.decisions), [request.decisions])
   const [inputValue, setInputValue] = useState("")
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const submitChoice = (value: string): boolean => {
-    const decision = resolveApprovalChoice(choices, value)
+    const decision = resolveChoice(choices, value)
     if (decision === undefined) {
       return false
     }
@@ -168,7 +168,7 @@ function ApprovalPrompt({
   const handleChange = (value: string) => {
     setInputValue(value)
     setErrorMessage(null)
-    if (shouldAutoSubmitApprovalChoice(choices, value)) {
+    if (shouldAutoSubmit(choices, value)) {
       submitChoice(value)
     }
   }
@@ -229,7 +229,7 @@ function ApprovalPrompt({
   )
 }
 
-function UserInputPrompt({
+function UserInputPanel({
   request,
   onResolve,
 }: {
@@ -252,7 +252,7 @@ function UserInputPrompt({
   }))
 
   const handleSubmit = (value: string) => {
-    const answer = resolveUserInputAnswer(question, value)
+    const answer = resolveAnswer(question, value)
     if (answer === undefined) {
       return
     }
@@ -310,7 +310,7 @@ function UserInputPrompt({
   )
 }
 
-function ElicitationPrompt({
+function ElicitationPanel({
   request,
   onResolve,
 }: {
@@ -388,7 +388,7 @@ function ElicitationPrompt({
   )
 }
 
-export function InteractionPrompt({
+export function Interaction({
   interaction,
   onResolve,
 }: {
@@ -397,10 +397,10 @@ export function InteractionPrompt({
 }) {
   switch (interaction.request.kind) {
     case "approval":
-      return <ApprovalPrompt request={interaction.request} onResolve={onResolve} />
+      return <ApprovalPanel request={interaction.request} onResolve={onResolve} />
     case "user_input":
-      return <UserInputPrompt request={interaction.request} onResolve={onResolve} />
+      return <UserInputPanel request={interaction.request} onResolve={onResolve} />
     case "elicitation":
-      return <ElicitationPrompt request={interaction.request} onResolve={onResolve} />
+      return <ElicitationPanel request={interaction.request} onResolve={onResolve} />
   }
 }

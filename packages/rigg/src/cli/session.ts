@@ -6,7 +6,7 @@ import type { WorkflowProject } from "../project"
 import type { WorkflowDocument } from "../workflow/schema"
 import type { RunControlHandler, RunEvent } from "../session/event"
 import { App } from "./tui/app"
-import { createTuiStore } from "./tui/store"
+import { createStore } from "./tui/store"
 import {
   createControlResolverRegistry,
   resolveImmediateControlRequest,
@@ -63,7 +63,7 @@ export function createInkRunSession(options: {
   terminal?: InteractiveTerminal
   workflow: WorkflowDocument
 }): RunSession {
-  const store = createTuiStore({ barrierMode: options.barrierMode })
+  const store = createStore({ barrierMode: options.barrierMode })
   const controlResolvers = createControlResolverRegistry()
   const terminal = options.terminal ?? {
     stderr: process.stderr,

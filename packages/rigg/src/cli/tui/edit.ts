@@ -1,29 +1,22 @@
 import type { Key } from "ink"
 
 import {
+  deleteRange,
   deleteWordLeft,
-  findWordBoundaryLeft,
-  findWordBoundaryRight,
-  getCurrentLineBounds,
-  getCursorLineColumn,
-  getCursorOffsetForLineColumn,
-  getPromptLines,
-  getPromptTextInputDeleteRange,
-  getPromptTextInputNextCursorOffset,
-  getPromptTextInputPreviousCursorOffset,
-  snapPromptTextInputCursorOffset,
-  snapPromptTextInputStringCursorOffset,
-} from "./prompt-text-cursor"
-import {
-  getPromptTextInputDisplayValue,
-  getPromptTextInputExpandedValue,
-  getPromptTextInputSegmentDisplayValue,
-  normalizePromptInputChunk,
-  normalizePromptTextInputSegments,
-  type PromptTextInputSegment,
-} from "./prompt-text-paste"
+  lineBounds,
+  lineColumn,
+  lines,
+  nextOffset,
+  offsetForLineColumn,
+  prevOffset,
+  snapSegments,
+  snapString,
+  wordLeft,
+  wordRight,
+} from "./cursor"
+import { displayValue, expandedValue, normalizeChunk, normalizeSegments, segmentDisplay, type Segment } from "./paste"
 
-export type PromptTextInputKey = Pick<
+export type InputKey = Pick<
   Key,
   | "backspace"
   | "ctrl"
@@ -41,12 +34,12 @@ export type PromptTextInputKey = Pick<
   | "upArrow"
 >
 
-type PromptTextInputAction =
+type EditAction =
   | { kind: "noop" }
   | { kind: "submit" }
   | { cursorOffset: number; kind: "update"; preferredColumn: number | null; value: string }
 
-type PromptTextInputSegmentsAction =
+type SegmentsAction =
   | { kind: "noop" }
   | { kind: "submit" }
   | {
@@ -54,28 +47,25 @@ type PromptTextInputSegmentsAction =
       kind: "update"
       nextPasteId: number
       preferredColumn: number | null
-      segments: PromptTextInputSegment[]
+      segments: Segment[]
     }
 
-function matchesCtrlCharacterShortcut(input: string, key: PromptTextInputKey, shortcut: string): boolean {
+function matchesCtrlCharacterShortcut(input: string, key: InputKey, shortcut: string): boolean {
   return key.ctrl && input.toLowerCase() === shortcut
 }
 
-function isDeleteWordLeftShortcut(input: string, key: PromptTextInputKey): boolean {
+function isDeleteWordLeftShortcut(input: string, key: InputKey): boolean {
   return ((key.backspace || key.delete) && key.meta) || matchesCtrlCharacterShortcut(input, key, "w")
 }
 
-function splitPromptTextInputSegmentsAtDisplayOffset(
-  segments: PromptTextInputSegment[],
-  cursorOffset: number,
-): { after: PromptTextInputSegment[]; before: PromptTextInputSegment[] } {
-  const safeCursorOffset = snapPromptTextInputCursorOffset(segments, cursorOffset, "nearest")
+function splitAtOffset(segments: Segment[], cursorOffset: number): { after: Segment[]; before: Segment[] } {
+  const safeCursorOffset = snapSegments(segments, cursorOffset, "nearest")
   let displayOffset = 0
 
   for (const [index, segment] of segments.entries()) {
-    const displayValue = getPromptTextInputSegmentDisplayValue(segment)
+    const displayVal = segmentDisplay(segment)
     const segmentStart = displayOffset
-    const segmentEnd = segmentStart + displayValue.length
+    const segmentEnd = segmentStart + displayVal.length
 
     if (safeCursorOffset > segmentEnd) {
       displayOffset = segmentEnd
@@ -109,16 +99,13 @@ function splitPromptTextInputSegmentsAtDisplayOffset(
   return { after: [], before: segments }
 }
 
-function insertPromptTextInputSegmentsAtDisplayOffset(options: {
+function insertAtOffset(options: { cursorOffset: number; insertedSegments: Segment[]; segments: Segment[] }): {
   cursorOffset: number
-  insertedSegments: PromptTextInputSegment[]
-  segments: PromptTextInputSegment[]
-}): { cursorOffset: number; segments: PromptTextInputSegment[] } {
-  const { after, before } = splitPromptTextInputSegmentsAtDisplayOffset(options.segments, options.cursorOffset)
-  const nextSegments = normalizePromptTextInputSegments([...before, ...options.insertedSegments, ...after])
-  const nextCursorOffset = getPromptTextInputDisplayValue(
-    normalizePromptTextInputSegments([...before, ...options.insertedSegments]),
-  ).length
+  segments: Segment[]
+} {
+  const { after, before } = splitAtOffset(options.segments, options.cursorOffset)
+  const nextSegments = normalizeSegments([...before, ...options.insertedSegments, ...after])
+  const nextCursorOffset = displayValue(normalizeSegments([...before, ...options.insertedSegments])).length
 
   return {
     cursorOffset: nextCursorOffset,
@@ -126,11 +113,7 @@ function insertPromptTextInputSegmentsAtDisplayOffset(options: {
   }
 }
 
-function removePromptTextInputDisplayRange(options: {
-  end: number
-  segments: PromptTextInputSegment[]
-  start: number
-}): PromptTextInputSegment[] {
+function removeDisplayRange(options: { end: number; segments: Segment[]; start: number }): Segment[] {
   const rangeStart = Math.min(options.start, options.end)
   const rangeEnd = Math.max(options.start, options.end)
   if (rangeStart === rangeEnd) {
@@ -138,12 +121,12 @@ function removePromptTextInputDisplayRange(options: {
   }
 
   let displayOffset = 0
-  const nextSegments: PromptTextInputSegment[] = []
+  const nextSegments: Segment[] = []
 
   for (const segment of options.segments) {
-    const displayValue = getPromptTextInputSegmentDisplayValue(segment)
+    const displayVal = segmentDisplay(segment)
     const segmentStart = displayOffset
-    const segmentEnd = segmentStart + displayValue.length
+    const segmentEnd = segmentStart + displayVal.length
     displayOffset = segmentEnd
 
     if (segment.kind === "paste") {
@@ -166,30 +149,28 @@ function removePromptTextInputDisplayRange(options: {
     }
   }
 
-  return normalizePromptTextInputSegments(nextSegments)
+  return normalizeSegments(nextSegments)
 }
 
-function deletePromptTextInputDisplayRange(options: {
+function deleteDisplayRange(options: { cursorOffset: number; end: number; segments: Segment[]; start: number }): {
   cursorOffset: number
-  end: number
-  segments: PromptTextInputSegment[]
-  start: number
-}): { cursorOffset: number; segments: PromptTextInputSegment[] } {
+  segments: Segment[]
+} {
   return {
-    cursorOffset: snapPromptTextInputCursorOffset(options.segments, Math.min(options.start, options.end), "left"),
-    segments: removePromptTextInputDisplayRange(options),
+    cursorOffset: snapSegments(options.segments, Math.min(options.start, options.end), "left"),
+    segments: removeDisplayRange(options),
   }
 }
 
-export function applyPromptTextInputKey(options: {
+export function applyKey(options: {
   cursorOffset: number
   input: string
-  key: PromptTextInputKey
+  key: InputKey
   preferredColumn?: number | null
   value: string
-}): PromptTextInputAction {
-  const value = normalizePromptInputChunk(options.value)
-  const cursorOffset = snapPromptTextInputStringCursorOffset(value, options.cursorOffset, "nearest")
+}): EditAction {
+  const value = normalizeChunk(options.value)
+  const cursorOffset = snapString(value, options.cursorOffset, "nearest")
   const { input, key } = options
   const metaShortcut = key.meta ? input.toLowerCase() : input
 
@@ -207,7 +188,7 @@ export function applyPromptTextInputKey(options: {
 
   if (key.meta && metaShortcut === "b") {
     return {
-      cursorOffset: findWordBoundaryLeft(value, cursorOffset),
+      cursorOffset: wordLeft(value, cursorOffset),
       kind: "update",
       preferredColumn: null,
       value,
@@ -216,7 +197,7 @@ export function applyPromptTextInputKey(options: {
 
   if (key.meta && metaShortcut === "f") {
     return {
-      cursorOffset: findWordBoundaryRight(value, cursorOffset),
+      cursorOffset: wordRight(value, cursorOffset),
       kind: "update",
       preferredColumn: null,
       value,
@@ -225,7 +206,7 @@ export function applyPromptTextInputKey(options: {
 
   if (matchesCtrlCharacterShortcut(input, key, "a") || key.home) {
     return {
-      cursorOffset: getCurrentLineBounds(value, cursorOffset).start,
+      cursorOffset: lineBounds(value, cursorOffset).start,
       kind: "update",
       preferredColumn: null,
       value,
@@ -234,7 +215,7 @@ export function applyPromptTextInputKey(options: {
 
   if (matchesCtrlCharacterShortcut(input, key, "e") || key.end) {
     return {
-      cursorOffset: getCurrentLineBounds(value, cursorOffset).end,
+      cursorOffset: lineBounds(value, cursorOffset).end,
       kind: "update",
       preferredColumn: null,
       value,
@@ -255,9 +236,7 @@ export function applyPromptTextInputKey(options: {
   }
 
   if (key.leftArrow) {
-    const nextCursorOffset = key.meta
-      ? findWordBoundaryLeft(value, cursorOffset)
-      : getPromptTextInputPreviousCursorOffset(value, cursorOffset)
+    const nextCursorOffset = key.meta ? wordLeft(value, cursorOffset) : prevOffset(value, cursorOffset)
     return {
       cursorOffset: nextCursorOffset,
       kind: "update",
@@ -267,9 +246,7 @@ export function applyPromptTextInputKey(options: {
   }
 
   if (key.rightArrow) {
-    const nextCursorOffset = key.meta
-      ? findWordBoundaryRight(value, cursorOffset)
-      : getPromptTextInputNextCursorOffset(value, cursorOffset)
+    const nextCursorOffset = key.meta ? wordRight(value, cursorOffset) : nextOffset(value, cursorOffset)
     return {
       cursorOffset: nextCursorOffset,
       kind: "update",
@@ -279,14 +256,14 @@ export function applyPromptTextInputKey(options: {
   }
 
   if (key.upArrow || key.downArrow) {
-    const { column, lineIndex } = getCursorLineColumn(value, cursorOffset)
+    const { column, lineIndex } = lineColumn(value, cursorOffset)
     const targetLineIndex = key.upArrow ? lineIndex - 1 : lineIndex + 1
-    if (targetLineIndex < 0 || targetLineIndex >= getPromptLines(value).length) {
+    if (targetLineIndex < 0 || targetLineIndex >= lines(value).length) {
       return { kind: "noop" }
     }
     const preferredColumn = options.preferredColumn ?? column
     return {
-      cursorOffset: getCursorOffsetForLineColumn(value, targetLineIndex, preferredColumn),
+      cursorOffset: offsetForLineColumn(value, targetLineIndex, preferredColumn),
       kind: "update",
       preferredColumn,
       value,
@@ -294,24 +271,24 @@ export function applyPromptTextInputKey(options: {
   }
 
   if (key.backspace || key.delete) {
-    const deleteRange = getPromptTextInputDeleteRange({
+    const dr = deleteRange({
       cursorOffset,
       value,
     })
 
-    if (deleteRange === undefined) {
+    if (dr === undefined) {
       return { kind: "noop" }
     }
 
     return {
-      cursorOffset: deleteRange.start,
+      cursorOffset: dr.start,
       kind: "update",
       preferredColumn: null,
-      value: value.slice(0, deleteRange.start) + value.slice(deleteRange.end),
+      value: value.slice(0, dr.start) + value.slice(dr.end),
     }
   }
 
-  const inserted = key.return && key.shift ? "\n" : normalizePromptInputChunk(input)
+  const inserted = key.return && key.shift ? "\n" : normalizeChunk(input)
   if (inserted.length === 0) {
     return { kind: "noop" }
   }
@@ -324,15 +301,15 @@ export function applyPromptTextInputKey(options: {
   }
 }
 
-export function applyPromptTextInputSegmentsKey(options: {
+export function applySegmentsKey(options: {
   cursorOffset: number
   input: string
-  key: PromptTextInputKey
+  key: InputKey
   nextPasteId: number
   preferredColumn?: number | null
-  segments: PromptTextInputSegment[]
+  segments: Segment[]
   treatAsPaste?: boolean
-}): PromptTextInputSegmentsAction {
+}): SegmentsAction {
   const { input, key } = options
 
   if (key.eventType === "release") {
@@ -347,14 +324,14 @@ export function applyPromptTextInputSegmentsKey(options: {
     return { kind: "submit" }
   }
 
-  const segments = normalizePromptTextInputSegments(options.segments)
-  const value = getPromptTextInputDisplayValue(segments)
-  const cursorOffset = snapPromptTextInputCursorOffset(segments, options.cursorOffset, "nearest")
+  const segments = normalizeSegments(options.segments)
+  const value = displayValue(segments)
+  const cursorOffset = snapSegments(segments, options.cursorOffset, "nearest")
   const metaShortcut = key.meta ? input.toLowerCase() : input
 
   if (key.meta && metaShortcut === "b") {
     return {
-      cursorOffset: snapPromptTextInputCursorOffset(segments, findWordBoundaryLeft(value, cursorOffset), "left"),
+      cursorOffset: snapSegments(segments, wordLeft(value, cursorOffset), "left"),
       kind: "update",
       nextPasteId: options.nextPasteId,
       preferredColumn: null,
@@ -364,7 +341,7 @@ export function applyPromptTextInputSegmentsKey(options: {
 
   if (key.meta && metaShortcut === "f") {
     return {
-      cursorOffset: snapPromptTextInputCursorOffset(segments, findWordBoundaryRight(value, cursorOffset), "right"),
+      cursorOffset: snapSegments(segments, wordRight(value, cursorOffset), "right"),
       kind: "update",
       nextPasteId: options.nextPasteId,
       preferredColumn: null,
@@ -374,7 +351,7 @@ export function applyPromptTextInputSegmentsKey(options: {
 
   if (matchesCtrlCharacterShortcut(input, key, "a") || key.home) {
     return {
-      cursorOffset: getCurrentLineBounds(value, cursorOffset).start,
+      cursorOffset: lineBounds(value, cursorOffset).start,
       kind: "update",
       nextPasteId: options.nextPasteId,
       preferredColumn: null,
@@ -384,7 +361,7 @@ export function applyPromptTextInputSegmentsKey(options: {
 
   if (matchesCtrlCharacterShortcut(input, key, "e") || key.end) {
     return {
-      cursorOffset: getCurrentLineBounds(value, cursorOffset).end,
+      cursorOffset: lineBounds(value, cursorOffset).end,
       kind: "update",
       nextPasteId: options.nextPasteId,
       preferredColumn: null,
@@ -393,16 +370,13 @@ export function applyPromptTextInputSegmentsKey(options: {
   }
 
   if (isDeleteWordLeftShortcut(input, key)) {
-    const next = deletePromptTextInputDisplayRange({
+    const next = deleteDisplayRange({
       cursorOffset,
       end: cursorOffset,
       segments,
-      start: findWordBoundaryLeft(value, cursorOffset),
+      start: wordLeft(value, cursorOffset),
     })
-    if (
-      getPromptTextInputDisplayValue(next.segments) === value &&
-      getPromptTextInputExpandedValue(next.segments) === getPromptTextInputExpandedValue(segments)
-    ) {
+    if (displayValue(next.segments) === value && expandedValue(next.segments) === expandedValue(segments)) {
       return { kind: "noop" }
     }
     return {
@@ -415,11 +389,9 @@ export function applyPromptTextInputSegmentsKey(options: {
   }
 
   if (key.leftArrow) {
-    const nextCursorOffset = key.meta
-      ? findWordBoundaryLeft(value, cursorOffset)
-      : getPromptTextInputPreviousCursorOffset(value, cursorOffset)
+    const nextCursorOffset = key.meta ? wordLeft(value, cursorOffset) : prevOffset(value, cursorOffset)
     return {
-      cursorOffset: snapPromptTextInputCursorOffset(segments, nextCursorOffset, "left"),
+      cursorOffset: snapSegments(segments, nextCursorOffset, "left"),
       kind: "update",
       nextPasteId: options.nextPasteId,
       preferredColumn: null,
@@ -428,11 +400,9 @@ export function applyPromptTextInputSegmentsKey(options: {
   }
 
   if (key.rightArrow) {
-    const nextCursorOffset = key.meta
-      ? findWordBoundaryRight(value, cursorOffset)
-      : getPromptTextInputNextCursorOffset(value, cursorOffset)
+    const nextCursorOffset = key.meta ? wordRight(value, cursorOffset) : nextOffset(value, cursorOffset)
     return {
-      cursorOffset: snapPromptTextInputCursorOffset(segments, nextCursorOffset, "right"),
+      cursorOffset: snapSegments(segments, nextCursorOffset, "right"),
       kind: "update",
       nextPasteId: options.nextPasteId,
       preferredColumn: null,
@@ -441,18 +411,14 @@ export function applyPromptTextInputSegmentsKey(options: {
   }
 
   if (key.upArrow || key.downArrow) {
-    const { column, lineIndex } = getCursorLineColumn(value, cursorOffset)
+    const { column, lineIndex } = lineColumn(value, cursorOffset)
     const targetLineIndex = key.upArrow ? lineIndex - 1 : lineIndex + 1
-    if (targetLineIndex < 0 || targetLineIndex >= getPromptLines(value).length) {
+    if (targetLineIndex < 0 || targetLineIndex >= lines(value).length) {
       return { kind: "noop" }
     }
     const preferredColumn = options.preferredColumn ?? column
     return {
-      cursorOffset: snapPromptTextInputCursorOffset(
-        segments,
-        getCursorOffsetForLineColumn(value, targetLineIndex, preferredColumn),
-        "nearest",
-      ),
+      cursorOffset: snapSegments(segments, offsetForLineColumn(value, targetLineIndex, preferredColumn), "nearest"),
       kind: "update",
       nextPasteId: options.nextPasteId,
       preferredColumn,
@@ -461,20 +427,20 @@ export function applyPromptTextInputSegmentsKey(options: {
   }
 
   if (key.backspace || key.delete) {
-    const deleteRange = getPromptTextInputDeleteRange({
+    const dr = deleteRange({
       cursorOffset,
       value,
     })
 
-    if (deleteRange === undefined) {
+    if (dr === undefined) {
       return { kind: "noop" }
     }
 
-    const next = deletePromptTextInputDisplayRange({
-      cursorOffset: deleteRange.start,
-      end: deleteRange.end,
+    const next = deleteDisplayRange({
+      cursorOffset: dr.start,
+      end: dr.end,
       segments,
-      start: deleteRange.start,
+      start: dr.start,
     })
     return {
       cursorOffset: next.cursorOffset,
@@ -485,16 +451,16 @@ export function applyPromptTextInputSegmentsKey(options: {
     }
   }
 
-  const inserted = key.return && key.shift ? "\n" : normalizePromptInputChunk(input)
+  const inserted = key.return && key.shift ? "\n" : normalizeChunk(input)
   if (inserted.length === 0) {
     return { kind: "noop" }
   }
 
   const isPaste = options.treatAsPaste === true && !key.return && inserted.includes("\n")
   const insertedSegments = isPaste
-    ? [{ kind: "paste", pasteId: options.nextPasteId, text: inserted } satisfies PromptTextInputSegment]
-    : [{ kind: "text", text: inserted } satisfies PromptTextInputSegment]
-  const next = insertPromptTextInputSegmentsAtDisplayOffset({
+    ? [{ kind: "paste", pasteId: options.nextPasteId, text: inserted } satisfies Segment]
+    : [{ kind: "text", text: inserted } satisfies Segment]
+  const next = insertAtOffset({
     cursorOffset,
     insertedSegments,
     segments,
@@ -509,4 +475,4 @@ export function applyPromptTextInputSegmentsKey(options: {
   }
 }
 
-export type { PromptTextInputAction, PromptTextInputSegmentsAction }
+export type { EditAction, SegmentsAction }

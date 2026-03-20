@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import type { ActiveLiveOutput, CompletedOutput } from "../../../src/cli/state"
-import { completedOutputToLines, countRenderableLiveOutputs } from "../../../src/cli/tui/workflow-tree"
+import { completedOutputToLines, countLiveOutputs } from "../../../src/cli/tui/workflow-tree"
 
 describe("completedOutputToLines", () => {
   test("preserves preview lines when completed output already has streamed entries", () => {
@@ -109,7 +109,7 @@ describe("completedOutputToLines", () => {
   })
 })
 
-describe("countRenderableLiveOutputs", () => {
+describe("countLiveOutputs", () => {
   test("counts only live outputs with visible lines", () => {
     const liveOutputs: Record<string, ActiveLiveOutput> = {
       "/group": { entries: [] },
@@ -135,6 +135,6 @@ describe("countRenderableLiveOutputs", () => {
       },
     }
 
-    expect(countRenderableLiveOutputs(liveOutputs)).toBe(1)
+    expect(countLiveOutputs(liveOutputs)).toBe(1)
   })
 })

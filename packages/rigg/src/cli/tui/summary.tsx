@@ -6,7 +6,7 @@ import { formatDuration, statusSymbol } from "./symbols"
 import { runDurationMs } from "./time"
 import { SUMMARY_KINDS, type TreeEntry } from "./tree"
 
-export function countSummaryStatuses(entries: TreeEntry[]): {
+export function countStatuses(entries: TreeEntry[]): {
   failedCount: number
   failedSteps: Array<{ label: string; suffix: string }>
   interruptedCount: number
@@ -51,7 +51,7 @@ export function Summary({ snapshot, entries }: { snapshot: RunSnapshot | null; e
   const { stdout } = useStdout()
   const cols = stdout?.columns ?? 80
 
-  const { failedCount, failedSteps, interruptedCount, skippedCount, succeededCount } = countSummaryStatuses(entries)
+  const { failedCount, failedSteps, interruptedCount, skippedCount, succeededCount } = countStatuses(entries)
   const totalMs = runDurationMs(snapshot)
   const statusLabel = snapshot.status.charAt(0).toUpperCase() + snapshot.status.slice(1)
   const statusColor = snapshot.status === "succeeded" ? "green" : "red"

@@ -80,7 +80,7 @@ function buildHeaderLeft(options: { budget: number; stepProgress?: string | unde
   return " ".repeat(Math.min(2, remaining)) + output
 }
 
-export function layoutHeaderLine(options: {
+export function headerLine(options: {
   cols: number
   elapsed: string
   status: string

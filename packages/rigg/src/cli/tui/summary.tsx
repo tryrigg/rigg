@@ -1,6 +1,6 @@
 import { Box, Text, useStdout } from "ink"
 
-import type { RunSnapshot } from "../../run/schema"
+import type { RunSnapshot } from "../../session/schema"
 import { renderRule } from "./layout"
 import { formatDuration, statusSymbol } from "./symbols"
 import { runDurationMs } from "./time"

@@ -1,6 +1,6 @@
 import figures from "figures"
 
-import type { NodeStatus } from "../../run/schema"
+import type { NodeStatus } from "../../session/schema"
 import { colors, kindColors } from "./theme"
 
 export type StatusSymbol = { icon: string; color: string }

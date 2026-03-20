@@ -20,7 +20,7 @@ export function stringifyJson(value: unknown): string {
   }
 }
 
-export function stringifyJsonCompact(value: unknown): string {
+export function compactJson(value: unknown): string {
   try {
     return JSON.stringify(value)
   } catch (error) {

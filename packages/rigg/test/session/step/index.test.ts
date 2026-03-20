@@ -1,0 +1,1250 @@
+import { describe, expect, test } from "bun:test"
+import { spawn } from "node:child_process"
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
+
+import type { ActionNode } from "../../../src/workflow/schema"
+import type { CodexProviderEvent } from "../../../src/codex/event"
+import { createCodexRuntimeSession } from "../../../src/codex/runtime"
+import { RIGG_VERSION } from "../../../src/version"
+import { runActionStep } from "../../../src/session/step"
+import { renderContext } from "../../fixture/builders"
+import { installFakeCodex } from "../../fixture/fake-codex"
+
+const FAKE_CODEX_LIFECYCLE_LOG = ".fake-codex-app-server-events.log"
+
+async function readFakeCodexLifecycleEvents(root: string): Promise<string[]> {
+  try {
+    const contents = await readFile(join(root, FAKE_CODEX_LIFECYCLE_LOG), "utf8")
+    return contents
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return []
+    }
+    throw error
+  }
+}
+
+async function waitForFakeCodexExitEvents(root: string, expectedCount: number): Promise<string[]> {
+  const timeoutAt = Date.now() + 1_000
+  while (Date.now() < timeoutAt) {
+    const events = await readFakeCodexLifecycleEvents(root)
+    const exitCount = events.filter((line) => line.startsWith("exit:")).length
+    if (exitCount >= expectedCount) {
+      return events
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+
+  return await readFakeCodexLifecycleEvents(root)
+}
+
+async function runBunScript(
+  scriptPath: string,
+  env: Record<string, string | undefined>,
+): Promise<{ code: number | null; durationMs: number; stderr: string }> {
+  const startedAt = Date.now()
+  const child = spawn(process.execPath, [scriptPath], {
+    cwd: process.cwd(),
+    env,
+    stdio: ["ignore", "ignore", "pipe"],
+  })
+
+  let stderr = ""
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk.toString()
+  })
+
+  const code = await new Promise<number | null>((resolve, reject) => {
+    child.once("error", reject)
+    child.once("exit", (nextCode) => resolve(nextCode))
+  })
+
+  return {
+    code,
+    durationMs: Date.now() - startedAt,
+    stderr,
+  }
+}
+
+describe("session/step", () => {
+  test("runs shell steps with cwd and env", async () => {
+    const outputChunks: Array<{ chunk: string; stream: "stderr" | "stdout" }> = []
+    const step: ActionNode = {
+      type: "shell",
+      with: {
+        command: "echo $RIGG_TEST_VALUE && pwd",
+        result: "text",
+      },
+    }
+
+    const result = await runActionStep(step, renderContext(), {
+      cwd: process.cwd(),
+      env: { ...process.env, RIGG_TEST_VALUE: "hello" },
+      onOutput: (stream, chunk) => {
+        outputChunks.push({ chunk, stream })
+      },
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toBe("")
+    expect(result.stdout).toContain("hello")
+    expect(result.stdout).toContain(process.cwd())
+    expect(outputChunks.every((chunk) => chunk.stream === "stdout")).toBe(true)
+    expect(outputChunks.map((chunk) => chunk.chunk).join("")).toBe(result.stdout)
+  })
+
+  test("writes relative files against the provided cwd", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-write-file-"))
+    try {
+      const step: ActionNode = {
+        type: "write_file",
+        with: {
+          content: "hello",
+          path: "nested/output.txt",
+        },
+      }
+
+      const result = await runActionStep(step, renderContext(), {
+        cwd: root,
+        env: process.env,
+      })
+
+      expect(result.result).toEqual({ path: join(root, "nested/output.txt") })
+      expect(await readFile(join(root, "nested/output.txt"), "utf8")).toBe("hello")
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("runs codex run steps through app-server", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-codex-run-app-server-"))
+    try {
+      const binDir = await installFakeCodex(root, {
+        threadStartExpectParams: {
+          cwd: root,
+          experimentalRawEvents: false,
+          model: null,
+          persistExtendedHistory: false,
+        },
+        turnStart: {
+          expectParams: {
+            effort: "medium",
+            input: [{ text: "Summarize the change.", text_elements: [], type: "text" }],
+            model: null,
+            threadId: "__THREAD_ID__",
+          },
+          dispatch: "immediate",
+          steps: [
+            {
+              kind: "notification",
+              method: "turn/started",
+              params: {
+                threadId: "__THREAD_ID__",
+                turn: { id: "__TURN_ID__", items: [], status: "inProgress", error: null },
+              },
+            },
+            {
+              kind: "notification",
+              method: "item/started",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                item: {
+                  type: "commandExecution",
+                  id: "cmd_1",
+                  command: "cat src/main.ts",
+                  cwd: root,
+                  processId: null,
+                  status: "inProgress",
+                  commandActions: [],
+                  aggregatedOutput: null,
+                  exitCode: null,
+                  durationMs: null,
+                },
+              },
+            },
+            {
+              kind: "notification",
+              method: "codex/event/mcp_startup_complete",
+              params: {
+                conversationId: "conv_1",
+                id: "event_1",
+                msg: {
+                  type: "mcp_startup_complete",
+                  cancelled: [],
+                  failed: [],
+                  ready: [],
+                },
+              },
+            },
+            {
+              kind: "notification",
+              method: "codex/event/future_event",
+              params: {
+                conversationId: "conv_1",
+                id: "event_2",
+                msg: {
+                  type: "future_event",
+                },
+              },
+            },
+            {
+              kind: "notification",
+              method: "turn/plan/updated",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                steps: [],
+              },
+            },
+            {
+              kind: "notification",
+              method: "item/agentMessage/delta",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                itemId: "msg_1",
+                delta: "done",
+              },
+            },
+            {
+              kind: "notification",
+              method: "item/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                item: {
+                  type: "agentMessage",
+                  id: "msg_1",
+                  text: "done",
+                  phase: null,
+                },
+              },
+            },
+            {
+              kind: "notification",
+              method: "turn/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turn: { id: "__TURN_ID__", items: [], status: "completed", error: null },
+              },
+            },
+          ],
+        },
+      })
+
+      const events: CodexProviderEvent[] = []
+      const result = await runActionStep(
+        {
+          type: "codex",
+          with: {
+            action: "run",
+            prompt: "Summarize the change.",
+          },
+        },
+        renderContext(),
+        {
+          cwd: root,
+          env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+          onProviderEvent: (event) => {
+            events.push(event)
+          },
+        },
+      )
+
+      expect(result.exitCode).toBe(0)
+      expect(result.result).toBe("done")
+      expect(events).toEqual([
+        { kind: "thread_started", provider: "codex", threadId: "thread_1" },
+        { kind: "turn_started", provider: "codex", threadId: "thread_1", turnId: "turn_1" },
+        {
+          itemId: "cmd_1",
+          detail: `command=cat src/main.ts cwd=${root}`,
+          kind: "tool_started",
+          provider: "codex",
+          threadId: "thread_1",
+          tool: "command_execution",
+          turnId: "turn_1",
+        },
+        {
+          itemId: "msg_1",
+          kind: "message_delta",
+          provider: "codex",
+          text: "done",
+          threadId: "thread_1",
+          turnId: "turn_1",
+        },
+        {
+          itemId: "msg_1",
+          kind: "message_completed",
+          provider: "codex",
+          text: "done",
+          threadId: "thread_1",
+          turnId: "turn_1",
+        },
+        { kind: "turn_completed", provider: "codex", status: "completed", threadId: "thread_1", turnId: "turn_1" },
+      ])
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("preserves streamed codex text when agent completion omits text", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-codex-run-streamed-app-server-"))
+    try {
+      const binDir = await installFakeCodex(root, {
+        turnStart: {
+          steps: [
+            {
+              kind: "notification",
+              method: "item/agentMessage/delta",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                itemId: "msg_1",
+                delta: "do",
+              },
+            },
+            {
+              kind: "notification",
+              method: "item/agentMessage/delta",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                itemId: "msg_1",
+                delta: "ne",
+              },
+            },
+            {
+              kind: "notification",
+              method: "item/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                item: {
+                  type: "agentMessage",
+                  id: "msg_1",
+                  phase: null,
+                },
+              },
+            },
+            {
+              kind: "notification",
+              method: "turn/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turn: { id: "__TURN_ID__", items: [], status: "completed", error: null },
+              },
+            },
+          ],
+        },
+      })
+
+      const events: CodexProviderEvent[] = []
+      const result = await runActionStep(
+        {
+          type: "codex",
+          with: {
+            action: "run",
+            prompt: "Summarize the change.",
+          },
+        },
+        renderContext(),
+        {
+          cwd: root,
+          env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+          onProviderEvent: (event) => {
+            events.push(event)
+          },
+        },
+      )
+
+      expect(result.exitCode).toBe(0)
+      expect(result.result).toBe("done")
+      expect(result.stdout).toBe("done")
+      expect(events).toEqual([
+        { kind: "thread_started", provider: "codex", threadId: "thread_1" },
+        { kind: "turn_started", provider: "codex", threadId: "thread_1", turnId: "turn_1" },
+        {
+          itemId: "msg_1",
+          kind: "message_delta",
+          provider: "codex",
+          text: "do",
+          threadId: "thread_1",
+          turnId: "turn_1",
+        },
+        {
+          itemId: "msg_1",
+          kind: "message_delta",
+          provider: "codex",
+          text: "ne",
+          threadId: "thread_1",
+          turnId: "turn_1",
+        },
+        {
+          itemId: "msg_1",
+          kind: "message_completed",
+          provider: "codex",
+          text: "done",
+          threadId: "thread_1",
+          turnId: "turn_1",
+        },
+        { kind: "turn_completed", provider: "codex", status: "completed", threadId: "thread_1", turnId: "turn_1" },
+      ])
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("runs codex run steps with an effort override through direct turn/start overrides", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-codex-run-effort-app-server-"))
+    try {
+      const binDir = await installFakeCodex(root, {
+        threadStartExpectParams: {
+          cwd: root,
+          experimentalRawEvents: false,
+          model: null,
+          persistExtendedHistory: false,
+        },
+        turnStart: {
+          expectParams: {
+            effort: "high",
+            input: [{ text: "Summarize the change.", text_elements: [], type: "text" }],
+            model: null,
+            threadId: "__THREAD_ID__",
+          },
+          steps: [
+            {
+              kind: "notification",
+              method: "item/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                item: {
+                  type: "agentMessage",
+                  id: "msg_1",
+                  text: "done",
+                  phase: null,
+                },
+              },
+            },
+            {
+              kind: "notification",
+              method: "turn/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turn: { id: "__TURN_ID__", items: [], status: "completed", error: null },
+              },
+            },
+          ],
+        },
+      })
+
+      const result = await runActionStep(
+        {
+          type: "codex",
+          with: {
+            action: "run",
+            effort: "high",
+            prompt: "Summarize the change.",
+          },
+        },
+        renderContext(),
+        {
+          cwd: root,
+          env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+        },
+      )
+
+      expect(result.exitCode).toBe(0)
+      expect(result.result).toBe("done")
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("maps codeReview text back into a review result", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-codex-review-app-server-"))
+    try {
+      const binDir = await installFakeCodex(root, {
+        threadStartExpectParams: {
+          cwd: root,
+          experimentalRawEvents: false,
+          model: null,
+          persistExtendedHistory: false,
+        },
+        reviewStart: {
+          steps: [
+            {
+              kind: "notification",
+              method: "item/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                item: {
+                  type: "codeReview",
+                  id: "__TURN_ID__",
+                  review: [
+                    "Looks solid overall with minor polish suggested.",
+                    "",
+                    "Review comment:",
+                    "",
+                    "- Prefer Stylize helpers — /tmp/file.rs:10-20",
+                    "  Use .dim()/.bold() chaining instead of manual Style.",
+                  ].join("\n"),
+                },
+              },
+            },
+            {
+              kind: "notification",
+              method: "turn/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turn: { id: "__TURN_ID__", items: [], status: "completed", error: null },
+              },
+            },
+          ],
+        },
+      })
+
+      const result = await runActionStep(
+        {
+          type: "codex",
+          with: {
+            action: "review",
+            review: {
+              target: {
+                type: "uncommitted",
+              },
+            },
+          },
+        },
+        renderContext(),
+        {
+          cwd: root,
+          env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+        },
+      )
+
+      expect(result.exitCode).toBe(0)
+      expect(result.result).toEqual({
+        findings: [
+          {
+            body: "Use .dim()/.bold() chaining instead of manual Style.",
+            code_location: {
+              absolute_file_path: "/tmp/file.rs",
+              line_range: {
+                end: 20,
+                start: 10,
+              },
+            },
+            confidence_score: 0,
+            priority: null,
+            title: "Prefer Stylize helpers",
+          },
+        ],
+        overall_confidence_score: 0,
+        overall_correctness: "unknown",
+        overall_explanation: "Looks solid overall with minor polish suggested.",
+      })
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("runs codex plan steps with the built-in collaboration mode and default medium effort", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-codex-plan-app-server-"))
+    try {
+      const binDir = await installFakeCodex(root, {
+        initializeExpectParams: {
+          capabilities: {
+            experimentalApi: true,
+          },
+          clientInfo: {
+            name: "@tryrigg/rigg",
+            title: "Rigg",
+            version: RIGG_VERSION,
+          },
+        },
+        threadStartExpectParams: {
+          cwd: root,
+          experimentalRawEvents: false,
+          model: null,
+          persistExtendedHistory: false,
+        },
+        collaborationModeListResult: {
+          data: [
+            { name: "Plan", mode: "plan", model: null, reasoning_effort: "high" },
+            { name: "Default", mode: "default", model: null, reasoning_effort: null },
+          ],
+        },
+        turnStart: {
+          expectParams: {
+            collaborationMode: {
+              mode: "plan",
+              settings: {
+                developer_instructions: null,
+                model: "gpt-5.5",
+                reasoning_effort: "medium",
+              },
+            },
+            input: [{ text: "Ask one clarifying question, then return the plan.", text_elements: [], type: "text" }],
+            threadId: "__THREAD_ID__",
+          },
+          steps: [
+            {
+              kind: "request",
+              method: "item/tool/requestUserInput",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                itemId: "input_1",
+                questions: [
+                  {
+                    id: "choice",
+                    header: "Choice",
+                    question: "Pick one",
+                    isOther: false,
+                    isSecret: false,
+                    options: [{ label: "A", description: "Pick A" }],
+                  },
+                ],
+              },
+              expectResult: {
+                answers: {
+                  choice: {
+                    answers: ["A"],
+                  },
+                },
+              },
+            },
+            {
+              kind: "notification",
+              method: "item/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                item: {
+                  type: "agentMessage",
+                  id: "msg_1",
+                  text: "plan ready",
+                  phase: null,
+                },
+              },
+            },
+            {
+              kind: "notification",
+              method: "turn/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turn: { id: "__TURN_ID__", items: [], status: "completed", error: null },
+              },
+            },
+          ],
+        },
+      })
+
+      const result = await runActionStep(
+        {
+          type: "codex",
+          with: {
+            action: "plan",
+            model: "gpt-5.5",
+            prompt: "Ask one clarifying question, then return the plan.",
+          },
+        },
+        renderContext(),
+        {
+          cwd: root,
+          env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+          interactionHandler: async (request) => {
+            if (request.kind !== "user_input") {
+              throw new Error(`unexpected interaction ${request.kind}`)
+            }
+
+            return {
+              answers: {
+                choice: { answers: ["A"] },
+              },
+              kind: "user_input",
+            }
+          },
+        },
+      )
+
+      expect(result.exitCode).toBe(0)
+      expect(result.result).toBe("plan ready")
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("runs codex plan steps with an effort override", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-codex-plan-effort-app-server-"))
+    try {
+      const binDir = await installFakeCodex(root, {
+        threadStartExpectParams: {
+          cwd: root,
+          experimentalRawEvents: false,
+          model: null,
+          persistExtendedHistory: false,
+        },
+        collaborationModeListResult: {
+          data: [
+            { name: "Plan", mode: "plan", model: "gpt-5.4", reasoning_effort: "medium" },
+            { name: "Default", mode: "default", model: "gpt-5.4", reasoning_effort: null },
+          ],
+        },
+        turnStart: {
+          expectParams: {
+            collaborationMode: {
+              mode: "plan",
+              settings: {
+                developer_instructions: null,
+                model: "gpt-5.4",
+                reasoning_effort: "xhigh",
+              },
+            },
+            input: [{ text: "Return the plan.", text_elements: [], type: "text" }],
+            threadId: "__THREAD_ID__",
+          },
+          steps: [
+            {
+              kind: "notification",
+              method: "item/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                item: {
+                  type: "agentMessage",
+                  id: "msg_1",
+                  text: "plan ready",
+                  phase: null,
+                },
+              },
+            },
+            {
+              kind: "notification",
+              method: "turn/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turn: { id: "__TURN_ID__", items: [], status: "completed", error: null },
+              },
+            },
+          ],
+        },
+      })
+
+      const result = await runActionStep(
+        {
+          type: "codex",
+          with: {
+            action: "plan",
+            effort: "xhigh",
+            prompt: "Return the plan.",
+          },
+        },
+        renderContext(),
+        {
+          cwd: root,
+          env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+        },
+      )
+
+      expect(result.exitCode).toBe(0)
+      expect(result.result).toBe("plan ready")
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("resolves approval, user input, and elicitation requests", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-codex-interactions-"))
+    try {
+      const binDir = await installFakeCodex(root, {
+        turnStart: {
+          steps: [
+            {
+              kind: "request",
+              method: "item/commandExecution/requestApproval",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                itemId: "cmd_1",
+                reason: "Need approval",
+                command: "git status",
+                cwd: root,
+                availableDecisions: ["accept", "decline", "cancel"],
+              },
+              expectResult: {
+                decision: "accept",
+              },
+            },
+            {
+              kind: "request",
+              method: "item/permissions/requestApproval",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                itemId: "perm_1",
+                reason: "Need permissions",
+                permissions: {
+                  mode: "workspace-write",
+                  writableRoots: [root],
+                },
+                availableDecisions: ["accept", "decline", "cancel"],
+              },
+              expectResult: {
+                permissions: {
+                  mode: "workspace-write",
+                  writableRoots: [root],
+                },
+                scope: "turn",
+              },
+            },
+            {
+              kind: "request",
+              method: "item/tool/requestUserInput",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                itemId: "input_1",
+                questions: [
+                  {
+                    id: "choice",
+                    header: "Choice",
+                    question: "Pick one",
+                    isOther: false,
+                    isSecret: false,
+                    options: [{ label: "A", description: "Pick A" }],
+                  },
+                ],
+              },
+              expectResult: {
+                answers: {
+                  choice: {
+                    answers: ["A"],
+                  },
+                },
+              },
+            },
+            {
+              kind: "request",
+              method: "mcpServer/elicitation/request",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                serverName: "search",
+                mode: "form",
+                message: "Provide parameters",
+                requestedSchema: {
+                  type: "object",
+                  properties: {
+                    query: { type: "string" },
+                  },
+                  required: ["query"],
+                },
+                _meta: null,
+              },
+              expectResult: {
+                action: "accept",
+                content: {
+                  query: "hello",
+                },
+                _meta: null,
+              },
+            },
+            {
+              kind: "notification",
+              method: "item/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turnId: "__TURN_ID__",
+                item: {
+                  type: "agentMessage",
+                  id: "msg_1",
+                  text: "done",
+                  phase: null,
+                },
+              },
+            },
+            {
+              kind: "notification",
+              method: "turn/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turn: { id: "__TURN_ID__", items: [], status: "completed", error: null },
+              },
+            },
+          ],
+        },
+      })
+
+      const result = await runActionStep(
+        {
+          type: "codex",
+          with: {
+            action: "run",
+            prompt: "Do the work",
+          },
+        },
+        renderContext(),
+        {
+          cwd: root,
+          env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+          interactionHandler: async (request) => {
+            switch (request.kind) {
+              case "approval":
+                return { decision: "accept", kind: "approval" }
+              case "user_input":
+                return { answers: { choice: { answers: ["A"] } }, kind: "user_input" }
+              case "elicitation":
+                return { action: "accept", content: { query: "hello" }, kind: "elicitation" }
+            }
+          },
+        },
+      )
+
+      expect(result.exitCode).toBe(0)
+      expect(result.result).toBe("done")
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("rejects unsupported codex versions", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-codex-version-gate-"))
+    try {
+      const binDir = await installFakeCodex(root, {
+        versionOutput: "codex-cli 0.113.0",
+      })
+
+      await expect(
+        runActionStep(
+          {
+            type: "codex",
+            with: {
+              action: "run",
+              prompt: "Say hi",
+            },
+          },
+          renderContext(),
+          {
+            cwd: root,
+            env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+          },
+        ),
+      ).rejects.toThrow("Upgrade to v0.114.0 or newer")
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("cleans up the app-server when bootstrap fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-codex-bootstrap-failure-"))
+    try {
+      const binDir = await installFakeCodex(root, {
+        accountReadResult: {
+          account: null,
+          requiresOpenaiAuth: true,
+        },
+      })
+
+      await expect(
+        createCodexRuntimeSession({
+          cwd: root,
+          env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+        }),
+      ).rejects.toThrow("Codex CLI is not authenticated")
+
+      await expect(
+        createCodexRuntimeSession({
+          cwd: root,
+          env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+        }),
+      ).rejects.toThrow("Codex CLI is not authenticated")
+
+      const lifecycleEvents = await waitForFakeCodexExitEvents(root, 2)
+      expect(lifecycleEvents.filter((line) => line.startsWith("started:"))).toHaveLength(2)
+      expect(lifecycleEvents.filter((line) => line.startsWith("exit:"))).toHaveLength(2)
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("closes the app-server without lingering for the forced-kill grace period", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-codex-close-latency-"))
+    try {
+      const binDir = await installFakeCodex(root, {})
+      const scriptPath = join(root, "close-codex-session.ts")
+      const processModuleUrl = new URL("../../../src/codex/proc.ts", import.meta.url).href
+
+      await writeFile(
+        scriptPath,
+        [
+          `const { startServer } = await import(${JSON.stringify(processModuleUrl)});`,
+          `const appServer = startServer({`,
+          `  cwd: ${JSON.stringify(root)},`,
+          `  env: process.env,`,
+          `});`,
+          `await appServer.close();`,
+        ].join("\n"),
+        "utf8",
+      )
+
+      const result = await runBunScript(scriptPath, {
+        ...process.env,
+        PATH: `${binDir}:${process.env["PATH"] ?? ""}`,
+      })
+      expect(result.code).toBe(0)
+      expect(result.stderr).toBe("")
+      expect(result.durationMs).toBeLessThan(700)
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("interrupts an active turn through app-server", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-codex-interrupt-"))
+    try {
+      const binDir = await installFakeCodex(root, {
+        turnStart: {
+          steps: [],
+        },
+      })
+      const session = await createCodexRuntimeSession({
+        cwd: root,
+        env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+      })
+      const controller = new AbortController()
+
+      const execution = session.run({
+        cwd: root,
+        signal: controller.signal,
+        prompt: "Wait for interruption",
+      })
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      controller.abort()
+
+      await expect(execution).resolves.toMatchObject({
+        exitCode: 130,
+        termination: "interrupted",
+      })
+      await session.close()
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("completes interruption when app-server acknowledges without turn completion", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-codex-interrupt-ack-only-"))
+    try {
+      const binDir = await installFakeCodex(root, {
+        turnInterrupt: {
+          steps: [],
+        },
+        turnStart: {
+          steps: [],
+        },
+      })
+      const session = await createCodexRuntimeSession({
+        cwd: root,
+        env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+      })
+      const controller = new AbortController()
+      const startedAt = Date.now()
+
+      const execution = session.run({
+        cwd: root,
+        signal: controller.signal,
+        prompt: "Wait for interruption",
+      })
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      controller.abort()
+
+      await expect(execution).resolves.toMatchObject({
+        exitCode: 130,
+        termination: "interrupted",
+      })
+      expect(Date.now() - startedAt).toBeLessThan(700)
+      await session.close()
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("completes interruption when app-server never responds to turn/interrupt", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-codex-interrupt-no-response-"))
+    try {
+      const binDir = await installFakeCodex(root, {
+        turnInterrupt: {
+          respond: false,
+          steps: [],
+        },
+        turnStart: {
+          steps: [],
+        },
+      })
+      const session = await createCodexRuntimeSession({
+        cwd: root,
+        env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+      })
+      const controller = new AbortController()
+      const startedAt = Date.now()
+
+      const execution = session.run({
+        cwd: root,
+        signal: controller.signal,
+        prompt: "Wait for interruption",
+      })
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      controller.abort()
+
+      await expect(execution).resolves.toMatchObject({
+        exitCode: 130,
+        termination: "interrupted",
+      })
+      expect(Date.now() - startedAt).toBeLessThan(1_500)
+      await session.close()
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("fails an active turn on malformed app-server output", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-codex-malformed-json-"))
+    try {
+      const binDir = await installFakeCodex(root, {
+        turnStart: {
+          dispatch: "immediate",
+          steps: [{ kind: "stdout", text: "{not-json" }],
+        },
+      })
+      const session = await createCodexRuntimeSession({
+        cwd: root,
+        env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+      })
+
+      await expect(
+        session.run({
+          cwd: root,
+          prompt: "Trigger malformed output",
+        }),
+      ).rejects.toThrow("codex app-server returned invalid JSON")
+
+      await session.close()
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("cancels delayed thread startup promptly", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-codex-thread-start-abort-"))
+    try {
+      const binDir = await installFakeCodex(root, {
+        threadStartDelayMs: 1_000,
+        turnStart: {
+          steps: [],
+        },
+      })
+      const session = await createCodexRuntimeSession({
+        cwd: root,
+        env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+      })
+      const controller = new AbortController()
+      const startedAt = Date.now()
+
+      const execution = session.run({
+        cwd: root,
+        prompt: "Abort before thread start returns",
+        signal: controller.signal,
+      })
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      controller.abort()
+
+      await expect(execution).resolves.toMatchObject({
+        exitCode: 130,
+        termination: "interrupted",
+      })
+      expect(Date.now() - startedAt).toBeLessThan(700)
+
+      await session.close()
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("uses dedicated app-server sessions for concurrent codex steps", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-codex-dedicated-sessions-"))
+    try {
+      const binDir = await installFakeCodex(root, {
+        turnStart: {
+          dispatch: "immediate",
+          steps: [
+            { kind: "stderr", text: "dedicated session diagnostic" },
+            { kind: "delay", ms: 50 },
+            {
+              kind: "notification",
+              method: "turn/completed",
+              params: {
+                threadId: "__THREAD_ID__",
+                turn: { id: "__TURN_ID__", items: [], status: "completed", error: null },
+              },
+            },
+          ],
+        },
+      })
+
+      const step: ActionNode = {
+        type: "codex",
+        with: {
+          action: "run",
+          prompt: "run in isolated session",
+        },
+      }
+
+      const [first, second] = await Promise.all([
+        runActionStep(step, renderContext(), {
+          cwd: root,
+          env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+        }),
+        runActionStep(step, renderContext(), {
+          cwd: root,
+          env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+        }),
+      ])
+
+      expect(first.stderr).toBe("dedicated session diagnostic")
+      expect(second.stderr).toBe("dedicated session diagnostic")
+      expect(first.providerEvents).toContainEqual({
+        kind: "diagnostic",
+        message: "dedicated session diagnostic",
+        provider: "codex",
+        threadId: "thread_1",
+        turnId: "turn_1",
+      })
+      expect(second.providerEvents).toContainEqual({
+        kind: "diagnostic",
+        message: "dedicated session diagnostic",
+        provider: "codex",
+        threadId: "thread_1",
+        turnId: "turn_1",
+      })
+
+      const lifecycleEvents = await waitForFakeCodexExitEvents(root, 2)
+      expect(lifecycleEvents.filter((line) => line.startsWith("started:"))).toHaveLength(2)
+      expect(lifecycleEvents.filter((line) => line.startsWith("exit:"))).toHaveLength(2)
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+})

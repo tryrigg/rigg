@@ -1,7 +1,7 @@
 import { Box, Text, useStdout } from "ink"
 
-import type { RunSnapshot, RunStatus } from "../../run/schema"
-import type { BarrierApprovalMode } from "../run"
+import type { RunSnapshot, RunStatus } from "../../session/schema"
+import type { BarrierApprovalMode } from "../state"
 import { layoutHeaderLine, renderRule } from "./layout"
 
 function statusColor(status: RunStatus | string): string {

@@ -1,6 +1,6 @@
 import { Box, Text, useInput } from "ink"
 
-import type { FrontierNode, StepBarrier } from "../../run/schema"
+import type { FrontierNode, StepBarrier } from "../../session/schema"
 import { matchesShortcut } from "./input"
 import { statusSymbol } from "./symbols"
 

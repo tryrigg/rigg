@@ -1,10 +1,10 @@
 import { Box, Text, useInput } from "ink"
 import { useMemo, useSyncExternalStore } from "react"
 
-import type { CodexInteractionResolution } from "../../codex/interaction"
-import type { WorkflowProject } from "../../compile/project"
-import type { WorkflowDocument } from "../../compile/schema"
-import type { BarrierApprovalMode } from "../run"
+import type { InteractionResolution } from "../../session/interaction"
+import type { WorkflowProject } from "../../project"
+import type { WorkflowDocument } from "../../workflow/schema"
+import type { BarrierApprovalMode } from "../state"
 import { BarrierPrompt } from "./barrier-prompt"
 import { Header } from "./header"
 import { InteractionPrompt } from "./interaction-prompt"
@@ -27,7 +27,7 @@ export function App({
   barrierMode: BarrierApprovalMode
   onInterrupt: () => void
   onResolveBarrier: (barrierId: string, action: "abort" | "continue") => void
-  onResolveInteraction: (interactionId: string, resolution: CodexInteractionResolution) => void
+  onResolveInteraction: (interactionId: string, resolution: InteractionResolution) => void
   project?: WorkflowProject | undefined
   store: TuiStore
   workflow: WorkflowDocument

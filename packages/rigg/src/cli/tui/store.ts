@@ -1,6 +1,6 @@
-import type { RunEvent } from "../../run/progress"
-import type { RunSnapshot } from "../../run/schema"
-import { applyRunEvent, createTerminalUiState, type BarrierApprovalMode, type TerminalUiState } from "../run"
+import type { RunEvent } from "../../session/event"
+import type { RunSnapshot } from "../../session/schema"
+import { applyRunEvent, createTerminalUiState, type BarrierApprovalMode, type TerminalUiState } from "../state"
 
 export type TuiStoreSnapshot = {
   state: TerminalUiState

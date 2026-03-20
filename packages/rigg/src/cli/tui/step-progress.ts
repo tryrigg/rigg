@@ -1,7 +1,7 @@
-import { StepKind, childNodePath, rootNodePath } from "../../compile/schema"
-import type { WorkflowDocument, WorkflowStep } from "../../compile/schema"
-import type { WorkflowProject } from "../../compile/project"
-import type { NodeSnapshot, RunSnapshot } from "../../run/schema"
+import { childPath, rootPath } from "../../workflow/id"
+import { StepKind, type WorkflowDocument, type WorkflowStep } from "../../workflow/schema"
+import type { WorkflowProject } from "../../project"
+import type { NodeSnapshot, RunSnapshot } from "../../session/schema"
 
 const ACTION_STEP_KINDS = new Set<string>([StepKind.Shell, StepKind.Codex, StepKind.WriteFile, StepKind.Workflow])
 
@@ -22,7 +22,7 @@ function collectActionNodes(
   project?: WorkflowProject,
 ): void {
   for (const [index, step] of steps.entries()) {
-    const nodePath = parentPath === null ? rootNodePath(index) : childNodePath(parentPath, index)
+    const nodePath = parentPath === null ? rootPath(index) : childPath(parentPath, index)
     switch (step.type) {
       case "shell":
       case "codex":
@@ -38,12 +38,12 @@ function collectActionNodes(
         break
       case "branch":
         for (const [caseIndex, branchCase] of step.cases.entries()) {
-          collectActionNodes(branchCase.steps, childNodePath(nodePath, caseIndex), insideLoop, actionNodes, project)
+          collectActionNodes(branchCase.steps, childPath(nodePath, caseIndex), insideLoop, actionNodes, project)
         }
         break
       case "parallel":
         for (const [branchIndex, branch] of step.branches.entries()) {
-          collectActionNodes(branch.steps, childNodePath(nodePath, branchIndex), insideLoop, actionNodes, project)
+          collectActionNodes(branch.steps, childPath(nodePath, branchIndex), insideLoop, actionNodes, project)
         }
         break
     }

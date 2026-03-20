@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto"
 import { onAbort } from "../util/abort"
 import { createAbortError, normalizeError } from "../util/error"
 import { isJsonObject } from "../util/json"
-import type { CodexAppServerProcess } from "./process"
+import type { CodexAppServerProcess } from "./proc"
 
 type JsonRpcMessage = Record<string, unknown>
 type JsonRpcNotification = {
@@ -55,7 +55,7 @@ export type CodexRpcClient = {
   start: (handlers: RpcHandlers) => void
 }
 
-export function createCodexRpcClient(process: CodexAppServerProcess): CodexRpcClient {
+export function createRpcClient(process: CodexAppServerProcess): CodexRpcClient {
   const pending = new Map<string | number, PendingRequest>()
   const ignoredResponses = new Set<string | number>()
   let state: ClientState = { kind: "open" }

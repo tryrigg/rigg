@@ -2,18 +2,18 @@ import { Box, Text, useInput } from "ink"
 import { useMemo, useState } from "react"
 
 import type {
-  CodexApprovalDecision,
-  CodexInteractionRequest,
-  CodexInteractionResolution,
-  CodexUserInputQuestion,
-} from "../../codex/interaction"
-import type { PendingInteraction } from "../../run/schema"
-import { stringifyJsonCompact, tryParseJson } from "../../util/json"
+  ApprovalDecision,
+  InteractionRequest,
+  InteractionResolution,
+  UserInputQuestion,
+} from "../../session/interaction"
+import type { PendingInteraction } from "../../session/schema"
+import { compactJson, tryParseJson } from "../../util/json"
 import { matchesShortcut } from "./input"
 import { PromptTextInput } from "./prompt-text-input"
 import { chars } from "./theme"
 
-function approvalShortcut(decision: CodexApprovalDecision, index: number): string {
+function approvalShortcut(decision: ApprovalDecision, index: number): string {
   switch (decision.intent) {
     case "approve":
       return "y"
@@ -28,7 +28,7 @@ function approvalShortcut(decision: CodexApprovalDecision, index: number): strin
 
 export type ApprovalPromptChoice = {
   decision: string
-  intent: CodexApprovalDecision["intent"]
+  intent: ApprovalDecision["intent"]
   shortcut: string
   tokens: string[]
 }
@@ -37,7 +37,7 @@ function normalizeApprovalChoiceInput(input: string): string {
   return input.trim().toLowerCase()
 }
 
-export function buildApprovalPromptChoices(decisions: ReadonlyArray<CodexApprovalDecision>): ApprovalPromptChoice[] {
+export function buildApprovalPromptChoices(decisions: ReadonlyArray<ApprovalDecision>): ApprovalPromptChoice[] {
   const choices: ApprovalPromptChoice[] = []
   for (const [index, decision] of decisions.entries()) {
     const tokens = new Set<string>()
@@ -103,7 +103,7 @@ function normalizeQuestionAnswer(
   return answer
 }
 
-export function resolveUserInputAnswer(question: CodexUserInputQuestion, value: string): string | undefined {
+export function resolveUserInputAnswer(question: UserInputQuestion, value: string): string | undefined {
   if (!question.allowEmpty && value.trim().length === 0) {
     return undefined
   }
@@ -149,8 +149,8 @@ function ApprovalPrompt({
   request,
   onResolve,
 }: {
-  request: Extract<CodexInteractionRequest, { kind: "approval" }>
-  onResolve: (resolution: CodexInteractionResolution) => void
+  request: Extract<InteractionRequest, { kind: "approval" }>
+  onResolve: (resolution: InteractionResolution) => void
 }) {
   const choices = useMemo(() => buildApprovalPromptChoices(request.decisions), [request.decisions])
   const [inputValue, setInputValue] = useState("")
@@ -233,8 +233,8 @@ function UserInputPrompt({
   request,
   onResolve,
 }: {
-  request: Extract<CodexInteractionRequest, { kind: "user_input" }>
-  onResolve: (resolution: CodexInteractionResolution) => void
+  request: Extract<InteractionRequest, { kind: "user_input" }>
+  onResolve: (resolution: InteractionResolution) => void
 }) {
   const [questionIndex, setQuestionIndex] = useState(0)
   const [answers, setAnswers] = useState<Record<string, { answers: string[] }>>({})
@@ -314,8 +314,8 @@ function ElicitationPrompt({
   request,
   onResolve,
 }: {
-  request: Extract<CodexInteractionRequest, { kind: "elicitation" }>
-  onResolve: (resolution: CodexInteractionResolution) => void
+  request: Extract<InteractionRequest, { kind: "elicitation" }>
+  onResolve: (resolution: InteractionResolution) => void
 }) {
   const [phase, setPhase] = useState<"choose" | "json">("choose")
   const [jsonInput, setJsonInput] = useState("")
@@ -358,7 +358,7 @@ function ElicitationPrompt({
         </Text>
       ) : (
         <Text dimColor>
-          {"  "}schema: {stringifyJsonCompact(request.requestedSchema ?? {})}
+          {"  "}schema: {compactJson(request.requestedSchema ?? {})}
         </Text>
       )}
       <Text>{""}</Text>
@@ -393,7 +393,7 @@ export function InteractionPrompt({
   onResolve,
 }: {
   interaction: PendingInteraction
-  onResolve: (resolution: CodexInteractionResolution) => void
+  onResolve: (resolution: InteractionResolution) => void
 }) {
   switch (interaction.request.kind) {
     case "approval":

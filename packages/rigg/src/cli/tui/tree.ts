@@ -1,7 +1,7 @@
-import { StepKind, rootNodePath, childNodePath } from "../../compile/schema"
-import type { WorkflowStep, WorkflowDocument } from "../../compile/schema"
-import { workflowById, type WorkflowProject } from "../../compile/project"
-import type { NodeStatus, RunSnapshot, NodeSnapshot } from "../../run/schema"
+import { childPath, rootPath } from "../../workflow/id"
+import { StepKind, type WorkflowDocument, type WorkflowStep } from "../../workflow/schema"
+import { workflowById, type WorkflowProject } from "../../project"
+import type { NodeStatus, RunSnapshot, NodeSnapshot } from "../../session/schema"
 import { formatDuration } from "./symbols"
 
 export const ACTION_KINDS = new Set<string>([StepKind.Shell, StepKind.Codex, StepKind.WriteFile])
@@ -157,7 +157,7 @@ function walkSteps(
     if (step === undefined) {
       continue
     }
-    const nodePath = parentPath === null ? rootNodePath(i) : childNodePath(parentPath, i)
+    const nodePath = parentPath === null ? rootPath(i) : childPath(parentPath, i)
     walkStep(step, nodeMap, nodePath, depth, prefix, entries, project)
   }
 }
@@ -287,7 +287,7 @@ function walkStep(
           continue
         }
         const caseLabel = branchCase.else === true ? "else" : (branchCase.if ?? `case ${ci}`)
-        const casePath = childNodePath(nodePath, ci)
+        const casePath = childPath(nodePath, ci)
         entries.push({
           entryType: "step",
           depth: depth + 1,
@@ -323,7 +323,7 @@ function walkStep(
         if (branch === undefined) {
           continue
         }
-        const branchPath = childNodePath(nodePath, bi)
+        const branchPath = childPath(nodePath, bi)
         if (branch.id) {
           entries.push({
             entryType: "label",

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 
-import type { WorkflowDocument, WorkflowStep } from "../../../src/compile/schema"
+import type { WorkflowDocument, WorkflowStep } from "../../../src/workflow/schema"
 import { formatStepProgress, summarizeStepProgress } from "../../../src/cli/tui/step-progress"
-import type { FrontierNode, NodeSnapshot, RunSnapshot } from "../../../src/run/schema"
+import type { FrontierNode, NodeSnapshot, RunSnapshot } from "../../../src/session/schema"
 import { runSnapshot } from "../../fixture/builders"
 
 function workflow(steps: WorkflowStep[]): WorkflowDocument {

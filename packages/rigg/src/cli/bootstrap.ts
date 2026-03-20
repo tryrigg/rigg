@@ -1,101 +1,24 @@
-import { runInitCommand, runRunCommand, runValidateCommand } from "./command"
+import { parseCommand, renderHelp } from "./args"
+import { runInitCommand } from "./init"
+import { runRunCommand } from "./run"
 import { parseUpgradeArgs, runUpgradeCommand } from "./upgrade"
+import { runValidateCommand } from "./validate"
 import { assertUnreachable } from "../util/assert"
 import { RIGG_VERSION } from "../version"
-import { writeLines } from "./output"
-
-type ParsedCommand =
-  | { kind: "invalid"; message: string }
-  | { kind: "help" }
-  | { kind: "version" }
-  | { kind: "init" }
-  | ({ kind: "upgrade" } & ReturnType<typeof parseUpgradeArgs>)
-  | { json: boolean; kind: "validate" }
-  | { autoContinue: boolean; inputs: string[]; kind: "run"; workflowId?: string }
-
-function parseCommand(argv: string[]): ParsedCommand {
-  const [commandName, ...rest] = argv
-
-  switch (commandName) {
-    case undefined:
-    case "help":
-    case "--help":
-    case "-h":
-      return { kind: "help" }
-    case "--version":
-    case "-V":
-      return { kind: "version" }
-    case "init":
-      return { kind: "init" }
-    case "upgrade":
-      try {
-        return { kind: "upgrade", ...parseUpgradeArgs(rest) }
-      } catch (error) {
-        return { kind: "invalid", message: error instanceof Error ? error.message : String(error) }
-      }
-    case "validate":
-      return { kind: "validate", json: rest.includes("--json") }
-    case "run":
-      return parseRunCommand(rest)
-    default:
-      return { kind: "help" }
-  }
-}
-
-function parseRunCommand(args: string[]): ParsedCommand {
-  let autoContinue = false
-  const inputs: string[] = []
-  let workflowId: string | undefined
-
-  for (let index = 0; index < args.length; index += 1) {
-    const value = args[index]
-    if (value === undefined) {
-      continue
-    }
-    if (value === "--input") {
-      const input = args[index + 1]
-      if (input === undefined) {
-        return { kind: "invalid", message: "`rigg run --input` requires a following KEY=VALUE argument." }
-      }
-      inputs.push(input)
-      index += 1
-      continue
-    }
-    if (value === "--auto-continue") {
-      autoContinue = true
-      continue
-    }
-    if (value.startsWith("--")) {
-      return { kind: "invalid", message: `Unknown run option: ${value}` }
-    }
-    if (workflowId === undefined) {
-      workflowId = value
-    }
-  }
-
-  return workflowId === undefined
-    ? { autoContinue, inputs, kind: "run" }
-    : { autoContinue, inputs, kind: "run", workflowId }
-}
-
-function renderHelp(): string[] {
-  return [
-    "rigg <command>",
-    "",
-    "Commands:",
-    "  init",
-    "  upgrade [target]",
-    "  validate [--json]",
-    "  run <workflow_id> [--input key=value] [--auto-continue]",
-    "",
-    "Options:",
-    "  -h, --help",
-    "  -V, --version",
-  ]
-}
+import { writeLines } from "./out"
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
-  const command = parseCommand(argv)
+  const command = (() => {
+    const [commandName, ...rest] = argv
+    if (commandName === "upgrade") {
+      try {
+        return { kind: "upgrade" as const, ...parseUpgradeArgs(rest) }
+      } catch (error) {
+        return { kind: "invalid" as const, message: error instanceof Error ? error.message : String(error) }
+      }
+    }
+    return parseCommand(argv)
+  })()
   const cwd = process.cwd()
 
   switch (command.kind) {

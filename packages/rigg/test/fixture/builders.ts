@@ -1,7 +1,7 @@
-import type { WorkflowProject } from "../../src/compile/project"
-import type { WorkflowDocument } from "../../src/compile/schema"
-import type { RenderContext, StepBinding } from "../../src/run/render"
-import type { RunSnapshot } from "../../src/run/schema"
+import type { WorkflowProject } from "../../src/project"
+import type { WorkflowDocument } from "../../src/workflow/schema"
+import type { RenderContext, StepBinding } from "../../src/session/render"
+import type { RunSnapshot } from "../../src/session/schema"
 
 export function workflowProject(
   files: Array<{

@@ -2,8 +2,8 @@ import { Box, Text } from "ink"
 import Spinner from "ink-spinner"
 import { useMemo } from "react"
 
-import type { NodeStatus } from "../../run/schema"
-import type { ActiveLiveOutput, CompletedOutput, LiveLogEntry, OutputPreview } from "../run"
+import type { NodeStatus } from "../../session/schema"
+import type { ActiveLiveOutput, CompletedOutput, LiveLogEntry, OutputPreview } from "../state"
 import { statusSymbol, kindColor } from "./symbols"
 import { chars, colors } from "./theme"
 import type { TreeEntry } from "./tree"
@@ -78,7 +78,7 @@ function previewToLines(preview: OutputPreview | null): FlatLine[] {
   return preview.text
     .split("\n")
     .filter(Boolean)
-    .map((text, index) => ({
+    .map((text: string, index: number) => ({
       isStderr,
       muted: false,
       text: isStderr && index === 0 ? `stderr: ${text}` : text,

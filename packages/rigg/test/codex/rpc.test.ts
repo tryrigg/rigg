@@ -3,8 +3,8 @@ import type readline from "node:readline"
 
 import { describe, expect, test } from "bun:test"
 
-import { createCodexRpcClient } from "../../src/codex/rpc"
-import type { CodexAppServerProcess } from "../../src/codex/process"
+import { createRpcClient } from "../../src/codex/rpc"
+import type { CodexAppServerProcess } from "../../src/codex/proc"
 
 class AbortOnAddSignal extends EventTarget {
   aborted = false
@@ -73,7 +73,7 @@ async function flushMicrotasks(): Promise<void> {
 describe("codex/rpc", () => {
   test("does not write a request when abort wins during listener setup", async () => {
     const { process, writes } = createFakeProcess()
-    const client = createCodexRpcClient(process)
+    const client = createRpcClient(process)
 
     await expect(
       client.request("thread/start", { prompt: "hello" }, { signal: new AbortOnAddSignal("cancelled") as AbortSignal }),
@@ -87,7 +87,7 @@ describe("codex/rpc", () => {
 
   test("ignores late responses for requests aborted after being sent", async () => {
     const { process, stdout, writes } = createFakeProcess()
-    const client = createCodexRpcClient(process)
+    const client = createRpcClient(process)
     const reportedErrors: Error[] = []
 
     client.start({
@@ -117,7 +117,7 @@ describe("codex/rpc", () => {
 
   test("keeps the first fatal error when invalid stdout is followed by process exit", async () => {
     const { exit, process, stdout } = createFakeProcess()
-    const client = createCodexRpcClient(process)
+    const client = createRpcClient(process)
     const reportedErrors: Error[] = []
 
     client.start({

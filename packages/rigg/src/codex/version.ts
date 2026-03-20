@@ -71,7 +71,7 @@ function comparePrereleaseIdentifier(left: string, right: string): number {
   return left.localeCompare(right)
 }
 
-export function compareCodexVersions(left: string, right: string): number {
+export function compareVersions(left: string, right: string): number {
   const parsedLeft = parseSemver(left)
   const parsedRight = parseSemver(right)
   if (parsedLeft === null || parsedRight === null) {
@@ -117,7 +117,7 @@ export function compareCodexVersions(left: string, right: string): number {
   return 0
 }
 
-export function parseCodexVersion(output: string): string | null {
+export function parseVersion(output: string): string | null {
   const match = CODEX_VERSION_PATTERN.exec(output)
   if (!match?.[1]) {
     return null
@@ -126,11 +126,11 @@ export function parseCodexVersion(output: string): string | null {
   return parseSemver(match[1]) === null ? null : normalizeCodexVersion(match[1])
 }
 
-export function isCodexVersionSupported(version: string): boolean {
-  return compareCodexVersions(version, MINIMUM_SUPPORTED_CODEX_VERSION) >= 0
+export function isSupported(version: string): boolean {
+  return compareVersions(version, MINIMUM_SUPPORTED_CODEX_VERSION) >= 0
 }
 
-export function formatCodexUpgradeMessage(version: string | null): string {
+export function upgradeMessage(version: string | null): string {
   const current = version === null ? "the installed version" : `v${version}`
   return `Codex CLI ${current} is too old for Rigg. Upgrade to v${MINIMUM_SUPPORTED_CODEX_VERSION} or newer.`
 }

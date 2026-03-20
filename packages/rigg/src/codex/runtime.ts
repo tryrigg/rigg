@@ -1,50 +1,44 @@
 import { onAbort } from "../util/abort"
 import { isAbortError, normalizeError } from "../util/error"
 import { RIGG_VERSION } from "../version"
-import { DEFAULT_CODEX_EFFORT, type CodexEffort } from "./effort"
+import { DEFAULT_EFFORT, type Effort } from "../workflow/effort"
 import type { CodexProviderEvent } from "./event"
 import {
-  findApprovalDecisionByIntent,
-  type CodexInteractionHandler,
-  type CodexInteractionRequest,
-  type CodexInteractionResolution,
-} from "./interaction"
+  findDecision,
+  type InteractionHandler,
+  type InteractionRequest,
+  type InteractionResolution,
+} from "../session/interaction"
+import { startServer, assertVersion, isBenignCodexDiagnostic, type CodexProcessOptions } from "./proc"
+import { createRpcClient } from "./rpc"
 import {
-  startCodexAppServer,
-  assertSupportedCodexVersion,
-  isBenignCodexDiagnostic,
-  type CodexProcessOptions,
-} from "./process"
-import { createCodexRpcClient } from "./rpc"
-import {
-  ensureAuthenticatedAccount,
+  ensureAuth,
   mapReviewTarget,
-  parseApprovalRequest,
-  parseCollaborationModeListResponse,
-  parseCompletedAssistantMessage,
-  parseElicitationRequest,
-  parseErrorNotification,
-  parseItemNotification,
-  parseMessageDeltaNotification,
+  parseApproval,
+  parseCollabModes,
+  parseAssistantMessage,
+  parseElicitation,
+  parseError,
+  parseItem,
+  parseDelta,
   parseReviewItem,
   parseReviewText,
-  parseThreadStartResponse,
+  parseThreadStart,
   parseToolEvent,
-  parseTurnCompletedNotification,
-  parseTurnStartResponse,
-  parseUserInputRequest,
+  parseTurnDone,
+  parseTurnStart,
+  parseUserInput,
   readPermissionsPayload,
-  readTurnCompletedNotificationTurnId,
-  readTurnIdFromParams,
+  readTurnId,
   type CollaborationModeKind,
   type ReviewStartTarget,
   type ReviewThreadTarget,
-} from "./protocol"
+} from "./parse"
 import {
-  appendAssistantMessageDelta,
-  completeAssistantMessage,
-  createAssistantTranscript,
-  renderAssistantTranscript,
+  appendDelta,
+  completeMessage,
+  createTranscript,
+  renderTranscript,
   type AssistantTranscript,
 } from "./transcript"
 
@@ -73,7 +67,7 @@ type CollaborationMode = {
   settings: {
     developer_instructions: null
     model: string
-    reasoning_effort: CodexEffort | null
+    reasoning_effort: Effort | null
   }
 }
 
@@ -81,13 +75,13 @@ type CollaborationModePreset = {
   mode: CollaborationModeKind
   settings: {
     model: string | null
-    reasoning_effort: CodexEffort | null
+    reasoning_effort: Effort | null
   }
 }
 
 type TurnStartParams = {
   collaborationMode?: CollaborationMode
-  effort?: CodexEffort | null
+  effort?: Effort | null
   input: Array<{
     text: string
     text_elements: []
@@ -119,7 +113,7 @@ type TurnExecution = {
   capture: TurnCapture
   cleanup: () => void
   errorMessage: string | null
-  interactionHandler?: CodexInteractionHandler | undefined
+  interactionHandler?: InteractionHandler | undefined
   interrupting: boolean
   onEvent?: ((event: CodexProviderEvent) => Promise<void> | void) | undefined
   reject: (error: Error) => void
@@ -196,7 +190,7 @@ export type CodexRuntimeSession = {
   interruptTurn: (input: { threadId: string; turnId: string }) => Promise<void>
   review: (options: {
     cwd: string
-    interactionHandler?: CodexInteractionHandler | undefined
+    interactionHandler?: InteractionHandler | undefined
     model?: string | undefined
     onEvent?: ((event: CodexProviderEvent) => Promise<void> | void) | undefined
     signal?: AbortSignal | undefined
@@ -205,8 +199,8 @@ export type CodexRuntimeSession = {
   run: (options: {
     collaborationMode?: CollaborationModeKind | undefined
     cwd: string
-    effort?: CodexEffort | undefined
-    interactionHandler?: CodexInteractionHandler | undefined
+    effort?: Effort | undefined
+    interactionHandler?: InteractionHandler | undefined
     model?: string | undefined
     onEvent?: ((event: CodexProviderEvent) => Promise<void> | void) | undefined
     prompt: string
@@ -218,10 +212,10 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
   const INTERRUPT_REQUEST_TIMEOUT_MS = 1_000
   const INTERRUPT_TIMEOUT_REASON = "rigg interrupt timeout"
 
-  assertSupportedCodexVersion(options)
+  assertVersion(options)
 
-  const appServer = startCodexAppServer(options)
-  const rpc = createCodexRpcClient(appServer)
+  const appServer = startServer(options)
+  const rpc = createRpcClient(appServer)
   const deferredTurnMessages = new Map<string, DeferredTurnMessage[]>()
   const executions = new Map<string, TurnExecution>()
   const staleTurnIds = new Set<string>()
@@ -348,7 +342,7 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
       providerEvents: execution.capture.providerEvents,
       reviewText: execution.reviewText,
       status,
-      text: renderAssistantTranscript(execution.assistantTranscript),
+      text: renderTranscript(execution.assistantTranscript),
     }
   }
 
@@ -430,7 +424,7 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
   try {
     await rpc.request("initialize", initializeParams, { signal: options.signal })
     rpc.notify("initialized")
-    ensureAuthenticatedAccount(await rpc.request("account/read", { refreshToken: false }, { signal: options.signal }))
+    ensureAuth(await rpc.request("account/read", { refreshToken: false }, { signal: options.signal }))
   } catch (error) {
     const bootstrapError = normalizeError(error)
     try {
@@ -456,7 +450,7 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
       model: options_.model ?? null,
       persistExtendedHistory: false,
     }
-    const threadId = parseThreadStartResponse(await rpc.request("thread/start", params, { signal: options_.signal }))
+    const threadId = parseThreadStart(await rpc.request("thread/start", params, { signal: options_.signal }))
     await captureEvent(options_.capture, { kind: "thread_started", provider: "codex", threadId }, options_.onEvent)
     return threadId
   }
@@ -470,7 +464,7 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
 
     collaborationModesPromise = (async () => {
       const response = await rpc.request("collaborationMode/list", {}, { signal })
-      const masks = parseCollaborationModeListResponse(response)
+      const masks = parseCollabModes(response)
       const modes = new Map<CollaborationModeKind, CollaborationModePreset>()
 
       for (const mask of masks) {
@@ -508,7 +502,7 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
   async function resolveCollaborationMode(
     kind: CollaborationModeKind,
     modelOverride: string | undefined,
-    effortOverride: CodexEffort | undefined,
+    effortOverride: Effort | undefined,
     signal?: AbortSignal | undefined,
   ): Promise<CollaborationMode> {
     const preset = collaborationModesByKind.get(kind) ?? (await loadCollaborationModes(signal)).get(kind)
@@ -534,7 +528,7 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
 
   async function executeTurn(input: {
     capture: TurnCapture
-    interactionHandler?: CodexInteractionHandler | undefined
+    interactionHandler?: InteractionHandler | undefined
     method: TurnMethod
     onEvent?: ((event: CodexProviderEvent) => Promise<void> | void) | undefined
     params: ReviewStartParams | TurnStartParams
@@ -546,13 +540,10 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     let turnId: string | undefined
     pendingTurnStarts += 1
     try {
-      turnId = parseTurnStartResponse(
-        input.method,
-        await rpc.request(input.method, input.params, { signal: input.signal }),
-      )
+      turnId = parseTurnStart(input.method, await rpc.request(input.method, input.params, { signal: input.signal }))
       const activeTurnId = turnId
       const execution: TurnExecution = {
-        assistantTranscript: createAssistantTranscript(),
+        assistantTranscript: createTranscript(),
         capture: input.capture,
         cleanup: () => {},
         errorMessage: null,
@@ -601,7 +592,7 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     collaborationMode?: CollaborationModeKind | undefined
     cwd: string
     finalizeCompletedTurn: (turn: TurnResult) => CodexStepResult
-    interactionHandler?: CodexInteractionHandler | undefined
+    interactionHandler?: InteractionHandler | undefined
     method: TurnMethod
     model?: string | undefined
     onEvent?: ((event: CodexProviderEvent) => Promise<void> | void) | undefined
@@ -656,15 +647,15 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
   async function run(options_: {
     collaborationMode?: CollaborationModeKind | undefined
     cwd: string
-    effort?: CodexEffort | undefined
-    interactionHandler?: CodexInteractionHandler | undefined
+    effort?: Effort | undefined
+    interactionHandler?: InteractionHandler | undefined
     model?: string | undefined
     onEvent?: ((event: CodexProviderEvent) => Promise<void> | void) | undefined
     prompt: string
     signal?: AbortSignal | undefined
   }): Promise<CodexStepResult> {
     const collaborationMode = options_.collaborationMode
-    const effectiveEffort = options_.effort ?? DEFAULT_CODEX_EFFORT
+    const effectiveEffort = options_.effort ?? DEFAULT_EFFORT
 
     return await executeThreadTurn({
       collaborationMode,
@@ -702,7 +693,7 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
 
   async function review(options_: {
     cwd: string
-    interactionHandler?: CodexInteractionHandler | undefined
+    interactionHandler?: InteractionHandler | undefined
     model?: string | undefined
     onEvent?: ((event: CodexProviderEvent) => Promise<void> | void) | undefined
     signal?: AbortSignal | undefined
@@ -764,13 +755,13 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
       throw new Error("codex app-server requested approval, but no interaction handler is configured")
     }
 
-    const request = parseApprovalRequest(input.requestKind, input.requestId, input.params)
+    const request = parseApproval(input.requestKind, input.requestId, input.params)
     const resolution = await execution.interactionHandler(request)
     assertResolutionKind("approval", resolution)
     assertApprovalDecision(request, resolution.decision)
 
     if (input.requestKind === "permissions") {
-      const approvedDecision = findApprovalDecisionByIntent(request, "approve")
+      const approvedDecision = findDecision(request, "approve")
       rpc.respond(input.id, {
         permissions: approvedDecision?.value === resolution.decision ? readPermissionsPayload(input.params) : {},
         scope: "turn",
@@ -789,7 +780,7 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
       throw new Error("codex app-server requested user input, but no interaction handler is configured")
     }
 
-    const request = parseUserInputRequest(input.requestId, input.params)
+    const request = parseUserInput(input.requestId, input.params)
     const resolution = await execution.interactionHandler(request)
     assertResolutionKind("user_input", resolution)
     rpc.respond(input.id, { answers: resolution.answers })
@@ -803,7 +794,7 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
       throw new Error("codex app-server requested elicitation, but no interaction handler is configured")
     }
 
-    const request = parseElicitationRequest(input.requestId, input.params)
+    const request = parseElicitation(input.requestId, input.params)
     const resolution = await execution.interactionHandler(request)
     assertResolutionKind("elicitation", resolution)
     rpc.respond(input.id, {
@@ -835,7 +826,7 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
       return
     }
 
-    const notification = parseErrorNotification(params)
+    const notification = parseError(params)
     const execution = executionFromParams(params, false)
     if (execution === undefined) {
       return
@@ -865,12 +856,12 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     }
 
     const { execution } = executionLookup
-    const notification = parseMessageDeltaNotification(params)
+    const notification = parseDelta(params)
     if (notification.text === null || notification.text.length === 0) {
       return
     }
 
-    appendAssistantMessageDelta(execution.assistantTranscript, {
+    appendDelta(execution.assistantTranscript, {
       itemId: notification.itemId,
       text: notification.text,
     })
@@ -898,12 +889,12 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     }
 
     const { execution } = executionLookup
-    const { item } = parseItemNotification(params)
+    const { item } = parseItem(params)
 
     if (method === "item/completed") {
-      const assistantMessage = parseCompletedAssistantMessage(item)
+      const assistantMessage = parseAssistantMessage(item)
       if (assistantMessage !== null) {
-        const text = completeAssistantMessage(execution.assistantTranscript, assistantMessage)
+        const text = completeMessage(execution.assistantTranscript, assistantMessage)
         await captureEvent(
           execution.capture,
           {
@@ -942,7 +933,7 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
       return
     }
 
-    const notification = parseTurnCompletedNotification(params)
+    const notification = parseTurnDone(params)
     const execution = executions.get(notification.turnId)
     if (execution === undefined) {
       if (deferTurnMessage({ kind: "notification", method: "turn/completed", params })) {
@@ -1011,7 +1002,7 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
   }
 
   function executionFromParams(params: unknown, allowSingleFallback = true): TurnExecution | undefined {
-    const turnId = readTurnIdFromParams(params)
+    const turnId = readTurnId(params)
     if (turnId !== undefined) {
       return executions.get(turnId)
     }
@@ -1057,12 +1048,12 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
   }
 
   function readDeferredTurnId(message: DeferredTurnMessage): string | undefined {
-    const turnId = readTurnIdFromParams(message.params)
+    const turnId = readTurnId(message.params)
     if (turnId !== undefined) {
       return turnId
     }
     if (message.kind === "notification" && message.method === "turn/completed") {
-      return readTurnCompletedNotificationTurnId(message.params)
+      return readTurnId(message.params)
     }
     return undefined
   }
@@ -1116,19 +1107,16 @@ function createPromiseKit<T>(): {
   return { promise, reject, resolve }
 }
 
-function assertResolutionKind<TKind extends CodexInteractionRequest["kind"]>(
+function assertResolutionKind<TKind extends InteractionRequest["kind"]>(
   expected: TKind,
-  resolution: CodexInteractionResolution,
-): asserts resolution is Extract<CodexInteractionResolution, { kind: TKind }> {
+  resolution: InteractionResolution,
+): asserts resolution is Extract<InteractionResolution, { kind: TKind }> {
   if (resolution.kind !== expected) {
     throw new Error(`interaction handler returned ${resolution.kind} for ${expected}`)
   }
 }
 
-function assertApprovalDecision(
-  request: Extract<CodexInteractionRequest, { kind: "approval" }>,
-  decision: string,
-): void {
+function assertApprovalDecision(request: Extract<InteractionRequest, { kind: "approval" }>, decision: string): void {
   if (request.decisions.some((candidate) => candidate.value === decision)) {
     return
   }

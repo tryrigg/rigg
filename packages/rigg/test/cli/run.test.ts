@@ -1,881 +1,608 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
-import type { WorkflowDocument } from "../../src/compile/schema"
-import {
-  applyRunEvent,
-  createControlResolverRegistry,
-  createInkRenderOptions,
-  createInkRunSession,
-  createNonInteractiveRunSession,
-  createTerminalUiState,
-  previewNodeOutput,
-} from "../../src/cli/run"
-import { runSnapshot } from "../fixture/builders"
+import { buildOmittedInputQuestion, createInterrupt, runRunCommand } from "../../src/cli/run"
+import { interrupt } from "../../src/session/error"
+import { runSnapshot, workflowProject } from "../fixture/builders"
+
+const tempDirs: string[] = []
+
+afterEach(async () => {
+  await Promise.all(tempDirs.splice(0).map((path) => rm(path, { force: true, recursive: true })))
+})
+
+async function createTempWorkspace(): Promise<string> {
+  const path = await mkdtemp(join(tmpdir(), "rigg-cli-"))
+  tempDirs.push(path)
+  return path
+}
+
+async function writeWorkflow(cwd: string, fileName: string, contents: string): Promise<void> {
+  await mkdir(join(cwd, ".rigg"), { recursive: true })
+  await Bun.write(join(cwd, ".rigg", fileName), contents)
+}
+
+function withTTYState(tty: { stderr: boolean; stdin: boolean }, run: () => Promise<void> | void): Promise<void> | void {
+  const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY")
+  const stderrDescriptor = Object.getOwnPropertyDescriptor(process.stderr, "isTTY")
+
+  Object.defineProperty(process.stdin, "isTTY", { configurable: true, value: tty.stdin })
+  Object.defineProperty(process.stderr, "isTTY", { configurable: true, value: tty.stderr })
+
+  const restore = () => {
+    if (stdinDescriptor === undefined) {
+      delete (process.stdin as { isTTY?: boolean }).isTTY
+    } else {
+      Object.defineProperty(process.stdin, "isTTY", stdinDescriptor)
+    }
+    if (stderrDescriptor === undefined) {
+      delete (process.stderr as { isTTY?: boolean }).isTTY
+    } else {
+      Object.defineProperty(process.stderr, "isTTY", stderrDescriptor)
+    }
+  }
+
+  try {
+    const result = run()
+    if (result instanceof Promise) {
+      return result.finally(restore)
+    }
+    restore()
+    return result
+  } catch (error) {
+    restore()
+    throw error
+  }
+}
 
 describe("cli/run", () => {
-  test("applyRunEvent updates snapshot on run_started", () => {
-    const state = createTerminalUiState()
-    const snapshot = runSnapshot()
-    applyRunEvent(state, { kind: "run_started", snapshot })
-    expect(state.snapshot).toBe(snapshot)
-    expect(state.lastCompletedNodePath).toBeNull()
+  test("requires interactive stdin and stderr", async () => {
+    const cwd = await createTempWorkspace()
+    await writeWorkflow(
+      cwd,
+      "plan.yaml",
+      ["id: plan", "steps:", "  - type: shell", "    with:", "      command: echo hi"].join("\n"),
+    )
+
+    await withTTYState({ stderr: true, stdin: false }, async () => {
+      const result = await runRunCommand(cwd, "plan", { autoContinue: false, inputs: [] })
+      expect(result.exitCode).toBe(1)
+      expect(result.stderrLines).toEqual([
+        "`rigg run` requires a TTY because step barriers and workflow input prompts are interactive. Re-run in an interactive terminal. `--auto-continue` only works in an interactive terminal.",
+      ])
+    })
   })
 
-  test("applyRunEvent does not allocate live output buckets before output arrives", () => {
-    const state = createTerminalUiState()
-    const snapshot = runSnapshot({
-      nodes: [
+  test("run --auto-continue is still rejected without a TTY", async () => {
+    const cwd = await createTempWorkspace()
+    await writeWorkflow(
+      cwd,
+      "plan.yaml",
+      ["id: plan", "steps:", "  - type: shell", "    with:", "      command: echo hi"].join("\n"),
+    )
+
+    await withTTYState({ stderr: false, stdin: true }, async () => {
+      const result = await runRunCommand(cwd, "plan", { autoContinue: true, inputs: [] })
+      expect(result.exitCode).toBe(1)
+      expect(result.stderrLines).toEqual([
+        "`rigg run` requires a TTY because step barriers and workflow input prompts are interactive. Re-run in an interactive terminal. `--auto-continue` only works in an interactive terminal.",
+      ])
+    })
+  })
+
+  test("tty run --auto-continue passes auto barrier mode into the session factory", async () => {
+    const cwd = await createTempWorkspace()
+    await writeWorkflow(
+      cwd,
+      "prompt.yaml",
+      ["id: prompt", "steps:", "  - type: shell", "    with:", "      command: echo hi"].join("\n"),
+    )
+
+    await withTTYState({ stderr: true, stdin: true }, async () => {
+      const createRunSessionCalls: string[] = []
+
+      const result = await runRunCommand(
+        cwd,
+        "prompt",
+        { autoContinue: true, inputs: [] },
         {
-          attempt: 1,
-          duration_ms: null,
-          exit_code: null,
-          finished_at: null,
-          node_kind: "shell",
-          node_path: "/0",
-          result: null,
-          started_at: "2026-03-15T10:00:00.000Z",
-          status: "running",
-          stderr: null,
-          stdout: null,
-          user_id: "step-1",
-          waiting_for: null,
-        },
-      ],
-    })
-
-    applyRunEvent(state, { kind: "run_started", snapshot })
-    applyRunEvent(state, {
-      kind: "node_started",
-      node: snapshot.nodes[0]!,
-      snapshot,
-    })
-    expect(state.liveOutputs["/0"]).toBeUndefined()
-
-    const completedNode = { ...snapshot.nodes[0]!, status: "succeeded" as const, duration_ms: 1000 }
-    applyRunEvent(state, {
-      kind: "node_completed",
-      node: completedNode,
-      snapshot: runSnapshot({ nodes: [completedNode] }),
-    })
-    expect(state.liveOutputs["/0"]).toBeUndefined()
-    expect(state.lastCompletedNodePath).toBe("/0")
-  })
-
-  test("applyRunEvent accumulates step_output chunks", () => {
-    const state = createTerminalUiState()
-    const snapshot = runSnapshot()
-    applyRunEvent(state, { kind: "run_started", snapshot })
-    applyRunEvent(state, {
-      kind: "node_started",
-      node: {
-        attempt: 1,
-        duration_ms: null,
-        exit_code: null,
-        finished_at: null,
-        node_kind: "shell",
-        node_path: "/0",
-        result: null,
-        started_at: "2026-03-15T10:00:00.000Z",
-        status: "running",
-        stderr: null,
-        stdout: null,
-        user_id: "step-1",
-        waiting_for: null,
-      },
-      snapshot,
-    })
-
-    applyRunEvent(state, {
-      chunk: "hello ",
-      kind: "step_output",
-      node_path: "/0",
-      stream: "stdout",
-      user_id: "step-1",
-    })
-    applyRunEvent(state, {
-      chunk: "world",
-      kind: "step_output",
-      node_path: "/0",
-      stream: "stdout",
-      user_id: "step-1",
-    })
-
-    const entries = state.liveOutputs["/0"]?.entries ?? []
-    expect(entries.length).toBe(1)
-    expect(entries[0]?.text).toBe("hello world")
-    expect(entries[0]?.stream).toBe("stdout")
-  })
-
-  test("applyRunEvent keeps stdout and stderr chunks in separate entries", () => {
-    const state = createTerminalUiState()
-    const snapshot = runSnapshot()
-    applyRunEvent(state, { kind: "run_started", snapshot })
-    applyRunEvent(state, {
-      kind: "node_started",
-      node: {
-        attempt: 1,
-        duration_ms: null,
-        exit_code: null,
-        finished_at: null,
-        node_kind: "shell",
-        node_path: "/0",
-        result: null,
-        started_at: "2026-03-15T10:00:00.000Z",
-        status: "running",
-        stderr: null,
-        stdout: null,
-        user_id: "step-1",
-        waiting_for: null,
-      },
-      snapshot,
-    })
-
-    applyRunEvent(state, {
-      chunk: "hello",
-      kind: "step_output",
-      node_path: "/0",
-      stream: "stdout",
-      user_id: "step-1",
-    })
-    applyRunEvent(state, {
-      chunk: "permission denied",
-      kind: "step_output",
-      node_path: "/0",
-      stream: "stderr",
-      user_id: "step-1",
-    })
-
-    expect(state.liveOutputs["/0"]?.entries).toEqual([
-      {
-        key: null,
-        stream: "stdout",
-        text: "hello",
-        variant: "stream",
-      },
-      {
-        key: null,
-        stream: "stderr",
-        text: "permission denied",
-        variant: "stream",
-      },
-    ])
-  })
-
-  test("applyRunEvent keeps stderr previews for stderr-only failures", () => {
-    const state = createTerminalUiState()
-    const snapshot = runSnapshot()
-    applyRunEvent(state, { kind: "run_started", snapshot })
-    applyRunEvent(state, {
-      kind: "node_started",
-      node: {
-        attempt: 1,
-        duration_ms: null,
-        exit_code: null,
-        finished_at: null,
-        node_kind: "write_file",
-        node_path: "/0",
-        result: null,
-        started_at: "2026-03-15T10:00:00.000Z",
-        status: "running",
-        stderr: null,
-        stdout: null,
-        user_id: "step-1",
-        waiting_for: null,
-      },
-      snapshot,
-    })
-
-    const failedNode = {
-      attempt: 1,
-      duration_ms: 15,
-      exit_code: 1,
-      finished_at: "2026-03-15T10:00:00.015Z",
-      node_kind: "write_file",
-      node_path: "/0",
-      result: null,
-      started_at: "2026-03-15T10:00:00.000Z",
-      status: "failed" as const,
-      stderr: "permission denied",
-      stdout: null,
-      user_id: "step-1",
-      waiting_for: null,
-    }
-
-    applyRunEvent(state, {
-      kind: "node_completed",
-      node: failedNode,
-      snapshot: runSnapshot({ nodes: [failedNode] }),
-    })
-
-    expect(state.completedOutputs["/0"]?.preview).toEqual({
-      stream: "stderr",
-      text: "permission denied",
-    })
-  })
-
-  test("previewNodeOutput prefers stderr for failed nodes and stdout for succeeded nodes", () => {
-    expect(
-      previewNodeOutput({
-        status: "failed",
-        stderr: "permission denied",
-        stdout: "partial output",
-      }),
-    ).toEqual({
-      stream: "stderr",
-      text: "permission denied",
-    })
-
-    expect(
-      previewNodeOutput({
-        status: "succeeded",
-        stderr: "warning",
-        stdout: "done",
-      }),
-    ).toEqual({
-      stream: "stdout",
-      text: "done",
-    })
-  })
-
-  test("previewNodeOutput prefers stderr for interrupted nodes", () => {
-    expect(
-      previewNodeOutput({
-        status: "interrupted",
-        stderr: "cancelled by sibling failure",
-        stdout: "partial output",
-      }),
-    ).toEqual({
-      stream: "stderr",
-      text: "cancelled by sibling failure",
-    })
-  })
-
-  test("previewNodeOutput keeps the latest lines for long output", () => {
-    expect(
-      previewNodeOutput({
-        status: "failed",
-        stderr: "line 1\nline 2\nline 3\nline 4",
-      }),
-    ).toEqual({
-      stream: "stderr",
-      text: "... +1 earlier lines\nline 2\nline 3\nline 4",
-    })
-  })
-
-  test("applyRunEvent clears live outputs on run_finished", () => {
-    const state = createTerminalUiState()
-    const snapshot = runSnapshot()
-    applyRunEvent(state, { kind: "run_started", snapshot })
-    applyRunEvent(state, {
-      kind: "node_started",
-      node: {
-        attempt: 1,
-        duration_ms: null,
-        exit_code: null,
-        finished_at: null,
-        node_kind: "shell",
-        node_path: "/0",
-        result: null,
-        started_at: "2026-03-15T10:00:00.000Z",
-        status: "running",
-        stderr: null,
-        stdout: null,
-        user_id: null,
-        waiting_for: null,
-      },
-      snapshot,
-    })
-
-    const finishedSnapshot = runSnapshot({ status: "succeeded", phase: "completed" })
-    applyRunEvent(state, { kind: "run_finished", snapshot: finishedSnapshot })
-    expect(Object.keys(state.liveOutputs).length).toBe(0)
-    expect(state.snapshot?.status).toBe("succeeded")
-  })
-
-  test("applyRunEvent appends an auto-continue event for completed barriers", () => {
-    const state = createTerminalUiState("auto_continue")
-    const completedNode = {
-      attempt: 1,
-      duration_ms: 1200,
-      exit_code: 0,
-      finished_at: "2026-03-15T10:01:00.000Z",
-      node_kind: "shell",
-      node_path: "/0",
-      result: null,
-      started_at: "2026-03-15T10:00:00.000Z",
-      status: "succeeded" as const,
-      stderr: null,
-      stdout: "repo ready\n",
-      user_id: "collect_context",
-      waiting_for: null,
-    }
-    const completedSnapshot = runSnapshot({ nodes: [completedNode] })
-
-    applyRunEvent(state, { kind: "run_started", snapshot: completedSnapshot })
-    applyRunEvent(state, {
-      kind: "node_completed",
-      node: completedNode,
-      snapshot: completedSnapshot,
-    })
-    applyRunEvent(state, {
-      barrier: {
-        barrier_id: "barrier-1",
-        completed: {
-          node_kind: "shell",
-          node_path: "/0",
-          result: null,
-          status: "succeeded",
-          user_id: "collect_context",
-        },
-        created_at: "2026-03-15T10:01:01.000Z",
-        frame_id: "root",
-        next: [
-          {
-            action: null,
-            cwd: null,
-            detail: "echo hi",
-            frame_id: "root",
-            model: null,
-            node_kind: "shell",
-            node_path: "/1",
-            prompt_preview: null,
-            user_id: "draft_shell",
+          createInterruptController: () => {
+            const controller = new AbortController()
+            return {
+              dispose: () => {},
+              interrupt: () => controller.abort(interrupt("workflow interrupted by operator")),
+              signal: controller.signal,
+            }
           },
-          {
-            action: "plan",
-            cwd: "/workspace",
-            detail: "codex plan",
-            frame_id: "root",
-            model: "gpt-5.4",
-            node_kind: "codex",
-            node_path: "/2",
-            prompt_preview: "Draft a plan",
-            user_id: "draft_plan",
-          },
-        ],
-        reason: "step_completed",
-      },
-      kind: "barrier_reached",
-      snapshot: runSnapshot({
-        active_barrier: {
-          barrier_id: "barrier-1",
-          completed: {
-            node_kind: "shell",
-            node_path: "/0",
-            result: null,
-            status: "succeeded",
-            user_id: "collect_context",
-          },
-          created_at: "2026-03-15T10:01:01.000Z",
-          frame_id: "root",
-          next: [
-            {
-              action: null,
-              cwd: null,
-              detail: "echo hi",
-              frame_id: "root",
-              model: null,
-              node_kind: "shell",
-              node_path: "/1",
-              prompt_preview: null,
-              user_id: "draft_shell",
-            },
-            {
-              action: "plan",
-              cwd: "/workspace",
-              detail: "codex plan",
-              frame_id: "root",
-              model: "gpt-5.4",
-              node_kind: "codex",
-              node_path: "/2",
-              prompt_preview: "Draft a plan",
-              user_id: "draft_plan",
-            },
-          ],
-          reason: "step_completed",
+          createRunSession: ((options: any) => {
+            createRunSessionCalls.push(options.barrierMode)
+            return {
+              close: () => {},
+              emit: () => {},
+              handle: async () => {
+                throw new Error("unexpected control request")
+              },
+            }
+          }) as any,
+          runWorkflowImpl: (async () => ({
+            kind: "completed",
+            snapshot: runSnapshot({
+              finished_at: "2026-03-17T00:00:02.000Z",
+              phase: "completed",
+              reason: "completed",
+              status: "succeeded",
+              workflow_id: "prompt",
+            }),
+          })) as any,
         },
-        nodes: [completedNode],
-      }),
-    })
+      )
 
-    expect(state.completedOutputs["/0"]?.entries.at(-1)).toEqual({
-      key: null,
-      text: "auto-continue: Next: draft_shell [cmd], draft_plan [codex] · plan · gpt-5.4",
-      variant: "event",
+      expect(result.exitCode).toBe(0)
+      expect(createRunSessionCalls).toEqual(["auto_continue"])
     })
   })
 
-  test("applyRunEvent leaves manual barriers unchanged", () => {
-    const state = createTerminalUiState("manual")
-    const completedNode = {
-      attempt: 1,
-      duration_ms: 1200,
-      exit_code: 0,
-      finished_at: "2026-03-15T10:01:00.000Z",
-      node_kind: "shell",
-      node_path: "/0",
-      result: null,
-      started_at: "2026-03-15T10:00:00.000Z",
-      status: "succeeded" as const,
-      stderr: null,
-      stdout: "repo ready\n",
-      user_id: "collect_context",
-      waiting_for: null,
-    }
-    const completedSnapshot = runSnapshot({ nodes: [completedNode] })
+  test("workflow interrupt controller aborts first and hard-exits on second interrupt", () => {
+    const originalKill = process.kill
+    let killCount = 0
 
-    applyRunEvent(state, { kind: "run_started", snapshot: completedSnapshot })
-    applyRunEvent(state, {
-      kind: "node_completed",
-      node: completedNode,
-      snapshot: completedSnapshot,
-    })
-    applyRunEvent(state, {
-      barrier: {
-        barrier_id: "barrier-1",
-        completed: {
-          node_kind: "shell",
-          node_path: "/0",
-          result: null,
-          status: "succeeded",
-          user_id: "collect_context",
-        },
-        created_at: "2026-03-15T10:01:01.000Z",
-        frame_id: "root",
-        next: [
-          {
-            action: null,
-            cwd: null,
-            detail: "echo hi",
-            frame_id: "root",
-            model: null,
-            node_kind: "shell",
-            node_path: "/1",
-            prompt_preview: null,
-            user_id: "draft_shell",
-          },
-        ],
-        reason: "step_completed",
-      },
-      kind: "barrier_reached",
-      snapshot: runSnapshot({ nodes: [completedNode] }),
-    })
-
-    expect(state.completedOutputs["/0"]?.entries).toEqual([])
-  })
-
-  test("uses an explicit non-interactive control policy", async () => {
-    const session = createNonInteractiveRunSession()
-    const snapshot = runSnapshot()
-
-    await expect(
-      session.handle({
-        barrier: {
-          barrier_id: "barrier-1",
-          completed: null,
-          created_at: "2026-03-15T10:01:00.000Z",
-          frame_id: "root",
-          next: [],
-          reason: "run_started",
-        },
-        kind: "step_barrier",
-        signal: new AbortController().signal,
-        snapshot,
-      }),
-    ).resolves.toEqual({ action: "continue", kind: "step_barrier" })
-
-    await expect(
-      session.handle({
-        interaction: {
-          created_at: "2026-03-15T10:01:00.000Z",
-          interaction_id: "approval-1",
-          kind: "approval",
-          node_path: "/1",
-          request: {
-            command: "git push",
-            cwd: "/app",
-            decisions: [
-              { intent: "approve", value: "approve" },
-              { intent: "deny", value: "deny" },
-            ],
-            itemId: "item-1",
-            kind: "approval",
-            message: "Ship the release",
-            requestId: "approval-1",
-            requestKind: "command_execution",
-            turnId: "turn-1",
-          },
-          user_id: "release",
-        },
-        kind: "interaction",
-        signal: new AbortController().signal,
-        snapshot,
-      }),
-    ).rejects.toThrow("workflow requires operator interaction (approval)")
-  })
-
-  test("routes interactive ink output to stderr and disables Ink Ctrl+C exits", () => {
-    const terminal = {
-      stderr: { isTTY: true } as unknown as NodeJS.WriteStream,
-      stdin: { isTTY: true } as unknown as NodeJS.ReadStream,
-    }
-
-    expect(createInkRenderOptions(terminal)).toMatchObject({
-      exitOnCtrlC: false,
-      stderr: terminal.stderr,
-      stdin: terminal.stdin,
-      stdout: terminal.stderr,
-    })
-  })
-
-  test("control resolver registry rejects stale requests when the signal aborts", async () => {
-    const registry = createControlResolverRegistry()
-    const controller = new AbortController()
-
-    const pending = registry.register({
-      barrier: {
-        barrier_id: "barrier-1",
-        completed: null,
-        created_at: "2026-03-15T10:01:00.000Z",
-        frame_id: "root",
-        next: [],
-        reason: "run_started",
-      },
-      kind: "step_barrier",
-      signal: controller.signal,
-      snapshot: runSnapshot(),
-    })
-
-    controller.abort(new Error("stale barrier"))
-
-    await expect(pending).rejects.toThrow("stale barrier")
-  })
-
-  test("control resolver registry preserves aborts that land during listener setup", async () => {
-    const registry = createControlResolverRegistry()
-    const controller = new AbortController()
-    const originalAddEventListener = AbortSignal.prototype.addEventListener
-
-    AbortSignal.prototype.addEventListener = function (
-      this: AbortSignal,
-      type: string,
-      listener: any,
-      options?: AddEventListenerOptions | boolean,
-    ): void {
-      if (this === controller.signal && type === "abort" && !controller.signal.aborted) {
-        controller.abort(new Error("stale barrier"))
-      }
-      return originalAddEventListener.call(this, type, listener, options)
-    }
+    ;(process as { kill: typeof process.kill }).kill = ((pid: number, signal?: number | NodeJS.Signals) => {
+      expect(pid).toBe(process.pid)
+      expect(signal).toBe("SIGINT")
+      killCount += 1
+      return true
+    }) as typeof process.kill
 
     try {
-      const pending = registry.register({
-        barrier: {
-          barrier_id: "barrier-1",
-          completed: null,
-          created_at: "2026-03-15T10:01:00.000Z",
-          frame_id: "root",
-          next: [],
-          reason: "run_started",
-        },
-        kind: "step_barrier",
-        signal: controller.signal,
-        snapshot: runSnapshot(),
-      })
+      const interrupt = createInterrupt()
+      interrupt.interrupt()
+      expect(interrupt.signal.aborted).toBe(true)
 
-      await expect(pending).rejects.toThrow("stale barrier")
+      interrupt.interrupt()
+      expect(killCount).toBe(1)
+      interrupt.dispose()
     } finally {
-      AbortSignal.prototype.addEventListener = originalAddEventListener
+      ;(process as { kill: typeof process.kill }).kill = originalKill
     }
   })
 
-  test("ink run session resolves controls through the resolver registry", async () => {
-    const workflow: WorkflowDocument = { id: "wf", steps: [] }
-    const terminal = {
-      stderr: { isTTY: true } as unknown as NodeJS.WriteStream,
-      stdin: { isTTY: true } as unknown as NodeJS.ReadStream,
-    }
-    let renderedTree: any
-    let unmounted = false
-    let interrupted = 0
-
-    const session = createInkRunSession({
-      barrierMode: "manual",
-      interrupt: () => {
-        interrupted++
-      },
-      renderApp: ((tree: unknown) => {
-        renderedTree = tree
-        return {
-          unmount: () => {
-            unmounted = true
-          },
-        } as any
-      }) as any,
-      terminal,
-      workflow,
-    })
-
-    const pending = session.handle({
-      barrier: {
-        barrier_id: "barrier-1",
-        completed: null,
-        created_at: "2026-03-15T10:01:00.000Z",
-        frame_id: "root",
-        next: [],
-        reason: "run_started",
-      },
-      kind: "step_barrier",
-      signal: new AbortController().signal,
-      snapshot: runSnapshot(),
-    })
-
-    renderedTree?.props.onInterrupt()
-    renderedTree?.props.onResolveBarrier("barrier-1", "continue")
-
-    await expect(pending).resolves.toEqual({ action: "continue", kind: "step_barrier" })
-
-    expect(interrupted).toBe(1)
-    session.close()
-    expect(unmounted).toBe(true)
-  })
-
-  test("ink run session auto-continues barriers but still waits on interactions", async () => {
-    const workflow: WorkflowDocument = { id: "wf", steps: [] }
-    const terminal = {
-      stderr: { isTTY: true } as unknown as NodeJS.WriteStream,
-      stdin: { isTTY: true } as unknown as NodeJS.ReadStream,
-    }
-    let renderedTree: any
-
-    const session = createInkRunSession({
-      barrierMode: "auto_continue",
-      interrupt: () => {},
-      renderApp: ((tree: unknown) => {
-        renderedTree = tree
-        return { unmount: () => {} } as any
-      }) as any,
-      terminal,
-      workflow,
-    })
-
+  test("builds workflow input questions with type, description, and JSON hints", () => {
     expect(
-      session.handle({
-        barrier: {
-          barrier_id: "barrier-1",
-          completed: null,
-          created_at: "2026-03-15T10:01:00.000Z",
-          frame_id: "root",
-          next: [],
-          reason: "run_started",
-        },
-        kind: "step_barrier",
-        signal: new AbortController().signal,
-        snapshot: runSnapshot(),
-      }),
-    ).toEqual({ action: "continue", kind: "step_barrier" })
-
-    const pending = session.handle({
-      interaction: {
-        created_at: "2026-03-15T10:01:00.000Z",
-        interaction_id: "approval-1",
-        kind: "approval",
-        node_path: "/1",
-        request: {
-          command: "git push",
-          cwd: "/app",
-          decisions: [
-            { intent: "approve", value: "approve" },
-            { intent: "deny", value: "deny" },
-          ],
-          itemId: "item-1",
-          kind: "approval",
-          message: "Ship the release",
-          requestId: "approval-1",
-          requestKind: "command_execution",
-          turnId: "turn-1",
-        },
-        user_id: "release",
-      },
-      kind: "interaction",
-      signal: new AbortController().signal,
-      snapshot: runSnapshot(),
-    })
-
-    renderedTree?.props.onResolveInteraction("approval-1", { decision: "approve", kind: "approval" })
-
-    await expect(pending).resolves.toEqual({ decision: "approve", kind: "approval" })
-    session.close()
-  })
-
-  test("ink run session resolves empty user_input interactions immediately", async () => {
-    const workflow: WorkflowDocument = { id: "wf", steps: [] }
-    const terminal = {
-      stderr: { isTTY: true } as unknown as NodeJS.WriteStream,
-      stdin: { isTTY: true } as unknown as NodeJS.ReadStream,
-    }
-
-    const session = createInkRunSession({
-      barrierMode: "manual",
-      interrupt: () => {},
-      renderApp: (() => ({ unmount: () => {} })) as any,
-      terminal,
-      workflow,
-    })
-
-    expect(
-      session.handle({
-        interaction: {
-          created_at: "2026-03-15T10:01:00.000Z",
-          interaction_id: "question-1",
-          kind: "user_input",
-          node_path: "/1",
-          request: {
-            itemId: "item-1",
-            kind: "user_input",
-            questions: [],
-            requestId: "question-1",
-            turnId: "turn-1",
-          },
-          user_id: "release",
-        },
-        kind: "interaction",
-        signal: new AbortController().signal,
-        snapshot: runSnapshot(),
+      buildOmittedInputQuestion("count", {
+        description: "How many iterations to run.",
+        type: "integer",
       }),
     ).toEqual({
-      answers: {},
-      kind: "user_input",
+      allowEmpty: true,
+      header: "count",
+      id: "count",
+      initialValue: undefined,
+      isOther: false,
+      isSecret: false,
+      options: null,
+      preserveWhitespace: true,
+      question:
+        "Input: count\nType: integer\nDescription: How many iterations to run.\nEnter JSON for non-string values.",
     })
 
-    session.close()
+    expect(
+      buildOmittedInputQuestion("name", {
+        description: "Display name.",
+        type: "string",
+      }),
+    ).toEqual({
+      allowEmpty: true,
+      header: "name",
+      id: "name",
+      initialValue: undefined,
+      isOther: false,
+      isSecret: false,
+      options: null,
+      preserveWhitespace: true,
+      question: "Input: name\nType: string\nDescription: Display name.",
+    })
+
+    expect(
+      buildOmittedInputQuestion("config", {
+        default: { enabled: true },
+        type: "object",
+      }),
+    ).toEqual({
+      allowEmpty: true,
+      header: "config",
+      id: "config",
+      initialValue: '{"enabled":true}',
+      isOther: false,
+      isSecret: false,
+      options: null,
+      preserveWhitespace: true,
+      question: "Input: config\nType: object\nEnter JSON for non-string values.",
+    })
   })
 
-  test("ink run session renders a standalone pre-run interaction and clears it after resolution", async () => {
-    const workflow: WorkflowDocument = { id: "wf", steps: [] }
-    const terminal = {
-      stderr: { isTTY: true } as unknown as NodeJS.WriteStream,
-      stdin: { isTTY: true } as unknown as NodeJS.ReadStream,
-    }
-    let renderedTree: any
-
-    const session = createInkRunSession({
-      barrierMode: "manual",
-      interrupt: () => {},
-      renderApp: ((tree: unknown) => {
-        renderedTree = tree
-        return { unmount: () => {} } as any
-      }) as any,
-      terminal,
-      workflow,
-    })
-
-    const pending = session.handle({
-      interaction: {
-        created_at: "2026-03-15T10:01:00.000Z",
-        interaction_id: "question-1",
-        kind: "user_input",
-        node_path: null,
-        request: {
-          itemId: "item-1",
-          kind: "user_input",
-          questions: [
-            {
-              header: "name",
-              id: "name",
-              isOther: false,
-              isSecret: false,
-              options: null,
-              question: "Input: name\nType: string",
-            },
-          ],
-          requestId: "question-1",
-          turnId: "turn-1",
-        },
-        user_id: null,
-      },
-      kind: "interaction",
-      signal: new AbortController().signal,
-      snapshot: runSnapshot(),
-    })
-
-    expect(renderedTree?.props.store.getSnapshot().state.snapshot?.active_interaction?.interaction_id).toBe(
-      "question-1",
+  test("prompts for omitted inputs and prefills defaults before runWorkflow", async () => {
+    const cwd = await createTempWorkspace()
+    await writeWorkflow(
+      cwd,
+      "prompt.yaml",
+      [
+        "id: prompt",
+        "inputs:",
+        "  name:",
+        "    type: string",
+        "  count:",
+        "    type: integer",
+        "    description: Number of retries.",
+        "  output_path:",
+        "    type: string",
+        "    default: plan.md",
+        "steps:",
+        "  - type: shell",
+        "    with:",
+        "      command: echo hi",
+      ].join("\n"),
     )
-    expect(renderedTree?.props.store.getSnapshot().state.snapshot?.phase).toBe("waiting_for_question")
 
-    renderedTree?.props.onResolveInteraction("question-1", {
-      answers: { name: { answers: ["Rigg"] } },
-      kind: "user_input",
+    await withTTYState({ stderr: true, stdin: true }, async () => {
+      const handledRequests: any[] = []
+      const runWorkflowCalls: Array<Record<string, unknown>> = []
+
+      const result = await runRunCommand(
+        cwd,
+        "prompt",
+        { autoContinue: false, inputs: ["name=cli-name"] },
+        {
+          createInterruptController: () => {
+            const controller = new AbortController()
+            return {
+              dispose: () => {},
+              interrupt: () => controller.abort(interrupt("workflow interrupted by operator")),
+              signal: controller.signal,
+            }
+          },
+          createRunSession: (() => ({
+            close: () => {},
+            emit: () => {},
+            handle: async (request: any) => {
+              handledRequests.push(request)
+              return {
+                answers: {
+                  count: { answers: ["42"] },
+                  output_path: { answers: ["custom.md"] },
+                },
+                kind: "user_input",
+              }
+            },
+          })) as any,
+          now: () => "2026-03-17T00:00:00.000Z",
+          runWorkflowImpl: (async (options: any) => {
+            runWorkflowCalls.push(options.invocationInputs)
+            return {
+              kind: "completed",
+              snapshot: runSnapshot({
+                finished_at: "2026-03-17T00:00:02.000Z",
+                phase: "completed",
+                reason: "completed",
+                status: "succeeded",
+                workflow_id: "prompt",
+              }),
+            }
+          }) as any,
+        },
+      )
+
+      expect(result.exitCode).toBe(0)
+      expect(handledRequests).toHaveLength(1)
+      expect(handledRequests[0]?.interaction.request.questions).toEqual([
+        {
+          allowEmpty: true,
+          header: "count",
+          id: "count",
+          initialValue: undefined,
+          isOther: false,
+          isSecret: false,
+          options: null,
+          preserveWhitespace: true,
+          question: "Input: count\nType: integer\nDescription: Number of retries.\nEnter JSON for non-string values.",
+        },
+        {
+          allowEmpty: true,
+          header: "output_path",
+          id: "output_path",
+          initialValue: "plan.md",
+          isOther: false,
+          isSecret: false,
+          options: null,
+          preserveWhitespace: true,
+          question: "Input: output_path\nType: string",
+        },
+      ])
+      expect(runWorkflowCalls).toEqual([
+        {
+          count: "42",
+          name: "cli-name",
+          output_path: "custom.md",
+        },
+      ])
     })
-
-    await expect(pending).resolves.toEqual({
-      answers: { name: { answers: ["Rigg"] } },
-      kind: "user_input",
-    })
-    expect(renderedTree?.props.store.getSnapshot().state.snapshot?.active_interaction).toBeNull()
-
-    session.close()
   })
 
-  test("ink run session clears a standalone pre-run interaction when it aborts", async () => {
-    const workflow: WorkflowDocument = { id: "wf", steps: [] }
-    const terminal = {
-      stderr: { isTTY: true } as unknown as NodeJS.WriteStream,
-      stdin: { isTTY: true } as unknown as NodeJS.ReadStream,
-    }
-    let renderedTree: any
-
-    const session = createInkRunSession({
-      barrierMode: "manual",
-      interrupt: () => {},
-      renderApp: ((tree: unknown) => {
-        renderedTree = tree
-        return { unmount: () => {} } as any
-      }) as any,
-      terminal,
-      workflow,
-    })
-
-    const controller = new AbortController()
-    const pending = session.handle({
-      interaction: {
-        created_at: "2026-03-15T10:01:00.000Z",
-        interaction_id: "question-1",
-        kind: "user_input",
-        node_path: null,
-        request: {
-          itemId: "item-1",
-          kind: "user_input",
-          questions: [
-            {
-              header: "name",
-              id: "name",
-              isOther: false,
-              isSecret: false,
-              options: null,
-              question: "Input: name\nType: string",
-            },
-          ],
-          requestId: "question-1",
-          turnId: "turn-1",
-        },
-        user_id: null,
-      },
-      kind: "interaction",
-      signal: controller.signal,
-      snapshot: runSnapshot(),
-    })
-
-    expect(renderedTree?.props.store.getSnapshot().state.snapshot?.active_interaction?.interaction_id).toBe(
-      "question-1",
+  test("skips the prompt when all required inputs are already provided", async () => {
+    const cwd = await createTempWorkspace()
+    await writeWorkflow(
+      cwd,
+      "prompt.yaml",
+      [
+        "id: prompt",
+        "inputs:",
+        "  name:",
+        "    type: string",
+        "  config:",
+        "    type: object",
+        "    properties:",
+        "      enabled:",
+        "        type: boolean",
+        "    required: [enabled]",
+        "steps:",
+        "  - type: shell",
+        "    with:",
+        "      command: echo hi",
+      ].join("\n"),
     )
 
-    controller.abort(new Error("pre-run prompt aborted"))
+    await withTTYState({ stderr: true, stdin: true }, async () => {
+      let handleCount = 0
+      const runWorkflowCalls: Array<Record<string, unknown>> = []
 
-    await expect(pending).rejects.toThrow("pre-run prompt aborted")
-    expect(renderedTree?.props.store.getSnapshot().state.snapshot?.active_interaction).toBeNull()
+      const result = await runRunCommand(
+        cwd,
+        "prompt",
+        { autoContinue: false, inputs: ["name=cli-name", 'config={\"enabled\":true}'] },
+        {
+          createInterruptController: () => {
+            const controller = new AbortController()
+            return {
+              dispose: () => {},
+              interrupt: () => controller.abort(interrupt("workflow interrupted by operator")),
+              signal: controller.signal,
+            }
+          },
+          createRunSession: (() => ({
+            close: () => {},
+            emit: () => {},
+            handle: async () => {
+              handleCount += 1
+              return { answers: {}, kind: "user_input" }
+            },
+          })) as any,
+          runWorkflowImpl: (async (options: any) => {
+            runWorkflowCalls.push(options.invocationInputs)
+            return {
+              kind: "completed",
+              snapshot: runSnapshot({
+                finished_at: "2026-03-17T00:00:02.000Z",
+                phase: "completed",
+                reason: "completed",
+                status: "succeeded",
+                workflow_id: "prompt",
+              }),
+            }
+          }) as any,
+        },
+      )
 
-    session.close()
+      expect(result.exitCode).toBe(0)
+      expect(handleCount).toBe(0)
+      expect(runWorkflowCalls).toEqual([
+        {
+          config: '{"enabled":true}',
+          name: "cli-name",
+        },
+      ])
+    })
+  })
+
+  test("passes raw prompted answers to workflow execution for schema-aware normalization", async () => {
+    const cwd = await createTempWorkspace()
+    await writeWorkflow(
+      cwd,
+      "prompt.yaml",
+      [
+        "id: prompt",
+        "inputs:",
+        "  enabled:",
+        "    type: boolean",
+        "  tags:",
+        "    type: array",
+        "    items:",
+        "      type: string",
+        "  note:",
+        "    type: string",
+        "steps:",
+        "  - type: shell",
+        "    with:",
+        "      command: echo hi",
+      ].join("\n"),
+    )
+
+    await withTTYState({ stderr: true, stdin: true }, async () => {
+      const runWorkflowCalls: Array<Record<string, unknown>> = []
+
+      const result = await runRunCommand(
+        cwd,
+        "prompt",
+        { autoContinue: false, inputs: [] },
+        {
+          createInterruptController: () => {
+            const controller = new AbortController()
+            return {
+              dispose: () => {},
+              interrupt: () => controller.abort(interrupt("workflow interrupted by operator")),
+              signal: controller.signal,
+            }
+          },
+          createRunSession: (() => ({
+            close: () => {},
+            emit: () => {},
+            handle: async () => ({
+              answers: {
+                enabled: { answers: ["true"] },
+                note: { answers: ["not-json"] },
+                tags: { answers: ['["a","b"]'] },
+              },
+              kind: "user_input",
+            }),
+          })) as any,
+          runWorkflowImpl: (async (options: any) => {
+            runWorkflowCalls.push(options.invocationInputs)
+            return {
+              kind: "completed",
+              snapshot: runSnapshot({
+                finished_at: "2026-03-17T00:00:02.000Z",
+                phase: "completed",
+                reason: "completed",
+                status: "succeeded",
+                workflow_id: "prompt",
+              }),
+            }
+          }) as any,
+        },
+      )
+
+      expect(result.exitCode).toBe(0)
+      expect(runWorkflowCalls).toEqual([
+        {
+          enabled: "true",
+          note: "not-json",
+          tags: '["a","b"]',
+        },
+      ])
+    })
+  })
+
+  test("invalid prompted values surface through the existing invalid_input path", async () => {
+    const cwd = await createTempWorkspace()
+    await writeWorkflow(
+      cwd,
+      "prompt.yaml",
+      [
+        "id: prompt",
+        "inputs:",
+        "  count:",
+        "    type: integer",
+        "steps:",
+        "  - type: shell",
+        "    with:",
+        "      command: echo hi",
+      ].join("\n"),
+    )
+
+    await withTTYState({ stderr: true, stdin: true }, async () => {
+      const result = await runRunCommand(
+        cwd,
+        "prompt",
+        { autoContinue: false, inputs: [] },
+        {
+          createInterruptController: () => {
+            const controller = new AbortController()
+            return {
+              dispose: () => {},
+              interrupt: () => controller.abort(interrupt("workflow interrupted by operator")),
+              signal: controller.signal,
+            }
+          },
+          createRunSession: (() => ({
+            close: () => {},
+            emit: () => {},
+            handle: async () => ({
+              answers: { count: { answers: ["abc"] } },
+              kind: "user_input",
+            }),
+          })) as any,
+          runWorkflowImpl: (async (options: any) => {
+            const project = workflowProject([
+              {
+                filePath: join(cwd, ".rigg", "prompt.yaml"),
+                relativePath: "prompt.yaml",
+                workflow: {
+                  id: "prompt",
+                  inputs: {
+                    count: { type: "integer" },
+                  },
+                  steps: [{ type: "shell", with: { command: "echo hi" } }],
+                },
+              },
+            ])
+            const { runWorkflow } = await import("../../src/session")
+            return await runWorkflow({
+              controlHandler: async () => {
+                throw new Error("unexpected control request")
+              },
+              invocationInputs: options.invocationInputs,
+              parentEnv: process.env,
+              project,
+              workflowId: "prompt",
+            })
+          }) as any,
+        },
+      )
+
+      expect(result.exitCode).toBe(1)
+      expect(result.stderrLines).toEqual(["inputs.count must be an integer"])
+    })
+  })
+
+  test("interrupting the pre-run prompt returns the standard interrupt message", async () => {
+    const cwd = await createTempWorkspace()
+    await writeWorkflow(
+      cwd,
+      "prompt.yaml",
+      [
+        "id: prompt",
+        "inputs:",
+        "  name:",
+        "    type: string",
+        "steps:",
+        "  - type: shell",
+        "    with:",
+        "      command: echo hi",
+      ].join("\n"),
+    )
+
+    await withTTYState({ stderr: true, stdin: true }, async () => {
+      const controller = new AbortController()
+
+      const result = await runRunCommand(
+        cwd,
+        "prompt",
+        { autoContinue: false, inputs: [] },
+        {
+          createInterruptController: () => ({
+            dispose: () => {},
+            interrupt: () => controller.abort(interrupt("workflow interrupted by operator")),
+            signal: controller.signal,
+          }),
+          createRunSession: (() => ({
+            close: () => {},
+            emit: () => {},
+            handle: async (request: any) => {
+              queueMicrotask(() => controller.abort(interrupt("workflow interrupted by operator")))
+              return await new Promise((_, reject) => {
+                request.signal.addEventListener(
+                  "abort",
+                  () => reject(new DOMException("workflow interrupted by operator", "AbortError")),
+                  { once: true },
+                )
+              })
+            },
+          })) as any,
+        },
+      )
+
+      expect(result.exitCode).toBe(1)
+      expect(result.stderrLines).toEqual(["workflow interrupted by operator"])
+    })
   })
 })

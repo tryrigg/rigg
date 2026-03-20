@@ -19,21 +19,18 @@ export type AssistantTranscript = {
   entries: AssistantTranscriptEntry[]
 }
 
-export function createAssistantTranscript(): AssistantTranscript {
+export function createTranscript(): AssistantTranscript {
   return {
     entries: [],
   }
 }
 
-export function appendAssistantMessageDelta(transcript: AssistantTranscript, delta: AssistantMessageDelta): void {
+export function appendDelta(transcript: AssistantTranscript, delta: AssistantMessageDelta): void {
   const entry = getOrCreateEntry(transcript, delta.itemId)
   entry.streamedText += delta.text
 }
 
-export function completeAssistantMessage(
-  transcript: AssistantTranscript,
-  completion: AssistantMessageCompletion,
-): string {
+export function completeMessage(transcript: AssistantTranscript, completion: AssistantMessageCompletion): string {
   const entry = getOrCreateEntry(transcript, completion.itemId)
   entry.completed = true
   if (completion.text !== null) {
@@ -42,7 +39,7 @@ export function completeAssistantMessage(
   return resolveEntryText(entry)
 }
 
-export function renderAssistantTranscript(transcript: AssistantTranscript): string {
+export function renderTranscript(transcript: AssistantTranscript): string {
   return transcript.entries
     .map((entry) => resolveEntryText(entry))
     .filter((text) => text.length > 0)

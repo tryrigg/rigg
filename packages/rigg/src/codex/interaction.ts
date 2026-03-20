@@ -115,7 +115,7 @@ export type CodexInteractionHandler = (
   request: CodexInteractionRequest,
 ) => Promise<CodexInteractionResolution> | CodexInteractionResolution
 
-export function findApprovalDecisionByIntent(
+export function findDecision(
   request: CodexApprovalRequest,
   intent: Exclude<CodexApprovalDecisionIntent, null>,
 ): CodexApprovalDecision | undefined {

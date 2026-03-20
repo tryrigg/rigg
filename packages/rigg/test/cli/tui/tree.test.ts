@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
-import type { WorkflowDocument, WorkflowStep } from "../../../src/compile/schema"
-import type { RunSnapshot } from "../../../src/run/schema"
+import type { WorkflowDocument, WorkflowStep } from "../../../src/workflow/schema"
+import type { RunSnapshot } from "../../../src/session/schema"
 import { buildTree, extractDetail } from "../../../src/cli/tui/tree"
 import { runSnapshot, workflowProject } from "../../fixture/builders"
 

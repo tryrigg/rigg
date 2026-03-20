@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import type { ActiveLiveOutput, CompletedOutput } from "../../../src/cli/run"
+import type { ActiveLiveOutput, CompletedOutput } from "../../../src/cli/state"
 import { completedOutputToLines, countRenderableLiveOutputs } from "../../../src/cli/tui/workflow-tree"
 
 describe("completedOutputToLines", () => {

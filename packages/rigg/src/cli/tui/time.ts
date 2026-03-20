@@ -1,4 +1,4 @@
-import type { RunSnapshot } from "../../run/schema"
+import type { RunSnapshot } from "../../session/schema"
 
 function elapsedClockMs(startedAt: string | null, finishedAt: string | null, nowMs = Date.now()): number {
   if (startedAt === null) {

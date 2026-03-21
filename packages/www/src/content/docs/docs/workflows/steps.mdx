@@ -1,6 +1,6 @@
 ---
 title: Steps
-description: Action step types — shell, codex, and write_file.
+description: Action step types — shell, codex, cursor, and write_file.
 sidebar:
   order: 2
 ---
@@ -93,6 +93,21 @@ result:
   overall_confidence_score: number
 ```
 
+## cursor
+
+Runs Cursor Agent through ACP and returns the final plain-text assistant response.
+
+```yaml
+- id: triage
+  type: cursor
+  with:
+    action: run # run | ask | plan
+    model: composer-2
+    prompt: Summarize the diff.
+```
+
+`cursor` is ACP text-only. If you need structured JSON from Cursor, run Cursor headless through a `shell` step and parse that shell output there.
+
 ## write_file
 
 Writes content to a file.
@@ -110,3 +125,4 @@ Writes content to a file.
 - `codex run`: `steps.draft.result`
 - `codex plan`: `steps.draft_plan.result`
 - `codex review`: `steps.review.result.findings`
+- `cursor`: `steps.triage.result`

@@ -97,6 +97,7 @@ export function prepareStep(
   switch (step.type) {
     case "shell":
     case "codex":
+    case "cursor":
     case "write_file":
       return {
         env,

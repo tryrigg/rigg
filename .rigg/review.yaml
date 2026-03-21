@@ -23,44 +23,33 @@ steps:
 
       - id: triage
         type: shell
-        env:
-          FINDINGS: ${{ toJSON(steps.review.result) }}
-          GREENFIELD: ${{ inputs.greenfield }}
-          ITERATION: ${{ run.iteration }}
-          FINDING_COUNT: ${{ len(steps.review.result.findings) }}
         with:
           result: json
           command: |
-            if [ "$FINDING_COUNT" -eq 0 ]; then
-              echo '{"findings":[],"directives":[],"discarded":[],"oscillations":[]}'
+            if [ "${{ len(steps.review.result.findings) }}" -eq 0 ]; then
+              printf '%s\n' '{"findings":[],"directives":[],"discarded":[],"oscillations":[]}'
               exit 0
             fi
-            {
-              echo "=== CUMULATIVE DIFF (main...HEAD) ==="
-              git diff main...HEAD
-              echo ""
-              echo "=== REMEDIATION HISTORY ==="
-              git log main..HEAD --oneline
-              echo ""
-              for commit in $(git log main..HEAD --format=%H --reverse); do
-                echo "--- $(git log -1 --oneline "$commit") ---"
-                git diff "${commit}^".."${commit}" 2>/dev/null
-                echo ""
-              done
-            } | claude -p \
-              --model claude-opus-4-6 \
-              --append-system-prompt-file private/typescript-implementation-guide.md \
-              --tools "Read,Glob,Grep,WebSearch" \
-              --allowedTools "Read,Glob,Grep,WebSearch" \
-              --no-session-persistence \
-              --output-format text \
-              "You are a senior engineer triaging automated code review findings.
-            Stdin contains: (1) the cumulative diff against main, and (2) per-commit diffs
-            for each prior remediation iteration.
-            This is iteration $ITERATION.
+
+            cursor agent --print --output-format json --trust --model composer-2 "$(cat <<'EOF'
+            You are a senior engineer triaging automated code review findings.
+            Perform all analysis silently. Do not narrate your process or progress.
+
+            First, read `private/typescript-implementation-guide.md` for coding standards.
+
+            Then gather context:
+            1. Run `git diff main...HEAD` for the cumulative diff
+            2. Run `git log main..HEAD --oneline` for remediation history
+            3. For each commit in `git log main..HEAD --format=%H --reverse`:
+               run `git diff ${commit}^..${commit}` for per-commit diffs
+
+            This is iteration ${{ run.iteration }}.
 
             ## Findings from automated review
-            $FINDINGS
+            ${{ toJSON(steps.review.result) }}
+
+            If the findings array above is empty, immediately respond with ONLY:
+            {"findings":[],"directives":[],"discarded":[],"oscillations":[]}
 
             ## Step 1: Oscillation detection
             Analyze the per-iteration commit diffs to detect flip-flop patterns — cases where
@@ -102,7 +91,7 @@ steps:
             4. **Actionability** — Is there a specific, concrete fix? Vague suggestions
                like 'consider refactoring' or 'might want to add' are not actionable.
 
-            5. **Greenfield filter** — Greenfield mode: $GREENFIELD.
+            5. **Greenfield filter** — Greenfield mode: ${{ inputs.greenfield }}.
                If true, also discard backward-compatibility, API stability, or migration findings.
 
             ## Keep/Discard rules
@@ -122,29 +111,30 @@ steps:
             Your ENTIRE response must be a single JSON object. No text before or after.
             No markdown fences. No explanation. ONLY the JSON object:
             {
-              \"findings\": [<surviving findings, preserving original schema>],
-              \"directives\": [
+              "findings": [<surviving findings, preserving original schema>],
+              "directives": [
                 {
-                  \"file\": \"path/to/file.ts\",
-                  \"approach\": \"description of the chosen stable approach\",
-                  \"reason\": \"why this approach wins over the alternative\",
-                  \"do_not\": \"description of the rejected approach — must not be applied\"
+                  "file": "path/to/file.ts",
+                  "approach": "description of the chosen stable approach",
+                  "reason": "why this approach wins over the alternative",
+                  "do_not": "description of the rejected approach — must not be applied"
                 }
               ],
-              \"discarded\": [
-                {\"id\": \"...\", \"reason\": \"one-line justification\"}
+              "discarded": [
+                {"id": "...", "reason": "one-line justification"}
               ],
-              \"oscillations\": [
+              "oscillations": [
                 {
-                  \"file\": \"path/to/file.ts\",
-                  \"pattern\": \"brief description of the back-and-forth\",
-                  \"resolution\": \"which approach was chosen and why\"
+                  "file": "path/to/file.ts",
+                  "pattern": "brief description of the back-and-forth",
+                  "resolution": "which approach was chosen and why"
                 }
               ]
             }
-            If no findings survive triage, return {\"findings\": [], ...}.
-            If no oscillations were detected, return empty arrays for directives and oscillations." |
-            node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{const s=b.indexOf("{"),e=b.lastIndexOf("}");if(s>=0&&e>s)process.stdout.write(b.slice(s,e+1));else process.exit(1)})'
+            If no findings survive triage, return {"findings": [], "directives": [], "discarded": [...], "oscillations": [...]}.
+            If no oscillations were detected, return empty arrays for directives and oscillations.
+            EOF
+            )" | bun -e 'const payload = JSON.parse(await Bun.stdin.text()); if (payload?.type !== "result" || typeof payload.result !== "string") throw new Error("cursor headless output missing result text"); const text = payload.result.trim(); for (let i = 0; i < text.length; i += 1) { const ch = text[i]; if (ch !== "{" && ch !== "[") continue; const suffix = text.slice(i).trim(); try { JSON.parse(suffix); process.stdout.write(suffix); process.exit(0); } catch {} } throw new Error(`cursor headless result did not contain a JSON suffix: ${JSON.stringify(text.slice(0, 200))}`)'
 
       - id: fix
         if: ${{ len(steps.triage.result.findings) > 0 }}
@@ -181,23 +171,18 @@ steps:
       - id: validate
         if: ${{ len(steps.triage.result.findings) > 0 }}
         type: shell
-        env:
-          FINDINGS: ${{ toJSON(steps.triage.result) }}
         with:
+          result: text
           command: |
-            git diff | claude -p \
-              --model claude-opus-4-6 \
-              --append-system-prompt-file private/typescript-implementation-guide.md \
-              --tools "Read,Glob,Grep,Bash,Edit,WebSearch" \
-              --allowedTools "Read,Glob,Grep,Bash,Edit,WebSearch" \
-              --no-session-persistence \
-              --output-format text \
-              "You are a senior engineer validating automated code review fixes.
+            cursor agent --print --output-format json --trust --model composer-2 "$(cat <<'EOF'
+            You are a senior engineer validating automated code review fixes.
+            Perform all analysis silently. Do not narrate your process or progress.
 
-            The diff of uncommitted changes is provided via stdin.
+            First, read `private/typescript-implementation-guide.md` for coding standards.
+            Then run `git diff` to see uncommitted changes and read each changed file in full.
 
             ## Triaged findings
-            $FINDINGS
+            ${{ toJSON(steps.triage.result) }}
 
             ## Task
             1. Read each changed file in full to see the fix in context
@@ -206,7 +191,7 @@ steps:
                - Is it a band-aid? (as any, eslint-disable, suppress warning, empty catch, TODO/FIXME deferral)
                - Does it conform to the TypeScript implementation guide?
                - Could it introduce regressions?
-            3. If any fix is insufficient, use Edit to correct it with a proper root-cause fix
+            3. If any fix is insufficient, use your tools to correct it with a proper root-cause fix
             4. After making any corrections, run in order and fix errors:
                - bun run format
                - bun run check
@@ -215,7 +200,9 @@ steps:
             ## Output
             Brief validation result:
             - APPROVED (all fixes sound) or CORRECTED (improved N fixes)
-            - One-line summary per fix evaluated"
+            - One-line summary per fix evaluated
+            EOF
+            )" | bun -e 'const payload = JSON.parse(await Bun.stdin.text()); if (payload?.type !== "result" || typeof payload.result !== "string") throw new Error("cursor headless output missing result text"); process.stdout.write(payload.result.trim())'
 
       - id: commit
         if: ${{ len(steps.triage.result.findings) > 0 }}
@@ -229,32 +216,20 @@ steps:
           result: none
 
   - id: report
-    type: shell
+    type: cursor
     with:
-      command: |
-        if git diff --quiet main...HEAD 2>/dev/null; then
-          echo "No changes needed. All code passed review."
-          exit 0
-        fi
-        {
-          echo "=== COMMITS ==="
-          git log main..HEAD --oneline
-          echo ""
-          echo "=== DIFF ==="
-          git diff main...HEAD
-        } | claude -p \
-          --model claude-opus-4-6 \
-          --append-system-prompt-file private/typescript-implementation-guide.md \
-          --tools "Read,Glob,Grep,WebSearch" \
-          --allowedTools "Read,Glob,Grep,WebSearch" \
-          --no-session-persistence \
-          --output-format text \
-          "You are a senior engineer summarizing a code review remediation cycle.
+      action: run
+      model: composer-2
+      prompt: |
+        You are a senior engineer summarizing a code review remediation cycle.
 
-        The git log and full diff (against main) are provided via stdin.
+        First check if there are any changes: run `git diff --quiet main...HEAD`.
+        If there are no changes, respond only with: "No changes needed. All code passed review."
 
-        ## Task
-        Read the changed files if you need more context beyond the diff.
+        If there are changes:
+        1. Run `git log main..HEAD --oneline` and `git diff main...HEAD`
+        2. Read changed files if you need more context beyond the diff
+        3. Read `private/typescript-implementation-guide.md` for coding standards
 
         Produce a concise report:
 
@@ -279,4 +254,4 @@ steps:
         Flag anything that looks incomplete, fragile, or worth watching.
         If everything looks clean, say so.
 
-        Be concise. No preamble."
+        Be concise. No preamble.

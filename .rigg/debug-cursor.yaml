@@ -1,0 +1,35 @@
+id: debug-cursor
+steps:
+  - id: run
+    type: cursor
+    with:
+      action: run
+      model: composer-2
+      prompt: Reply with exactly "hello from cursor" and nothing else.
+
+  - id: ask
+    type: cursor
+    with:
+      action: ask
+      model: composer-2
+      prompt: Reply with exactly "ask mode works" and nothing else.
+
+  - id: headless_json
+    type: shell
+    with:
+      result: json
+      command: |
+        cursor agent --print --output-format json --trust --model composer-2 "$(cat <<'EOF'
+        Do all work silently. Output only the final JSON object.
+        Reply with ONLY this JSON object, no markdown fences, no explanation:
+        {"status":"ok","source":"cursor"}
+        EOF
+        )" | bun -e 'const payload = JSON.parse(await Bun.stdin.text()); if (payload?.type !== "result" || typeof payload.result !== "string") throw new Error("cursor headless output missing result text"); const text = payload.result.trim(); for (let i = 0; i < text.length; i += 1) { const ch = text[i]; if (ch !== "{" && ch !== "[") continue; const suffix = text.slice(i).trim(); try { JSON.parse(suffix); process.stdout.write(suffix); process.exit(0); } catch {} } throw new Error(`cursor headless result did not contain a JSON suffix: ${JSON.stringify(text.slice(0, 200))}`)'
+
+  - id: summary
+    type: shell
+    with:
+      command: |
+        echo "run:  ${{ steps.run.result }}"
+        echo "ask:  ${{ steps.ask.result }}"
+        echo "headless_json: ${{ toJSON(steps.headless_json.result) }}"

@@ -1,7 +1,8 @@
 import { onAbort } from "../../util/abort"
-import type { CodexProviderEvent } from "../../codex/event"
 import { filterEnv } from "../../util/env"
 import { parseJsonOutput } from "../../codex/parse"
+import type { InteractionHandler } from "../interaction"
+import type { ProviderEvent } from "../event"
 import { timedOut } from "../error"
 
 const PROVIDER_TERMINATE_GRACE_MS = 5 * 1000
@@ -10,7 +11,7 @@ type StreamName = "stderr" | "stdout"
 
 export type ActionStepOutput = {
   exitCode: number
-  providerEvents: CodexProviderEvent[]
+  providerEvents: ProviderEvent[]
   result: unknown
   stderr: string
   stdout: string
@@ -22,6 +23,11 @@ export type ActionExecutionOptions = {
   env: Record<string, string | undefined>
   onOutput?: ((stream: StreamName, chunk: string) => Promise<void> | void) | undefined
   signal?: AbortSignal | undefined
+}
+
+export type ProviderStepOptions = ActionExecutionOptions & {
+  interactionHandler?: InteractionHandler | undefined
+  onProviderEvent?: ((event: ProviderEvent) => Promise<void> | void) | undefined
 }
 
 export type ProcessOutput = {

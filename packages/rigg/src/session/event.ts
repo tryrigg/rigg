@@ -1,8 +1,10 @@
 import type { CodexProviderEvent } from "../codex/event"
+import type { CursorProviderEvent } from "../cursor/event"
 import type { InteractionResolution } from "./interaction"
 import type { NodeSnapshot, PendingInteraction, RunSnapshot, StepBarrier } from "./schema"
 
 export type StreamKind = "stdout" | "stderr"
+export type ProviderEvent = CodexProviderEvent | CursorProviderEvent
 
 export type RunEvent =
   | {
@@ -33,7 +35,7 @@ export type RunEvent =
       user_id: string | null
     }
   | {
-      event: CodexProviderEvent
+      event: ProviderEvent
       kind: "provider_event"
       node_path: string
       user_id: string | null

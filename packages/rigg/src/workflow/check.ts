@@ -28,6 +28,7 @@ import type {
   BranchCase,
   BranchNode,
   CodexNode,
+  CursorNode,
   GroupNode,
   LoopNode,
   ParallelNode,
@@ -176,6 +177,7 @@ function validateStep(
       case "shell":
       case "write_file":
       case "codex":
+      case "cursor":
         return validateActionStep(step, filePath, scope, errors)
       case "workflow":
         return validateWorkflowStep(project, workflowId, step, filePath, scope, errors, activeWorkflowIds)
@@ -222,6 +224,8 @@ function validateActionStep(
       }
     case "codex":
       return validateCodex(step, filePath, scope, errors)
+    case "cursor":
+      return validateCursor(step, filePath, scope, errors)
   }
 }
 
@@ -621,6 +625,20 @@ function validateCodex(
     }
   }
 
+  checkTpl(step.with.prompt, filePath, scope, errors)
+  return {
+    availableStepShapes: new Map(scope.availableStepShapes),
+    guaranteedResultShape: StringShape,
+    resultShape: StringShape,
+  }
+}
+
+function validateCursor(
+  step: CursorNode,
+  filePath: string,
+  scope: VisibleScope,
+  errors: CompileDiagnostic[],
+): ValidationSummary & { guaranteedResultShape: ResultShape; resultShape: ResultShape } {
   checkTpl(step.with.prompt, filePath, scope, errors)
   return {
     availableStepShapes: new Map(scope.availableStepShapes),
@@ -1115,6 +1133,7 @@ function walkCalls(steps: WorkflowStep[], visit: (step: WorkflowNode) => void): 
         break
       case "shell":
       case "codex":
+      case "cursor":
       case "write_file":
         break
     }

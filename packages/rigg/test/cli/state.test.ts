@@ -204,6 +204,48 @@ describe("cli/state", () => {
     })
   })
 
+  test("applyEvent renders cursor provider events in live output", () => {
+    const state = createState()
+    const snapshot = runSnapshot()
+    applyEvent(state, { kind: "run_started", snapshot })
+    applyEvent(state, {
+      kind: "provider_event",
+      event: {
+        kind: "message_delta",
+        messageId: "msg_1",
+        provider: "cursor",
+        sessionId: "session_1",
+        text: "hello",
+      },
+      node_path: "/0",
+      user_id: "cursor-step",
+    })
+    applyEvent(state, {
+      kind: "provider_event",
+      event: {
+        kind: "diagnostic",
+        message: "permission pending",
+        provider: "cursor",
+        sessionId: "session_1",
+      },
+      node_path: "/0",
+      user_id: "cursor-step",
+    })
+
+    expect(state.liveOutputs["/0"]?.entries).toEqual([
+      {
+        key: "msg_1",
+        text: "hello",
+        variant: "assistant",
+      },
+      {
+        key: null,
+        text: "diagnostic: permission pending",
+        variant: "event",
+      },
+    ])
+  })
+
   test("previewOutput prefers stderr for failed nodes and stdout for succeeded nodes", () => {
     expect(
       previewOutput({

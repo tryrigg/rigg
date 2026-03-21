@@ -14,6 +14,10 @@ import { PromptTextInput } from "./prompt"
 import { chars } from "./theme"
 
 function approvalShortcut(decision: ApprovalDecision, index: number): string {
+  if (decision.shortcut) {
+    return normalizeApprovalChoiceInput(decision.shortcut)
+  }
+
   switch (decision.intent) {
     case "approve":
       return "y"
@@ -26,9 +30,28 @@ function approvalShortcut(decision: ApprovalDecision, index: number): string {
   }
 }
 
+function shortcutCandidates(decision: ApprovalDecision, index: number): string[] {
+  const normalizedValue = normalizeApprovalChoiceInput(decision.value)
+  const words = normalizedValue.split(/[^a-z0-9]+/).filter((word) => word.length > 0)
+  const compactValue = normalizedValue.replace(/[^a-z0-9]+/g, "")
+  const candidates = new Set<string>([approvalShortcut(decision, index)])
+
+  for (const word of words) {
+    candidates.add(word[0]!)
+  }
+  for (const char of compactValue) {
+    candidates.add(char)
+  }
+  candidates.add(String(index + 1))
+
+  return [...candidates]
+}
+
 export type PromptChoice = {
+  completionTokens: string[]
   decision: string
   intent: ApprovalDecision["intent"]
+  indexToken: string
   shortcut: string
   tokens: string[]
 }
@@ -39,18 +62,30 @@ function normalizeApprovalChoiceInput(input: string): string {
 
 export function buildChoices(decisions: ReadonlyArray<ApprovalDecision>): PromptChoice[] {
   const choices: PromptChoice[] = []
+  const usedShortcuts = new Set<string>()
   for (const [index, decision] of decisions.entries()) {
     const tokens = new Set<string>()
+    const completionTokens = new Set<string>()
+    const indexToken = String(index + 1)
     const normalizedValue = normalizeApprovalChoiceInput(decision.value)
+    const shortcut =
+      shortcutCandidates(decision, index).find((candidate) => !usedShortcuts.has(candidate)) ?? indexToken
+
+    usedShortcuts.add(shortcut)
+
     if (normalizedValue.length > 0) {
       tokens.add(normalizedValue)
+      completionTokens.add(normalizedValue)
     }
-    tokens.add(String(index + 1))
-    tokens.add(approvalShortcut(decision, index))
+    tokens.add(indexToken)
+    completionTokens.add(indexToken)
+    tokens.add(shortcut)
     choices.push({
+      completionTokens: [...completionTokens],
       decision: decision.value,
       intent: decision.intent,
-      shortcut: approvalShortcut(decision, index),
+      indexToken,
+      shortcut,
       tokens: [...tokens],
     })
   }
@@ -74,16 +109,22 @@ export function resolveChoice(choices: ReadonlyArray<PromptChoice>, input: strin
 
 export function shouldAutoSubmit(choices: ReadonlyArray<PromptChoice>, input: string): boolean {
   const normalized = normalizeApprovalChoiceInput(input)
-  if (normalized.length === 0 || resolveChoice(choices, normalized) === undefined) {
+  const matchedChoice =
+    normalized.length === 0 ? undefined : choices.find((choice) => choice.tokens.includes(normalized))
+  if (matchedChoice === undefined) {
     return false
   }
 
   for (const choice of choices) {
-    for (const token of choice.tokens) {
+    for (const token of choice.completionTokens) {
       if (token.length > normalized.length && token.startsWith(normalized)) {
         return false
       }
     }
+  }
+
+  if (matchedChoice.shortcut === normalized && matchedChoice.shortcut !== matchedChoice.indexToken) {
+    return true
   }
 
   return true

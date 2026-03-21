@@ -204,4 +204,27 @@ describe("summarize", () => {
 
     expect(summary).toEqual({ completed: 1, total: 1 })
   })
+
+  test("counts cursor steps as action nodes", () => {
+    const summary = summarize(
+      workflow([
+        { id: "ask", type: "cursor", with: { action: "ask", prompt: "Question?" } },
+        { id: "cmd", type: "shell", with: { command: "echo done" } },
+      ]),
+      snapshot({
+        nodes: [
+          nodeSnapshot({
+            finished_at: "2026-03-17T00:00:01.000Z",
+            node_kind: "cursor",
+            node_path: "/0",
+            started_at: "2026-03-17T00:00:00.000Z",
+            status: "succeeded",
+            user_id: "ask",
+          }),
+        ],
+      }),
+    )
+
+    expect(summary).toEqual({ completed: 1, total: 2 })
+  })
 })

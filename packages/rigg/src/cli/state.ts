@@ -1,5 +1,4 @@
-import type { CodexProviderEvent } from "../codex/event"
-import type { RunEvent, StreamKind } from "../session/event"
+import type { RunEvent, StreamKind, ProviderEvent } from "../session/event"
 import type { FrontierNode, RunSnapshot } from "../session/schema"
 
 export type ApprovalMode = "manual" | "auto_continue"
@@ -35,6 +34,7 @@ export type UiState = {
 
 const labels: Record<string, string> = {
   codex: "codex",
+  cursor: "cursor",
   shell: "cmd",
   write_file: "write_file",
 }
@@ -184,7 +184,7 @@ function barrierLabel(next: FrontierNode[]): string | null {
 
 function frontierLabel(node: FrontierNode): string {
   const parts = [`${node.user_id ?? node.node_path} [${labels[node.node_kind] ?? node.node_kind}]`]
-  if (node.node_kind === "codex" && node.action) {
+  if ((node.node_kind === "codex" || node.node_kind === "cursor") && node.action) {
     parts.push(node.action)
   }
   if (node.node_kind === "codex" && node.model) {
@@ -209,12 +209,16 @@ function appendLiveStream(state: UiState, nodePath: string, chunk: string, strea
   })
 }
 
-function appendProviderEvent(state: UiState, nodePath: string, event: CodexProviderEvent): void {
+function appendProviderEvent(state: UiState, nodePath: string, event: ProviderEvent): void {
   const output = ensureLiveOutput(state, nodePath)
 
   switch (event.kind) {
     case "message_delta":
-      upsertAssistant(output, event.itemId ?? event.turnId, (current) => current + event.text)
+      upsertAssistant(
+        output,
+        event.provider === "codex" ? (event.itemId ?? event.turnId) : (event.messageId ?? event.sessionId),
+        (current) => current + event.text,
+      )
       return
     case "message_completed":
       upsertAssistant(output, event.itemId ?? event.turnId, () => event.text)
@@ -247,6 +251,8 @@ function appendProviderEvent(state: UiState, nodePath: string, event: CodexProvi
         variant: "event",
       })
       return
+    case "session_started":
+    case "session_completed":
     case "thread_started":
     case "turn_started":
     case "turn_completed":

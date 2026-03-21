@@ -157,6 +157,25 @@ describe("workflow/check", () => {
     expect(invalidStepArray?.message).toBe("`steps.draft.result` array access must use a numeric index")
   })
 
+  test("treats cursor results as plain text", () => {
+    const error = expectSingleError({
+      id: "cursor-text-only",
+      steps: [
+        {
+          id: "triage",
+          type: "cursor",
+          with: {
+            action: "run",
+            prompt: "Return a summary",
+          },
+        },
+        shellStep("echo ${{ steps.triage.result.findings }}"),
+      ],
+    })
+
+    expect(error?.message).toBe("`steps.triage.result` does not support nested field access")
+  })
+
   test("validates branch else rules and export shape consistency", () => {
     const missingElse = expectSingleError({
       id: "missing-else",

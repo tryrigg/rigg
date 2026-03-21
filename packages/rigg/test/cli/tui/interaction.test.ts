@@ -32,6 +32,17 @@ describe("approval prompt choices", () => {
     expect(resolveChoice(choices, "  ask user  ")).toBe("Ask User")
   })
 
+  test("does not auto-submit a shortcut while an exact label is still being typed", () => {
+    const choices = buildChoices([
+      { intent: "approve", value: "Allow" },
+      { intent: null, shortcut: "a", value: "Ask User" },
+    ])
+
+    expect(shouldAutoSubmit(choices, "a")).toBe(false)
+    expect(shouldAutoSubmit(choices, "allow")).toBe(true)
+    expect(resolveChoice(choices, "allow")).toBe("Allow")
+  })
+
   test("keeps ambiguous prefixes pending until the token is complete", () => {
     const choices = buildChoices([
       { intent: null, value: "approve" },
@@ -50,6 +61,31 @@ describe("approval prompt choices", () => {
 
     expect(choices[0]?.intent).toBe("approve")
     expect(choices[1]?.intent).toBe("deny")
+  })
+
+  test("assigns distinct shortcuts to multiple approval decisions", () => {
+    const choices = buildChoices([
+      { intent: "approve", shortcut: "y", value: "ask" },
+      { intent: "approve", shortcut: "a", value: "code" },
+      { intent: "deny", value: "reject" },
+    ])
+
+    expect(choices.map((choice) => choice.shortcut)).toEqual(["y", "a", "n"])
+    expect(resolveChoice(choices, "y")).toBe("ask")
+    expect(resolveChoice(choices, "a")).toBe("code")
+  })
+
+  test("does not auto-submit one-key approval shortcuts while their labels remain prefix matches", () => {
+    const choices = buildChoices([
+      { intent: "approve", shortcut: "y", value: "ask" },
+      { intent: "approve", shortcut: "a", value: "code" },
+      { intent: "deny", value: "reject" },
+    ])
+
+    expect(shouldAutoSubmit(choices, "y")).toBe(true)
+    expect(shouldAutoSubmit(choices, "a")).toBe(false)
+    expect(shouldAutoSubmit(choices, "co")).toBe(false)
+    expect(shouldAutoSubmit(choices, "ask")).toBe(true)
   })
 })
 

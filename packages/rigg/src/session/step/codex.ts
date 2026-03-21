@@ -4,17 +4,12 @@ import { createCodexRuntimeSession } from "../../codex/runtime"
 import { isAbortError } from "../../util/error"
 import type { RenderContext } from "../render"
 import { stepFailed, interrupt } from "../error"
-import type { ActionExecutionOptions, ActionStepOutput } from "./shell"
-
-export type CodexStepOptions = ActionExecutionOptions & {
-  interactionHandler?: import("../interaction").InteractionHandler | undefined
-  onProviderEvent?: ((event: import("../../codex/event").CodexProviderEvent) => Promise<void> | void) | undefined
-}
+import type { ActionStepOutput, ProviderStepOptions } from "./shell"
 
 export async function runCodexStep(
   step: CodexNode,
   context: RenderContext,
-  options: CodexStepOptions,
+  options: ProviderStepOptions,
 ): Promise<ActionStepOutput> {
   switch (step.with.action) {
     case "review":
@@ -37,7 +32,7 @@ function applyTemplate(template: string, context: RenderContext): string {
 async function runCodexReviewStep(
   reviewConfig: Extract<CodexNode["with"], { action: "review" }>,
   context: RenderContext,
-  options: CodexStepOptions,
+  options: ProviderStepOptions,
 ): Promise<ActionStepOutput> {
   return await withCodexSession(options, async (session) => {
     return await session.review({
@@ -54,7 +49,7 @@ async function runCodexReviewStep(
 async function runCodexPromptStep(
   config: Extract<CodexNode["with"], { action: "plan" | "run" }>,
   context: RenderContext,
-  options: CodexStepOptions,
+  options: ProviderStepOptions,
 ): Promise<ActionStepOutput> {
   return await withCodexSession(options, async (session) => {
     return await session.run({
@@ -92,7 +87,7 @@ function inferReviewScope(
 }
 
 async function withCodexSession(
-  options: CodexStepOptions,
+  options: ProviderStepOptions,
   action: (session: Awaited<ReturnType<typeof createCodexRuntimeSession>>) => Promise<ActionStepOutput>,
 ): Promise<ActionStepOutput> {
   let session: Awaited<ReturnType<typeof createCodexRuntimeSession>>

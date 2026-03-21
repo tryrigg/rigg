@@ -6,11 +6,13 @@ import { tmpdir } from "node:os"
 
 import type { ActionNode } from "../../../src/workflow/schema"
 import type { CodexProviderEvent } from "../../../src/codex/event"
+import type { CursorProviderEvent } from "../../../src/cursor/event"
 import { createCodexRuntimeSession } from "../../../src/codex/runtime"
 import { RIGG_VERSION } from "../../../src/version"
 import { runActionStep } from "../../../src/session/step"
 import { renderContext } from "../../fixture/builders"
 import { installFakeCodex } from "../../fixture/fake-codex"
+import { installFakeCursor } from "../../fixture/fake-cursor"
 
 const FAKE_CODEX_LIFECYCLE_LOG = ".fake-codex-app-server-events.log"
 
@@ -252,7 +254,9 @@ describe("session/step", () => {
           cwd: root,
           env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
           onProviderEvent: (event) => {
-            events.push(event)
+            if (event.provider === "codex") {
+              events.push(event)
+            }
           },
         },
       )
@@ -359,7 +363,9 @@ describe("session/step", () => {
           cwd: root,
           env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
           onProviderEvent: (event) => {
-            events.push(event)
+            if (event.provider === "codex") {
+              events.push(event)
+            }
           },
         },
       )
@@ -1243,6 +1249,265 @@ describe("session/step", () => {
       const lifecycleEvents = await waitForFakeCodexExitEvents(root, 2)
       expect(lifecycleEvents.filter((line) => line.startsWith("started:"))).toHaveLength(2)
       expect(lifecycleEvents.filter((line) => line.startsWith("exit:"))).toHaveLength(2)
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  const cursorPromptCases: Array<{
+    action: "ask" | "plan" | "run"
+    expectedMode: "agent" | "ask" | "plan"
+    text: string
+  }> = [
+    { action: "run", expectedMode: "agent", text: "cursor run output" },
+    { action: "plan", expectedMode: "plan", text: "cursor plan output" },
+    { action: "ask", expectedMode: "ask", text: "cursor ask output" },
+  ]
+
+  test.each(cursorPromptCases)("runs cursor $action steps through ACP", async ({ action, expectedMode, text }) => {
+    const root = await mkdtemp(join(tmpdir(), `rigg-cursor-${action}-acp-`))
+    try {
+      const binDir = await installFakeCursor(root, {
+        initializeExpectParams: {
+          clientCapabilities: {},
+          clientInfo: {
+            name: "@tryrigg/rigg",
+            title: "Rigg",
+            version: RIGG_VERSION,
+          },
+          protocolVersion: 1,
+        },
+        sessionNew: {
+          expectParams: {
+            cwd: root,
+            mcpServers: [],
+            mode: expectedMode,
+          },
+        },
+        sessionPrompt: {
+          dispatch: "immediate",
+          expectParams: {
+            prompt: [{ text: `Prompt for ${action}`, type: "text" }],
+            sessionId: "__SESSION_ID__",
+          },
+          steps: [
+            {
+              kind: "notification",
+              method: "session/update",
+              params: {
+                sessionId: "__SESSION_ID__",
+                update: {
+                  content: { text: text.slice(0, Math.floor(text.length / 2)), type: "text" },
+                  messageId: "msg_1",
+                  sessionUpdate: "agent_message_chunk",
+                },
+              },
+            },
+            {
+              kind: "notification",
+              method: "session/update",
+              params: {
+                sessionId: "__SESSION_ID__",
+                update: {
+                  content: { text: text.slice(Math.floor(text.length / 2)), type: "text" },
+                  messageId: "msg_1",
+                  sessionUpdate: "agent_message_chunk",
+                },
+              },
+            },
+          ],
+        },
+      })
+
+      const events: CursorProviderEvent[] = []
+      const result = await runActionStep(
+        {
+          type: "cursor",
+          with: {
+            action,
+            prompt: `Prompt for ${action}`,
+          },
+        },
+        renderContext(),
+        {
+          cwd: root,
+          env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+          onProviderEvent: (event) => {
+            if (event.provider === "cursor") {
+              events.push(event)
+            }
+          },
+        },
+      )
+
+      expect(result.exitCode).toBe(0)
+      expect(result.result).toBe(text)
+      expect(events).toEqual([
+        {
+          action,
+          cwd: root,
+          kind: "session_started",
+          provider: "cursor",
+          sessionId: "session_1",
+        },
+        {
+          kind: "message_delta",
+          messageId: "msg_1",
+          provider: "cursor",
+          sessionId: "session_1",
+          text: text.slice(0, Math.floor(text.length / 2)),
+        },
+        {
+          kind: "message_delta",
+          messageId: "msg_1",
+          provider: "cursor",
+          sessionId: "session_1",
+          text: text.slice(Math.floor(text.length / 2)),
+        },
+        {
+          kind: "session_completed",
+          provider: "cursor",
+          sessionId: "session_1",
+          status: "completed",
+        },
+      ])
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("round-trips standard ACP cursor permission requests", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-cursor-permission-acp-"))
+    try {
+      const binDir = await installFakeCursor(root, {
+        sessionPrompt: {
+          dispatch: "immediate",
+          steps: [
+            {
+              expectResult: {
+                outcome: {
+                  optionId: "code",
+                  outcome: "selected",
+                },
+              },
+              kind: "request",
+              method: "session/request_permission",
+              params: {
+                options: [
+                  {
+                    kind: "allow_always",
+                    name: "Yes, and auto-accept all actions",
+                    optionId: "code",
+                  },
+                  {
+                    kind: "allow_once",
+                    name: "Yes, and manually accept actions",
+                    optionId: "ask",
+                  },
+                  {
+                    kind: "reject_once",
+                    name: "No, stay in architect mode",
+                    optionId: "reject",
+                  },
+                ],
+                sessionId: "__SESSION_ID__",
+                toolCall: {
+                  content: [{ text: "## Implementation Plan...", type: "text" }],
+                  kind: "switch_mode",
+                  status: "pending",
+                  title: "Ready for implementation",
+                  toolCallId: "call_switch_mode_001",
+                },
+              },
+            },
+            {
+              kind: "notification",
+              method: "session/update",
+              params: {
+                sessionId: "__SESSION_ID__",
+                update: {
+                  content: { text: "approved", type: "text" },
+                  messageId: "msg_1",
+                  sessionUpdate: "agent_message_chunk",
+                },
+              },
+            },
+          ],
+        },
+      })
+
+      const requests: Array<{ decisions: string[]; message: string }> = []
+      const result = await runActionStep(
+        {
+          type: "cursor",
+          with: {
+            action: "run",
+            prompt: "Needs approval",
+          },
+        },
+        renderContext(),
+        {
+          cwd: root,
+          env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+          interactionHandler: (request) => {
+            if (request.kind !== "approval") {
+              throw new Error(`unexpected request kind: ${request.kind}`)
+            }
+            requests.push({
+              decisions: request.decisions.map((decision) => decision.value),
+              message: request.message,
+            })
+            return { decision: "code", kind: "approval" }
+          },
+        },
+      )
+
+      expect(result.result).toBe("approved")
+      expect(requests).toEqual([
+        {
+          decisions: ["code", "ask", "reject"],
+          message: "Ready for implementation\n\n## Implementation Plan...",
+        },
+      ])
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("interrupts cursor sessions with session/cancel", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-cursor-interrupt-"))
+    try {
+      const binDir = await installFakeCursor(root, {
+        sessionPrompt: {
+          dispatch: "immediate",
+          steps: [{ kind: "delay", ms: 500 }],
+        },
+      })
+
+      const controller = new AbortController()
+      const execution = runActionStep(
+        {
+          type: "cursor",
+          with: {
+            action: "run",
+            prompt: "Interrupt me",
+          },
+        },
+        renderContext(),
+        {
+          cwd: root,
+          env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+          signal: controller.signal,
+        },
+      )
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      controller.abort()
+
+      await expect(execution).resolves.toMatchObject({
+        exitCode: 130,
+        termination: "interrupted",
+      })
     } finally {
       await rm(root, { force: true, recursive: true })
     }

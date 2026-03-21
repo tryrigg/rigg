@@ -4,10 +4,11 @@ import { workflowById, type WorkflowProject } from "../../project"
 import type { NodeStatus, RunSnapshot, NodeSnapshot } from "../../session/schema"
 import { formatDuration } from "./symbols"
 
-export const ACTION_KINDS = new Set<string>([StepKind.Shell, StepKind.Codex, StepKind.WriteFile])
+export const ACTION_KINDS = new Set<string>([StepKind.Shell, StepKind.Codex, StepKind.Cursor, StepKind.WriteFile])
 export const SUMMARY_KINDS = new Set<string>([
   StepKind.Shell,
   StepKind.Codex,
+  StepKind.Cursor,
   StepKind.WriteFile,
   StepKind.Group,
   StepKind.Loop,
@@ -128,6 +129,8 @@ export function extractDetail(step: WorkflowStep): string | undefined {
       }
       return detail
     }
+    case "cursor":
+      return step.with.action
     case "write_file":
       return `→ ${step.with.path}`
     default:
@@ -179,6 +182,7 @@ function walkStep(
   switch (step.type) {
     case "shell":
     case "codex":
+    case "cursor":
     case "write_file":
       entries.push({
         entryType: "step",

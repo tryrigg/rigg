@@ -7,6 +7,7 @@ import { InputSchema } from "./input"
 export const StepKind = {
   Branch: "branch",
   Codex: "codex",
+  Cursor: "cursor",
   Group: "group",
   Loop: "loop",
   Parallel: "parallel",
@@ -60,6 +61,14 @@ const CodexPlanWithSchema = z
   })
   .strict()
 
+const CursorWithSchema = z
+  .object({
+    action: z.union([z.literal("ask"), z.literal("plan"), z.literal("run")]),
+    model: z.string().min(1).optional(),
+    prompt: z.string().min(1),
+  })
+  .strict()
+
 const WriteFileWithSchema = z
   .object({
     content: z.string(),
@@ -93,6 +102,11 @@ export type ShellNode = BaseNode & {
 export type CodexNode = BaseNode & {
   type: "codex"
   with: z.infer<typeof CodexPlanWithSchema> | z.infer<typeof CodexReviewWithSchema> | z.infer<typeof CodexRunWithSchema>
+}
+
+export type CursorNode = BaseNode & {
+  type: "cursor"
+  with: z.infer<typeof CursorWithSchema>
 }
 
 export type WriteFileNode = BaseNode & {
@@ -147,6 +161,7 @@ export type WorkflowNode = BaseNode & {
 export type WorkflowStep =
   | BranchNode
   | CodexNode
+  | CursorNode
   | GroupNode
   | LoopNode
   | ParallelNode
@@ -191,6 +206,11 @@ const ShellNodeSchema: z.ZodType<ShellNode> = BaseNodeSchema.extend({
 const CodexNodeSchema: z.ZodType<CodexNode> = BaseNodeSchema.extend({
   type: z.literal("codex"),
   with: z.union([CodexReviewWithSchema, CodexRunWithSchema, CodexPlanWithSchema]),
+}).strict()
+
+const CursorNodeSchema: z.ZodType<CursorNode> = BaseNodeSchema.extend({
+  type: z.literal("cursor"),
+  with: CursorWithSchema,
 }).strict()
 
 const WriteFileNodeSchema: z.ZodType<WriteFileNode> = BaseNodeSchema.extend({
@@ -240,6 +260,7 @@ export const WorkflowStepSchema: z.ZodType<WorkflowStep> = z.lazy(() =>
   z.union([
     ShellNodeSchema,
     CodexNodeSchema,
+    CursorNodeSchema,
     WriteFileNodeSchema,
     WorkflowNodeSchema,
     GroupNodeSchema,
@@ -258,4 +279,4 @@ export const WorkflowDocumentSchema: z.ZodType<WorkflowDocument> = z
   })
   .strict()
 
-export type ActionNode = CodexNode | ShellNode | WriteFileNode
+export type ActionNode = CodexNode | CursorNode | ShellNode | WriteFileNode

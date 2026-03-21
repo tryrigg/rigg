@@ -9,6 +9,7 @@ export const ApprovalDecisionIntentSchema = z.union([
 
 export const ApprovalDecisionSchema = z.object({
   intent: ApprovalDecisionIntentSchema,
+  shortcut: z.string().optional(),
   value: z.string(),
 })
 

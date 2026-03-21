@@ -11,6 +11,7 @@ export const colors = {
 export const kindColors: Record<string, string> = {
   shell: "yellow",
   codex: "blue",
+  cursor: "cyan",
   write_file: "magenta",
   group: "dim",
   loop: "cyan",

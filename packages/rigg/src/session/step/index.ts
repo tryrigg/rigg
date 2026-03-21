@@ -2,16 +2,23 @@ import { renderString } from "../../workflow/expr"
 import type { ActionNode } from "../../workflow/schema"
 import type { RenderContext } from "../render"
 import { stepFailed } from "../error"
-import { runCodexStep, type CodexStepOptions } from "./codex"
-import { runShellStep, type ActionStepOutput } from "./shell"
+import { runCodexStep } from "./codex"
+import { runCursorStep } from "./cursor"
+import { runShellStep, type ActionStepOutput, type ProviderStepOptions } from "./shell"
 import { runWriteFileStep } from "./write-file"
 
-export type { ActionExecutionOptions, ActionStepOutput, ProcessOutput, StreamEventParser } from "./shell"
+export type {
+  ActionExecutionOptions,
+  ActionStepOutput,
+  ProcessOutput,
+  ProviderStepOptions,
+  StreamEventParser,
+} from "./shell"
 
 export async function runActionStep(
   step: ActionNode,
   context: RenderContext,
-  options: CodexStepOptions,
+  options: ProviderStepOptions,
 ): Promise<ActionStepOutput> {
   switch (step.type) {
     case "shell":
@@ -36,6 +43,8 @@ export async function runActionStep(
     }
     case "codex":
       return await runCodexStep(step, context, options)
+    case "cursor":
+      return await runCursorStep(step, context, options)
   }
 }
 

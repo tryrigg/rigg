@@ -3,7 +3,13 @@ import { StepKind, type WorkflowDocument, type WorkflowStep } from "../../workfl
 import type { WorkflowProject } from "../../project"
 import type { NodeSnapshot, RunSnapshot } from "../../session/schema"
 
-const ACTION_STEP_KINDS = new Set<string>([StepKind.Shell, StepKind.Codex, StepKind.WriteFile, StepKind.Workflow])
+const ACTION_STEP_KINDS = new Set<string>([
+  StepKind.Shell,
+  StepKind.Codex,
+  StepKind.Cursor,
+  StepKind.WriteFile,
+  StepKind.Workflow,
+])
 
 export type ProgressSummary = {
   completed: number
@@ -26,6 +32,7 @@ function collectActionNodes(
     switch (step.type) {
       case "shell":
       case "codex":
+      case "cursor":
       case "write_file":
       case "workflow":
         actionNodes.set(nodePath, { insideLoop })

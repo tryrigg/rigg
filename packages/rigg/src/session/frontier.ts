@@ -227,8 +227,8 @@ export function createFrontierNode(
   const context = createRenderContext(env, inputs, run, steps)
 
   return {
-    action: step.type === "codex" ? step.with.action : null,
-    cwd: step.type === "codex" ? cwd : null,
+    action: step.type === "codex" || step.type === "cursor" ? step.with.action : null,
+    cwd: step.type === "codex" || step.type === "cursor" ? cwd : null,
     detail: detailOverride ?? summarizeFrontierDetail(step),
     frame_id: frameId,
     model: step.type === "codex" ? (step.with.model ?? null) : null,
@@ -246,6 +246,9 @@ export function summarizeFrontierDetail(step: ActionNode): string | null {
   if (step.type === "write_file") {
     return step.with.path
   }
+  if (step.type === "cursor") {
+    return `cursor ${step.with.action}`
+  }
 
   if (step.with.action === "review") {
     return "codex review"
@@ -258,6 +261,9 @@ export function summarizeFrontierDetail(step: ActionNode): string | null {
 }
 
 export function frontierPromptPreview(step: ActionNode, context: RenderContext): string | null {
+  if (step.type === "cursor") {
+    return preview(renderStringSafely(step.with.prompt, context))
+  }
   if (step.type === "codex" && step.with.action !== "review") {
     return preview(renderStringSafely(step.with.prompt, context))
   }

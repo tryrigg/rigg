@@ -63,7 +63,9 @@ export const NodeSnapshotSchema = z.object({
 })
 
 export const FrontierNodeSchema = z.object({
-  action: z.string().optional().nullable(),
+  codex_collaboration_mode: z.enum(["default", "plan"]).nullable(),
+  codex_kind: z.enum(["turn", "review"]).nullable(),
+  cursor_mode: z.enum(["agent", "ask", "plan"]).nullable(),
   cwd: z.string().optional().nullable(),
   detail: z.string().optional().nullable(),
   frame_id: z.string().min(1),

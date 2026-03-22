@@ -8,17 +8,16 @@ steps:
       - id: review
         type: codex
         with:
-          action: review
+          kind: review
           model: gpt-5.3-codex-spark
-          review:
-            target:
-              type: uncommitted
+          target:
+            type: uncommitted
 
       - id: fix
         if: ${{ len(steps.review.result.findings) > 0 }}
         type: cursor
         with:
-          action: run
+          mode: agent
           model: composer-2-fast
           prompt: |
             Fix these code review findings:

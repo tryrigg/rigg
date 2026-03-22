@@ -11,7 +11,8 @@ steps:
   - id: draft
     type: codex
     with:
-      action: run
+      kind: turn
+      collaboration_mode: plan
       model: gpt-5.4
       prompt: |
         Draft a detailed implementation plan from the requirements below.
@@ -37,17 +38,16 @@ steps:
       - id: review
         type: codex
         with:
-          action: review
+          kind: review
           model: gpt-5.4
-          review:
-            target:
-              type: uncommitted
+          target:
+            type: uncommitted
 
       - id: fix
         if: \${{ len(steps.review.result.findings) > 0 }}
         type: codex
         with:
-          action: run
+          kind: turn
           model: gpt-5.4
           prompt: |
             Address the findings from this review.
@@ -73,18 +73,17 @@ steps:
       - id: review
         type: codex
         with:
-          action: review
+          kind: review
           model: gpt-5.4
-          review:
-            target:
-              type: base
-              branch: \${{ inputs.base_branch }}
+          target:
+            type: base
+            branch: \${{ inputs.base_branch }}
 
       - id: fix
         if: \${{ len(steps.review.result.findings) > 0 }}
         type: codex
         with:
-          action: run
+          kind: turn
           model: gpt-5.4
           prompt: |
             Address the findings from this review.
@@ -110,18 +109,17 @@ steps:
       - id: review
         type: codex
         with:
-          action: review
+          kind: review
           model: gpt-5.4
-          review:
-            target:
-              type: commit
-              sha: \${{ inputs.commit_sha }}
+          target:
+            type: commit
+            sha: \${{ inputs.commit_sha }}
 
       - id: fix
         if: \${{ len(steps.review.result.findings) > 0 }}
         type: codex
         with:
-          action: run
+          kind: turn
           model: gpt-5.4
           prompt: |
             Address the findings from this review.

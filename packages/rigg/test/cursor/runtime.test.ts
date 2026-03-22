@@ -48,7 +48,7 @@ describe("cursor/runtime", () => {
       try {
         await expect(
           runtime.run({
-            action: "run",
+            mode: "agent",
             cwd,
             prompt: "Use agent mode",
           }),
@@ -118,7 +118,7 @@ describe("cursor/runtime", () => {
       try {
         await expect(
           runtime.run({
-            action: "ask",
+            mode: "ask",
             cwd,
             interactionHandler: async (request) => {
               if (request.kind !== "approval") {
@@ -178,7 +178,7 @@ describe("cursor/runtime", () => {
       try {
         const controller = new AbortController()
         const run = runtime.run({
-          action: "run",
+          mode: "agent",
           cwd,
           prompt: "Interrupt me",
           signal: controller.signal,
@@ -252,7 +252,7 @@ describe("cursor/runtime", () => {
       try {
         const controller = new AbortController()
         const firstRun = runtime.run({
-          action: "run",
+          mode: "agent",
           cwd,
           prompt: "Interrupt me",
           signal: controller.signal,
@@ -270,7 +270,7 @@ describe("cursor/runtime", () => {
 
         await expect(
           runtime.run({
-            action: "run",
+            mode: "agent",
             cwd,
             prompt: "Run again",
           }),
@@ -350,7 +350,7 @@ describe("cursor/runtime", () => {
       try {
         await expect(
           runtime.run({
-            action: "run",
+            mode: "agent",
             cwd,
             prompt: "Reject this prompt",
           }),
@@ -360,7 +360,7 @@ describe("cursor/runtime", () => {
 
         await expect(
           runtime.run({
-            action: "run",
+            mode: "agent",
             cwd,
             prompt: "Run again",
           }),
@@ -407,7 +407,7 @@ describe("cursor/runtime", () => {
       try {
         await expect(
           runtime.run({
-            action: "run",
+            mode: "agent",
             cwd,
             prompt: "Refuse with provider error",
           }),
@@ -444,7 +444,7 @@ describe("cursor/runtime", () => {
       try {
         const startedAt = performance.now()
         const result = await runtime.run({
-          action: "run",
+          mode: "agent",
           cwd,
           prompt: "Return without late updates",
         })
@@ -507,7 +507,7 @@ describe("cursor/runtime", () => {
       try {
         await expect(
           runtime.run({
-            action: "run",
+            mode: "agent",
             cwd,
             prompt: "Wait for immediate post-response updates",
           }),
@@ -568,7 +568,7 @@ describe("cursor/runtime", () => {
       try {
         const controller = new AbortController()
         const run = runtime.run({
-          action: "run",
+          mode: "agent",
           cwd,
           prompt: "Finish before the timeout abort lands",
           signal: controller.signal,
@@ -625,7 +625,7 @@ describe("cursor/runtime", () => {
       try {
         const controller = new AbortController()
         const run = runtime.run({
-          action: "run",
+          mode: "agent",
           cwd,
           prompt: "Finish even if an ignored update lands before abort",
           signal: controller.signal,
@@ -683,7 +683,7 @@ describe("cursor/runtime", () => {
       try {
         const controller = new AbortController()
         const run = runtime.run({
-          action: "run",
+          mode: "agent",
           cwd,
           prompt: "Finish after the last trailing update lands",
           signal: controller.signal,
@@ -741,7 +741,7 @@ describe("cursor/runtime", () => {
       try {
         const controller = new AbortController()
         const run = runtime.run({
-          action: "run",
+          mode: "agent",
           cwd,
           onEvent: async (event) => {
             if (event.kind !== "message_delta") {
@@ -822,7 +822,7 @@ describe("cursor/runtime", () => {
       try {
         const controller = new AbortController()
         const run = runtime.run({
-          action: "run",
+          mode: "agent",
           cwd,
           prompt: "Abort after stopReason when a tool call is still pending",
           signal: controller.signal,
@@ -911,7 +911,7 @@ describe("cursor/runtime", () => {
       try {
         await expect(
           runtime.run({
-            action: "run",
+            mode: "agent",
             cwd,
             prompt: "Complete once",
           }),
@@ -925,7 +925,7 @@ describe("cursor/runtime", () => {
 
         await expect(
           runtime.run({
-            action: "run",
+            mode: "agent",
             cwd,
             prompt: "Run again",
           }),
@@ -976,7 +976,7 @@ describe("cursor/runtime", () => {
       try {
         await expect(
           runtime.run({
-            action: "run",
+            mode: "agent",
             cwd,
             prompt: "Wait for the prompt response",
           }),

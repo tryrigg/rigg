@@ -65,15 +65,14 @@ Repeats until a condition is met or `max` iterations is reached.
     - id: review
       type: codex
       with:
-        action: review
-        review:
-          target:
-            type: uncommitted
+        kind: review
+        target:
+          type: uncommitted
     - id: fix
       if: ${{ len(steps.review.result.findings) > 0 }}
       type: codex
       with:
-        action: run
+        kind: turn
         prompt: |
           Address these review findings:
           ${{ toJSON(steps.review.result) }}
@@ -104,7 +103,7 @@ Conditional execution. First matching `if` wins. `else` is the fallback.
         - id: fix
           type: codex
           with:
-            action: run
+            kind: turn
             prompt: Fix the issues.
       exports:
         outcome: ${{ steps.fix.result }}

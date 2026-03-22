@@ -51,7 +51,7 @@ describe("workflow/check", () => {
               id: "check",
               type: "codex",
               with: {
-                action: "run",
+                kind: "turn",
                 prompt: "Evaluate",
               },
             },
@@ -138,11 +138,9 @@ describe("workflow/check", () => {
           id: "draft",
           type: "codex",
           with: {
-            action: "review",
-            review: {
-              target: {
-                type: "uncommitted",
-              },
+            kind: "review",
+            target: {
+              type: "uncommitted",
             },
           },
         },
@@ -165,7 +163,7 @@ describe("workflow/check", () => {
           id: "triage",
           type: "cursor",
           with: {
-            action: "run",
+            mode: "agent",
             prompt: "Return a summary",
           },
         },
@@ -228,7 +226,7 @@ describe("workflow/check", () => {
           if: "${{ true }}",
           type: "codex",
           with: {
-            action: "run",
+            kind: "turn",
             prompt: "Judge",
           },
         },
@@ -749,7 +747,8 @@ describe("workflow/check", () => {
                   id: "plan",
                   type: "codex",
                   with: {
-                    action: "plan",
+                    collaboration_mode: "plan",
+                    kind: "turn",
                     prompt: "Clarify scope and propose a plan.",
                   },
                 },
@@ -757,30 +756,24 @@ describe("workflow/check", () => {
                   id: "uncommitted",
                   type: "codex",
                   with: {
-                    action: "review",
-                    review: {
-                      target: { type: "uncommitted" },
-                    },
+                    kind: "review",
+                    target: { type: "uncommitted" },
                   },
                 },
                 {
                   id: "base",
                   type: "codex",
                   with: {
-                    action: "review",
-                    review: {
-                      target: { branch: "main", type: "base" },
-                    },
+                    kind: "review",
+                    target: { branch: "main", type: "base" },
                   },
                 },
                 {
                   id: "commit",
                   type: "codex",
                   with: {
-                    action: "review",
-                    review: {
-                      target: { sha: "abc123", type: "commit" },
-                    },
+                    kind: "review",
+                    target: { sha: "abc123", type: "commit" },
                   },
                 },
               ],

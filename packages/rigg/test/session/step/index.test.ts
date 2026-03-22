@@ -245,7 +245,7 @@ describe("session/step", () => {
         {
           type: "codex",
           with: {
-            action: "run",
+            kind: "turn",
             prompt: "Summarize the change.",
           },
         },
@@ -354,7 +354,7 @@ describe("session/step", () => {
         {
           type: "codex",
           with: {
-            action: "run",
+            kind: "turn",
             prompt: "Summarize the change.",
           },
         },
@@ -455,7 +455,7 @@ describe("session/step", () => {
         {
           type: "codex",
           with: {
-            action: "run",
+            kind: "turn",
             effort: "high",
             prompt: "Summarize the change.",
           },
@@ -522,11 +522,9 @@ describe("session/step", () => {
         {
           type: "codex",
           with: {
-            action: "review",
-            review: {
-              target: {
-                type: "uncommitted",
-              },
+            kind: "review",
+            target: {
+              type: "uncommitted",
             },
           },
         },
@@ -659,7 +657,8 @@ describe("session/step", () => {
         {
           type: "codex",
           with: {
-            action: "plan",
+            kind: "turn",
+            collaboration_mode: "plan",
             model: "gpt-5.5",
             prompt: "Ask one clarifying question, then return the plan.",
           },
@@ -750,7 +749,8 @@ describe("session/step", () => {
         {
           type: "codex",
           with: {
-            action: "plan",
+            kind: "turn",
+            collaboration_mode: "plan",
             effort: "xhigh",
             prompt: "Return the plan.",
           },
@@ -895,7 +895,7 @@ describe("session/step", () => {
         {
           type: "codex",
           with: {
-            action: "run",
+            kind: "turn",
             prompt: "Do the work",
           },
         },
@@ -935,7 +935,7 @@ describe("session/step", () => {
           {
             type: "codex",
             with: {
-              action: "run",
+              kind: "turn",
               prompt: "Say hi",
             },
           },
@@ -1213,7 +1213,7 @@ describe("session/step", () => {
       const step: ActionNode = {
         type: "codex",
         with: {
-          action: "run",
+          kind: "turn",
           prompt: "run in isolated session",
         },
       }
@@ -1255,17 +1255,17 @@ describe("session/step", () => {
   })
 
   const cursorPromptCases: Array<{
-    action: "ask" | "plan" | "run"
     expectedMode: "agent" | "ask" | "plan"
+    mode: "agent" | "ask" | "plan"
     text: string
   }> = [
-    { action: "run", expectedMode: "agent", text: "cursor run output" },
-    { action: "plan", expectedMode: "plan", text: "cursor plan output" },
-    { action: "ask", expectedMode: "ask", text: "cursor ask output" },
+    { mode: "agent", expectedMode: "agent", text: "cursor run output" },
+    { mode: "plan", expectedMode: "plan", text: "cursor plan output" },
+    { mode: "ask", expectedMode: "ask", text: "cursor ask output" },
   ]
 
-  test.each(cursorPromptCases)("runs cursor $action steps through ACP", async ({ action, expectedMode, text }) => {
-    const root = await mkdtemp(join(tmpdir(), `rigg-cursor-${action}-acp-`))
+  test.each(cursorPromptCases)("runs cursor $mode steps through ACP", async ({ mode, expectedMode, text }) => {
+    const root = await mkdtemp(join(tmpdir(), `rigg-cursor-${mode}-acp-`))
     try {
       const binDir = await installFakeCursor(root, {
         initializeExpectParams: {
@@ -1287,7 +1287,7 @@ describe("session/step", () => {
         sessionPrompt: {
           dispatch: "immediate",
           expectParams: {
-            prompt: [{ text: `Prompt for ${action}`, type: "text" }],
+            prompt: [{ text: `Prompt for ${mode}`, type: "text" }],
             sessionId: "__SESSION_ID__",
           },
           steps: [
@@ -1324,8 +1324,8 @@ describe("session/step", () => {
         {
           type: "cursor",
           with: {
-            action,
-            prompt: `Prompt for ${action}`,
+            mode,
+            prompt: `Prompt for ${mode}`,
           },
         },
         renderContext(),
@@ -1344,9 +1344,9 @@ describe("session/step", () => {
       expect(result.result).toBe(text)
       expect(events).toEqual([
         {
-          action,
           cwd: root,
           kind: "session_started",
+          mode,
           provider: "cursor",
           sessionId: "session_1",
         },
@@ -1441,7 +1441,7 @@ describe("session/step", () => {
         {
           type: "cursor",
           with: {
-            action: "run",
+            mode: "agent",
             prompt: "Needs approval",
           },
         },
@@ -1489,7 +1489,7 @@ describe("session/step", () => {
         {
           type: "cursor",
           with: {
-            action: "run",
+            mode: "agent",
             prompt: "Interrupt me",
           },
         },

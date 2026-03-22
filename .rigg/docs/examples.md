@@ -13,16 +13,15 @@ steps:
       - id: review
         type: codex
         with:
-          action: review
-          review:
-            target:
-              type: uncommitted
+          kind: review
+          target:
+            type: uncommitted
 
       - id: fix
         if: ${{ len(steps.review.result.findings) > 0 }}
         type: codex
         with:
-          action: run
+          kind: turn
           prompt: |
             Address the accepted findings from this review.
             Review:
@@ -42,7 +41,8 @@ steps:
   - id: draft
     type: codex
     with:
-      action: plan
+      kind: turn
+      collaboration_mode: plan
       prompt: |
         Clarify anything missing, then draft an implementation plan.
         Requirements:
@@ -82,7 +82,7 @@ steps:
   - id: report
     type: codex
     with:
-      action: run
+      kind: turn
       prompt: |
         Summarize these results.
         Unit:
@@ -102,9 +102,8 @@ steps:
   - id: review
     type: codex
     with:
-      action: review
-      review:
-        target:
-          type: commit
-          sha: ${{ inputs.commit_sha }}
+      kind: review
+      target:
+        type: commit
+        sha: ${{ inputs.commit_sha }}
 ```

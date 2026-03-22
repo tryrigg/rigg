@@ -188,12 +188,59 @@ export function createFrontierNode(
   cwd: string,
   detailOverride?: string,
 ): FrontierNode {
+  if (step.type === "codex") {
+    if (step.with.kind === "review") {
+      return {
+        codex_collaboration_mode: null,
+        codex_kind: "review",
+        cursor_mode: null,
+        cwd,
+        detail: detailOverride ?? summarizeFrontierDetail(step),
+        frame_id: frameId,
+        model: step.with.model ?? null,
+        node_kind: step.type,
+        node_path: nodePath,
+        prompt_preview: frontierPromptPreview(step, context),
+        user_id: step.id ?? null,
+      }
+    }
+    return {
+      codex_collaboration_mode: step.with.collaboration_mode ?? "default",
+      codex_kind: "turn",
+      cursor_mode: null,
+      cwd,
+      detail: detailOverride ?? summarizeFrontierDetail(step),
+      frame_id: frameId,
+      model: step.with.model ?? null,
+      node_kind: step.type,
+      node_path: nodePath,
+      prompt_preview: frontierPromptPreview(step, context),
+      user_id: step.id ?? null,
+    }
+  }
+  if (step.type === "cursor") {
+    return {
+      codex_collaboration_mode: null,
+      codex_kind: null,
+      cursor_mode: step.with.mode,
+      cwd,
+      detail: detailOverride ?? summarizeFrontierDetail(step),
+      frame_id: frameId,
+      model: step.with.model ?? null,
+      node_kind: step.type,
+      node_path: nodePath,
+      prompt_preview: frontierPromptPreview(step, context),
+      user_id: step.id ?? null,
+    }
+  }
   return {
-    action: step.type === "codex" || step.type === "cursor" ? step.with.action : null,
-    cwd: step.type === "codex" || step.type === "cursor" ? cwd : null,
+    codex_collaboration_mode: null,
+    codex_kind: null,
+    cursor_mode: null,
+    cwd: null,
     detail: detailOverride ?? summarizeFrontierDetail(step),
     frame_id: frameId,
-    model: step.type === "codex" || step.type === "cursor" ? (step.with.model ?? null) : null,
+    model: null,
     node_kind: step.type,
     node_path: nodePath,
     prompt_preview: frontierPromptPreview(step, context),
@@ -209,17 +256,17 @@ export function summarizeFrontierDetail(step: ActionNode): string | null {
     return step.with.path
   }
   if (step.type === "cursor") {
-    return `cursor ${step.with.action}`
+    return `cursor ${step.with.mode}`
   }
 
-  if (step.with.action === "review") {
+  if (step.with.kind === "review") {
     return "codex review"
   }
-  if (step.with.action === "plan") {
-    return "codex plan"
+  if (step.with.collaboration_mode === "plan") {
+    return "codex turn · plan"
   }
 
-  return "codex run"
+  return "codex turn"
 }
 
 function frontierPromptPreview(step: ActionNode, context: RenderContext): string | null {
@@ -229,8 +276,8 @@ function frontierPromptPreview(step: ActionNode, context: RenderContext): string
   if (step.type !== "codex") {
     return null
   }
-  if (step.with.action === "review") {
-    const target = step.with.review.target
+  if (step.with.kind === "review") {
+    const target = step.with.target
     if (target.type === "uncommitted") return "review uncommitted changes"
     if (target.type === "base") return `review base ${renderStringSafely(target.branch, context)}`
     return `review commit ${renderStringSafely(target.sha, context)}`

@@ -1,8 +1,8 @@
 export type CursorProviderEvent =
   | {
-      action: "ask" | "plan" | "run"
       cwd: string
       kind: "session_started"
+      mode: "agent" | "ask" | "plan"
       provider: "cursor"
       sessionId: string
     }

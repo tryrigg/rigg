@@ -3,14 +3,14 @@ steps:
   - id: run
     type: cursor
     with:
-      action: run
+      mode: agent
       model: composer-2
       prompt: Reply with exactly "hello from cursor" and nothing else.
 
   - id: ask
     type: cursor
     with:
-      action: ask
+      mode: ask
       model: composer-2
       prompt: Reply with exactly "ask mode works" and nothing else.
 

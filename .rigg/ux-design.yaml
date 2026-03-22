@@ -243,7 +243,8 @@ steps:
           - id: codex_design
             type: codex
             with:
-              action: plan
+              kind: turn
+              collaboration_mode: plan
               model: gpt-5.4
               effort: high
               prompt: |

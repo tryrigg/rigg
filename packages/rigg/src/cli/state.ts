@@ -182,10 +182,16 @@ function barrierLabel(next: FrontierNode[]): string | null {
   return next.map((node) => frontierLabel(node)).join(", ")
 }
 
-function frontierLabel(node: FrontierNode): string {
+export function frontierLabel(node: FrontierNode): string {
   const parts = [`${node.user_id ?? node.node_path} [${labels[node.node_kind] ?? node.node_kind}]`]
-  if ((node.node_kind === "codex" || node.node_kind === "cursor") && node.action) {
-    parts.push(node.action)
+  if (node.node_kind === "codex" && node.codex_kind) {
+    parts.push(node.codex_kind)
+    if (node.codex_kind === "turn" && node.codex_collaboration_mode === "plan") {
+      parts.push("plan")
+    }
+  }
+  if (node.node_kind === "cursor" && node.cursor_mode) {
+    parts.push(node.cursor_mode)
   }
   if ((node.node_kind === "codex" || node.node_kind === "cursor") && node.model) {
     parts.push(node.model)

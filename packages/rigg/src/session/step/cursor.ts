@@ -28,8 +28,8 @@ export async function runCursorStep(
 
   try {
     return await session.run({
-      action: step.with.action,
       cwd: options.cwd,
+      mode: step.with.mode,
       interactionHandler: options.interactionHandler,
       onEvent: options.onProviderEvent,
       prompt: applyTemplate(step.with.prompt, context),

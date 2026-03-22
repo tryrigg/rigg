@@ -11,18 +11,16 @@ export async function runCodexStep(
   context: RenderContext,
   options: ProviderStepOptions,
 ): Promise<ActionStepOutput> {
-  switch (step.with.action) {
+  switch (step.with.kind) {
     case "review":
       return await runCodexReviewStep(step.with, context, options)
-    case "plan":
-      return await runCodexPromptStep(step.with, context, options)
-    case "run":
+    case "turn":
       return await runCodexPromptStep(step.with, context, options)
   }
 }
 
 async function runCodexReviewStep(
-  reviewConfig: Extract<CodexNode["with"], { action: "review" }>,
+  reviewConfig: Extract<CodexNode["with"], { kind: "review" }>,
   context: RenderContext,
   options: ProviderStepOptions,
 ): Promise<ActionStepOutput> {
@@ -33,19 +31,19 @@ async function runCodexReviewStep(
       model: reviewConfig.model,
       onEvent: options.onProviderEvent,
       signal: options.signal,
-      target: inferReviewScope(reviewConfig.review, context),
+      target: inferReviewScope(reviewConfig.target, context),
     })
   })
 }
 
 async function runCodexPromptStep(
-  config: Extract<CodexNode["with"], { action: "plan" | "run" }>,
+  config: Extract<CodexNode["with"], { kind: "turn" }>,
   context: RenderContext,
   options: ProviderStepOptions,
 ): Promise<ActionStepOutput> {
   return await withCodexSession(options, async (session) => {
     return await session.run({
-      collaborationMode: config.action === "plan" ? "plan" : undefined,
+      collaborationMode: config.collaboration_mode === "plan" ? "plan" : undefined,
       cwd: options.cwd,
       effort: config.effort,
       interactionHandler: options.interactionHandler,
@@ -58,14 +56,9 @@ async function runCodexPromptStep(
 }
 
 function inferReviewScope(
-  review: CodexNode["with"] extends infer T
-    ? T extends { action: "review"; review: infer ReviewConfig }
-      ? ReviewConfig
-      : never
-    : never,
+  target: Extract<CodexNode["with"], { kind: "review" }>["target"],
   context: RenderContext,
 ): { type: "base"; value: string } | { type: "commit"; value: string } | { type: "uncommitted" } {
-  const target = review.target
   if (target.type === "base") {
     return { type: "base", value: applyTemplate(target.branch, context) }
   }

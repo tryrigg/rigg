@@ -13,7 +13,7 @@ describe("buildTree", () => {
   test("builds flat list for sequential workflow", () => {
     const wf = workflow([
       { type: "shell", with: { command: "echo hello" } },
-      { type: "codex", with: { action: "run", prompt: "do stuff" } },
+      { type: "codex", with: { kind: "turn", prompt: "do stuff" } },
       { type: "write_file", with: { path: "out.txt", content: "hi" } },
     ])
 
@@ -400,37 +400,37 @@ describe("extractDetail", () => {
     expect(extractDetail(step)).toBe("$ echo first")
   })
 
-  test("returns action for codex steps", () => {
-    const step: WorkflowStep = { type: "codex", with: { action: "run", prompt: "do stuff" } }
-    expect(extractDetail(step)).toBe("run")
+  test("returns kind summary for codex steps", () => {
+    const step: WorkflowStep = { type: "codex", with: { kind: "turn", prompt: "do stuff" } }
+    expect(extractDetail(step)).toBe("turn")
   })
 
-  test("returns action for cursor steps", () => {
-    const step: WorkflowStep = { type: "cursor", with: { action: "ask", prompt: "do stuff" } }
+  test("returns mode for cursor steps", () => {
+    const step: WorkflowStep = { type: "cursor", with: { mode: "ask", prompt: "do stuff" } }
     expect(extractDetail(step)).toBe("ask")
   })
 
-  test("returns action and model for cursor steps with model", () => {
-    const step: WorkflowStep = { type: "cursor", with: { action: "ask", prompt: "do stuff", model: "composer-2" } }
+  test("returns mode and model for cursor steps with model", () => {
+    const step: WorkflowStep = { type: "cursor", with: { mode: "ask", prompt: "do stuff", model: "composer-2" } }
     expect(extractDetail(step)).toBe("ask · composer-2")
   })
 
-  test("returns action and model for codex steps with model", () => {
-    const step: WorkflowStep = { type: "codex", with: { action: "run", prompt: "do stuff", model: "o3" } }
-    expect(extractDetail(step)).toBe("run · o3")
+  test("returns kind and model for codex steps with model", () => {
+    const step: WorkflowStep = { type: "codex", with: { kind: "turn", prompt: "do stuff", model: "o3" } }
+    expect(extractDetail(step)).toBe("turn · o3")
   })
 
-  test("returns action, model and effort for codex steps", () => {
+  test("returns kind, model and effort for codex steps", () => {
     const step: WorkflowStep = {
       type: "codex",
-      with: { action: "run", prompt: "do stuff", model: "o3", effort: "high" },
+      with: { kind: "turn", prompt: "do stuff", model: "o3", effort: "high" },
     }
-    expect(extractDetail(step)).toBe("run · o3 · high")
+    expect(extractDetail(step)).toBe("turn · o3 · high")
   })
 
-  test("returns action and effort for codex steps without model", () => {
-    const step: WorkflowStep = { type: "codex", with: { action: "run", prompt: "do stuff", effort: "low" } }
-    expect(extractDetail(step)).toBe("run · low")
+  test("returns kind and effort for codex steps without model", () => {
+    const step: WorkflowStep = { type: "codex", with: { kind: "turn", prompt: "do stuff", effort: "low" } }
+    expect(extractDetail(step)).toBe("turn · low")
   })
 
   test("returns path for write_file steps", () => {
@@ -470,7 +470,9 @@ describe("annotateNext", () => {
         frame_id: "root",
         next: [
           {
-            action: "shell",
+            codex_collaboration_mode: null,
+            codex_kind: null,
+            cursor_mode: null,
             cwd: "/workspace",
             detail: "echo left",
             frame_id: "root",
@@ -481,7 +483,9 @@ describe("annotateNext", () => {
             user_id: "left-step",
           },
           {
-            action: "shell",
+            codex_collaboration_mode: null,
+            codex_kind: null,
+            cursor_mode: null,
             cwd: "/workspace",
             detail: "echo right",
             frame_id: "root",

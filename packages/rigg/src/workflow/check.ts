@@ -609,12 +609,12 @@ function validateCodex(
   scope: VisibleScope,
   errors: CompileDiagnostic[],
 ): ValidationSummary & { guaranteedResultShape: ResultShape; resultShape: ResultShape } {
-  if (step.with.action === "review") {
-    if (step.with.review.target.type === "base") {
-      checkTpl(step.with.review.target.branch, filePath, scope, errors)
+  if (step.with.kind === "review") {
+    if (step.with.target.type === "base") {
+      checkTpl(step.with.target.branch, filePath, scope, errors)
     }
-    if (step.with.review.target.type === "commit") {
-      checkTpl(step.with.review.target.sha, filePath, scope, errors)
+    if (step.with.target.type === "commit") {
+      checkTpl(step.with.target.sha, filePath, scope, errors)
     }
 
     const reviewShape = shapeFromSchema(reviewOutput())

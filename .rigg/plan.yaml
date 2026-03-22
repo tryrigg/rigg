@@ -102,7 +102,8 @@ steps:
   - id: draft
     type: codex
     with:
-      action: plan
+      kind: turn
+      collaboration_mode: plan
       model: gpt-5.4
       effort: high
       prompt: |
@@ -271,7 +272,7 @@ steps:
           - id: refine
             type: codex
             with:
-              action: run
+              kind: turn
               model: gpt-5.4
               effort: medium
               prompt: |

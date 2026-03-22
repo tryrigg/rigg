@@ -9,7 +9,7 @@ steps:
   - id: codex_probe
     type: codex
     with:
-      action: run
+      kind: turn
       model: gpt-5.1-codex-mini
       prompt: |
         Inspect this repository and produce a short debug note for a workflow progress UI check.
@@ -29,7 +29,7 @@ steps:
   - id: summarize
     type: codex
     with:
-      action: run
+      kind: turn
       model: gpt-5.1-codex-mini
       prompt: |
         Turn the note below into a compact final summary for a human operator.

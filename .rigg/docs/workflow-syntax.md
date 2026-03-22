@@ -40,44 +40,43 @@ steps:
 ### codex
 
 ```yaml
-# Run mode
+# Turn (default collaboration)
 - id: implement
   type: codex
   with:
-    action: run
+    kind: turn
     prompt: Implement the feature.
     model: gpt-5.4
     effort: high
 
-# Plan mode
+# Turn with Plan collaboration
 - id: draft_plan
   type: codex
   with:
-    action: plan
+    kind: turn
+    collaboration_mode: plan
     prompt: Clarify the scope and produce an implementation plan.
     model: gpt-5.4
     effort: low
 
-# Review mode
+# Review
 - id: review
   type: codex
   with:
-    action: review
+    kind: review
     model: gpt-5.4
-    review:
-      target:
-        type: uncommitted # uncommitted | base | commit
-      title: Optional title
+    target:
+      type: uncommitted # uncommitted | base | commit
 ```
 
-`action: run` and `action: plan` return plain text.
-`action: plan` uses Codex's built-in Plan collaboration mode and is planning-only.
+`kind: turn` returns plain text.
+`collaboration_mode: plan` uses Codex's built-in Plan collaboration mode and is planning-only.
 It must not mutate repo-tracked files.
-`effort` is optional on `action: run` and `action: plan` and maps to Codex reasoning effort.
+`effort` is optional on turns and maps to Codex reasoning effort.
 Allowed values: `low | medium | high | xhigh`.
 If omitted, Rigg uses `medium`.
 
-For `review.target`:
+For `target` on `kind: review`:
 
 - `type: uncommitted` needs no extra fields
 - `type: base` requires `branch`
@@ -182,7 +181,7 @@ rigg run <workflow_id> --input key=value
 ## Key Rules
 
 1. Access step outputs via `steps.<id>.result`
-2. `codex` supports `action: run`, `action: plan`, and `action: review`
-3. `codex run` and `codex plan` return text, while `codex review` returns the built-in review object shape
-4. `codex plan` is planning-only and must not mutate repo-tracked files
+2. `codex` uses `kind: turn` or `kind: review` (turns may set `collaboration_mode: plan`)
+3. `codex` turns return text; `codex` review returns the built-in review object shape
+4. Plan collaboration on a turn uses `collaboration_mode: plan` and is planning-only
 5. Unknown YAML keys cause validation errors

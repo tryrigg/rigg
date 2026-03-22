@@ -42,8 +42,8 @@ type CursorSessionResult = {
 }
 
 type SessionExecution = {
-  action: "ask" | "plan" | "run"
   capture: SessionCapture
+  mode: CursorMode
   cleanup: () => void
   interactionHandler?: InteractionHandler | undefined
   interrupting: boolean
@@ -72,9 +72,9 @@ export type CursorStepResult = {
 export type CursorRuntimeSession = {
   close: () => Promise<void>
   run: (options: {
-    action: "ask" | "plan" | "run"
     cwd: string
     interactionHandler?: InteractionHandler | undefined
+    mode: CursorMode
     onEvent?: ((event: CursorProviderEvent) => Promise<void> | void) | undefined
     prompt: string
     signal?: AbortSignal | undefined
@@ -362,9 +362,9 @@ export async function createCursorRuntimeSession(options: CursorRuntimeOptions):
   }
 
   async function run(options_: {
-    action: "ask" | "plan" | "run"
     cwd: string
     interactionHandler?: InteractionHandler | undefined
+    mode: CursorMode
     onEvent?: ((event: CursorProviderEvent) => Promise<void> | void) | undefined
     prompt: string
     signal?: AbortSignal | undefined
@@ -372,14 +372,13 @@ export async function createCursorRuntimeSession(options: CursorRuntimeOptions):
     const capture: SessionCapture = { diagnostics: [], providerEvents: [] }
     let sessionId: string
     try {
-      const mode = modeForAction(options_.action)
       sessionId = parseSessionNew(
         await rpc.request(
           "session/new",
           {
             cwd: options_.cwd,
             mcpServers: [],
-            mode,
+            mode: options_.mode,
           },
           { signal: options_.signal },
         ),
@@ -394,8 +393,8 @@ export async function createCursorRuntimeSession(options: CursorRuntimeOptions):
 
     const resultPromise = createPromiseKit<CursorSessionResult>()
     const execution: SessionExecution = {
-      action: options_.action,
       capture,
+      mode: options_.mode,
       cleanup: () => {},
       interactionHandler: options_.interactionHandler,
       interrupting: false,
@@ -425,9 +424,9 @@ export async function createCursorRuntimeSession(options: CursorRuntimeOptions):
     await captureEvent(
       capture,
       {
-        action: options_.action,
         cwd: options_.cwd,
         kind: "session_started",
+        mode: options_.mode,
         provider: "cursor",
         sessionId,
       },
@@ -638,17 +637,6 @@ function parseInteractionRequest(
       return parseExtensionRequest(method, requestId, params)
     default:
       throw new Error(`unsupported Cursor ACP request: ${method}`)
-  }
-}
-
-function modeForAction(action: "ask" | "plan" | "run"): CursorMode {
-  switch (action) {
-    case "ask":
-      return "ask"
-    case "plan":
-      return "plan"
-    case "run":
-      return "agent"
   }
 }
 

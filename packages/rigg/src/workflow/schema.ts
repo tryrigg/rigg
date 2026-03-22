@@ -33,37 +33,29 @@ const CodexReviewTargetSchema = z.union([
   z.object({ sha: z.string().min(1), type: z.literal("commit") }).strict(),
 ])
 
-const CodexReviewSchema = z.object({ target: CodexReviewTargetSchema }).strict()
-
 const CodexReviewWithSchema = z
   .object({
-    action: z.literal("review"),
+    kind: z.literal("review"),
     model: z.string().min(1).optional(),
-    review: CodexReviewSchema,
+    target: CodexReviewTargetSchema,
   })
   .strict()
 
-const CodexRunWithSchema = z
+const CodexTurnWithSchema = z
   .object({
-    action: z.literal("run"),
+    collaboration_mode: z.enum(["default", "plan"]).optional(),
     effort: EffortSchema.optional(),
+    kind: z.literal("turn"),
     model: z.string().min(1).optional(),
     prompt: z.string().min(1),
   })
   .strict()
 
-const CodexPlanWithSchema = z
-  .object({
-    action: z.literal("plan"),
-    effort: EffortSchema.optional(),
-    model: z.string().min(1).optional(),
-    prompt: z.string().min(1),
-  })
-  .strict()
+const CodexWithSchema = z.discriminatedUnion("kind", [CodexTurnWithSchema, CodexReviewWithSchema])
 
 const CursorWithSchema = z
   .object({
-    action: z.union([z.literal("ask"), z.literal("plan"), z.literal("run")]),
+    mode: z.enum(["agent", "ask", "plan"]).default("agent"),
     model: z.string().min(1).optional(),
     prompt: z.string().min(1),
   })
@@ -101,7 +93,7 @@ export type ShellNode = BaseNode & {
 
 export type CodexNode = BaseNode & {
   type: "codex"
-  with: z.infer<typeof CodexPlanWithSchema> | z.infer<typeof CodexReviewWithSchema> | z.infer<typeof CodexRunWithSchema>
+  with: z.infer<typeof CodexTurnWithSchema> | z.infer<typeof CodexReviewWithSchema>
 }
 
 export type CursorNode = BaseNode & {
@@ -205,7 +197,7 @@ const ShellNodeSchema: z.ZodType<ShellNode> = BaseNodeSchema.extend({
 
 const CodexNodeSchema: z.ZodType<CodexNode> = BaseNodeSchema.extend({
   type: z.literal("codex"),
-  with: z.union([CodexReviewWithSchema, CodexRunWithSchema, CodexPlanWithSchema]),
+  with: CodexWithSchema,
 }).strict()
 
 const CursorNodeSchema: z.ZodType<CursorNode> = BaseNodeSchema.extend({

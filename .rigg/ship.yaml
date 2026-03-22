@@ -27,7 +27,7 @@ steps:
   - id: implement
     type: codex
     with:
-      action: run
+      kind: turn
       model: gpt-5.4
       effort: high
       prompt: |

@@ -364,7 +364,9 @@ describe("cli/state", () => {
         frame_id: "root",
         next: [
           {
-            action: null,
+            codex_collaboration_mode: null,
+            codex_kind: null,
+            cursor_mode: null,
             cwd: null,
             detail: "echo hi",
             frame_id: "root",
@@ -375,9 +377,11 @@ describe("cli/state", () => {
             user_id: "draft_shell",
           },
           {
-            action: "plan",
+            codex_collaboration_mode: "plan",
+            codex_kind: "turn",
+            cursor_mode: null,
             cwd: "/workspace",
-            detail: "codex plan",
+            detail: "codex turn · plan",
             frame_id: "root",
             model: "gpt-5.4",
             node_kind: "codex",
@@ -403,7 +407,9 @@ describe("cli/state", () => {
           frame_id: "root",
           next: [
             {
-              action: null,
+              codex_collaboration_mode: null,
+              codex_kind: null,
+              cursor_mode: null,
               cwd: null,
               detail: "echo hi",
               frame_id: "root",
@@ -414,9 +420,11 @@ describe("cli/state", () => {
               user_id: "draft_shell",
             },
             {
-              action: "plan",
+              codex_collaboration_mode: "plan",
+              codex_kind: "turn",
+              cursor_mode: null,
               cwd: "/workspace",
-              detail: "codex plan",
+              detail: "codex turn · plan",
               frame_id: "root",
               model: "gpt-5.4",
               node_kind: "codex",
@@ -433,7 +441,7 @@ describe("cli/state", () => {
 
     expect(state.completedOutputs["/0"]?.entries.at(-1)).toEqual({
       key: null,
-      text: "auto-continue: Next: draft_shell [cmd], draft_plan [codex] · plan · gpt-5.4",
+      text: "auto-continue: Next: draft_shell [cmd], draft_plan [codex] · turn · plan · gpt-5.4",
       variant: "event",
     })
   })
@@ -477,7 +485,9 @@ describe("cli/state", () => {
         frame_id: "root",
         next: [
           {
-            action: "ask",
+            codex_collaboration_mode: null,
+            codex_kind: null,
+            cursor_mode: "ask",
             cwd: "/workspace",
             detail: "cursor ask",
             frame_id: "root",
@@ -505,7 +515,9 @@ describe("cli/state", () => {
           frame_id: "root",
           next: [
             {
-              action: "ask",
+              codex_collaboration_mode: null,
+              codex_kind: null,
+              cursor_mode: "ask",
               cwd: "/workspace",
               detail: "cursor ask",
               frame_id: "root",
@@ -568,7 +580,9 @@ describe("cli/state", () => {
         frame_id: "root",
         next: [
           {
-            action: null,
+            codex_collaboration_mode: null,
+            codex_kind: null,
+            cursor_mode: null,
             cwd: null,
             detail: "echo hi",
             frame_id: "root",

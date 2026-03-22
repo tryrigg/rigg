@@ -21,37 +21,32 @@ Runs a shell command.
 
 ## codex
 
-Three actions are supported: `run`, `plan`, and `review`.
+Two kinds are supported: `turn` and `review`.
 
-### run
+### turn
 
-Generates or modifies code.
+Normal Codex turns. Set `collaboration_mode: plan` to use Codex's Plan collaboration mode (planning-only, no repo mutations).
 
 ```yaml
 - id: implement
   type: codex
   with:
-    action: run
+    kind: turn
     prompt: Add input validation.
     model: gpt-5.4
 ```
-
-`steps.<id>.result` is always the final plain-text response.
-
-### plan
-
-Uses Codex's built-in Plan collaboration mode to gather context, ask clarifying questions when needed, and return a plan without mutating repo-tracked files.
 
 ```yaml
 - id: draft_plan
   type: codex
   with:
-    action: plan
+    kind: turn
+    collaboration_mode: plan
     prompt: Clarify the scope and produce an implementation plan.
     model: gpt-5.4
 ```
 
-`steps.<id>.result` is the final plain-text planning response.
+`steps.<id>.result` is always the final plain-text response for turns.
 
 ### review
 
@@ -61,11 +56,10 @@ Scans diffs and returns review findings.
 - id: review
   type: codex
   with:
-    action: review
+    kind: review
     model: gpt-5.4
-    review:
-      target:
-        type: uncommitted # uncommitted | base | commit
+    target:
+      type: uncommitted # uncommitted | base | commit
 ```
 
 Target variants:
@@ -101,7 +95,7 @@ Runs Cursor Agent through ACP and returns the final plain-text assistant respons
 - id: triage
   type: cursor
   with:
-    action: run # run | ask | plan
+    mode: agent # agent | ask | plan (default: agent)
     model: composer-2
     prompt: Summarize the diff.
 ```
@@ -122,7 +116,6 @@ Writes content to a file.
 
 ## Result access
 
-- `codex run`: `steps.draft.result`
-- `codex plan`: `steps.draft_plan.result`
-- `codex review`: `steps.review.result.findings`
+- `codex` turns: `steps.draft.result`
+- `codex` review: `steps.review.result.findings`
 - `cursor`: `steps.triage.result`

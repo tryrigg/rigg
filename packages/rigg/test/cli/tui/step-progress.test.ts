@@ -31,9 +31,17 @@ function nodeSnapshot(overrides: Partial<NodeSnapshot> = {}): NodeSnapshot {
 
 function frontierNode(overrides: Partial<FrontierNode> = {}): FrontierNode {
   return {
+    codex_collaboration_mode: null,
+    codex_kind: null,
+    cursor_mode: null,
+    cwd: null,
+    detail: null,
     frame_id: "root",
+    model: null,
     node_kind: "shell",
     node_path: "/0",
+    prompt_preview: null,
+    user_id: null,
     ...overrides,
   }
 }
@@ -208,7 +216,7 @@ describe("summarize", () => {
   test("counts cursor steps as action nodes", () => {
     const summary = summarize(
       workflow([
-        { id: "ask", type: "cursor", with: { action: "ask", prompt: "Question?" } },
+        { id: "ask", type: "cursor", with: { mode: "ask", prompt: "Question?" } },
         { id: "cmd", type: "shell", with: { command: "echo done" } },
       ]),
       snapshot({

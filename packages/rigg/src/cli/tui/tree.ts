@@ -120,17 +120,28 @@ export function extractDetail(step: WorkflowStep): string | undefined {
       return `$ ${trimmed}`
     }
     case "codex": {
-      let detail = step.with.action
+      if (step.with.kind === "review") {
+        let detail = "review"
+        if (step.with.model) {
+          detail += ` · ${step.with.model}`
+        }
+        return detail
+      }
+      let detail = "turn"
+      if (step.with.collaboration_mode === "plan") {
+        detail += " · plan"
+      }
       if (step.with.model) {
         detail += ` · ${step.with.model}`
       }
-      if ("effort" in step.with && step.with.effort) {
+      if (step.with.effort) {
         detail += ` · ${step.with.effort}`
       }
       return detail
     }
     case "cursor": {
-      let detail = step.with.action
+      const mode = step.with.mode ?? "agent"
+      let detail = mode
       if (step.with.model) {
         detail += ` · ${step.with.model}`
       }

@@ -25,38 +25,28 @@
 | `with.command` | template                   | Yes      | —       |
 | `with.result`  | `none` \| `text` \| `json` | No       | `text`  |
 
-## type: codex (action: run)
+## type: codex (`kind: turn`)
 
-| Field         | Type                                   | Required |
-| ------------- | -------------------------------------- | -------- |
-| `with.action` | `run`                                  | Yes      |
-| `with.prompt` | template                               | Yes      |
-| `with.model`  | string                                 | No       |
-| `with.effort` | `low` \| `medium` \| `high` \| `xhigh` | No       |
+| Field                     | Type                                   | Required |
+| ------------------------- | -------------------------------------- | -------- |
+| `with.kind`               | `turn`                                 | Yes      |
+| `with.prompt`             | template                               | Yes      |
+| `with.collaboration_mode` | `default` \| `plan`                    | No       |
+| `with.model`              | string                                 | No       |
+| `with.effort`             | `low` \| `medium` \| `high` \| `xhigh` | No       |
 
-`codex run` returns plain text. `with.effort` maps to Codex reasoning effort and defaults to `medium`.
+`kind: turn` returns plain text. `collaboration_mode: plan` uses Codex's built-in Plan collaboration mode and is planning-only.
+`with.effort` maps to Codex reasoning effort and defaults to `medium`.
 
-## type: codex (action: plan)
+## type: codex (`kind: review`)
 
-| Field         | Type                                   | Required |
-| ------------- | -------------------------------------- | -------- |
-| `with.action` | `plan`                                 | Yes      |
-| `with.prompt` | template                               | Yes      |
-| `with.model`  | string                                 | No       |
-| `with.effort` | `low` \| `medium` \| `high` \| `xhigh` | No       |
-
-`codex plan` returns plain text, uses Codex's built-in Plan collaboration mode, and lets `with.effort` override Codex reasoning effort. The default is `medium`.
-Plan steps are planning-only and must not mutate repo-tracked files.
-
-## type: codex (action: review)
-
-| Field                       | Type                                | Required  |
-| --------------------------- | ----------------------------------- | --------- |
-| `with.action`               | `review`                            | Yes       |
-| `with.model`                | string                              | No        |
-| `with.review.target.type`   | `uncommitted` \| `base` \| `commit` | Yes       |
-| `with.review.target.branch` | template                            | if base   |
-| `with.review.target.sha`    | template                            | if commit |
+| Field                | Type                                | Required  |
+| -------------------- | ----------------------------------- | --------- |
+| `with.kind`          | `review`                            | Yes       |
+| `with.model`         | string                              | No        |
+| `with.target.type`   | `uncommitted` \| `base` \| `commit` | Yes       |
+| `with.target.branch` | template                            | if base   |
+| `with.target.sha`    | template                            | if commit |
 
 Built-in review result shape:
 
@@ -75,6 +65,16 @@ overall_correctness: string
 overall_explanation: string
 overall_confidence_score: number
 ```
+
+## type: cursor
+
+| Field         | Type                       | Required              |
+| ------------- | -------------------------- | --------------------- |
+| `with.mode`   | `agent` \| `ask` \| `plan` | No (default: `agent`) |
+| `with.prompt` | template                   | Yes                   |
+| `with.model`  | string                     | No                    |
+
+`cursor` communicates with Cursor Agent through ACP and returns the final plain-text assistant response.
 
 ## type: write_file
 

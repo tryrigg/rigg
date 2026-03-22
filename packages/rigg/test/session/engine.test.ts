@@ -1012,7 +1012,7 @@ describe("session/engine", () => {
                 id: "needs_approval",
                 type: "codex",
                 with: {
-                  action: "run",
+                  kind: "turn",
                   prompt: "needs approval",
                 },
               },
@@ -1884,7 +1884,7 @@ describe("session/engine", () => {
                       id: "never_run_codex",
                       type: "codex",
                       with: {
-                        action: "run",
+                        kind: "turn",
                         prompt: "Should never run",
                       },
                     },
@@ -1955,7 +1955,7 @@ describe("session/engine", () => {
               },
               type: "codex",
               with: {
-                action: "run",
+                kind: "turn",
                 prompt: "Do the work",
               },
             },
@@ -2071,7 +2071,7 @@ describe("session/engine", () => {
               id: "agent",
               type: "codex",
               with: {
-                action: "run",
+                kind: "turn",
                 prompt: "Do the work",
               },
             },
@@ -2173,7 +2173,7 @@ describe("session/engine", () => {
                       id: "left_agent",
                       type: "codex",
                       with: {
-                        action: "run",
+                        kind: "turn",
                         prompt: "left",
                       },
                     },
@@ -2186,7 +2186,7 @@ describe("session/engine", () => {
                       id: "right_agent",
                       type: "codex",
                       with: {
-                        action: "run",
+                        kind: "turn",
                         prompt: "right",
                       },
                     },
@@ -2244,7 +2244,7 @@ describe("session/engine", () => {
                       id: "left_agent",
                       type: "codex",
                       with: {
-                        action: "run",
+                        kind: "turn",
                         prompt: "left",
                       },
                     },
@@ -2548,7 +2548,7 @@ describe("session/engine", () => {
               id: "review",
               type: "codex",
               with: {
-                action: "run",
+                kind: "turn",
                 model: "gpt-5.4",
                 prompt: "Review branch ${{ env.BRANCH }}",
               },
@@ -2563,7 +2563,9 @@ describe("session/engine", () => {
         throw new Error("missing barrier")
       }
       expect(firstBarrier.barrier.next[0]).toMatchObject({
-        action: "run",
+        codex_collaboration_mode: "default",
+        codex_kind: "turn",
+        cursor_mode: null,
         cwd: root,
         model: "gpt-5.4",
         prompt_preview: "Review branch main",

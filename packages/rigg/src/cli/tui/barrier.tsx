@@ -1,18 +1,12 @@
 import { Box, Text, useInput } from "ink"
 
 import type { FrontierNode, StepBarrier } from "../../session/schema"
+import { frontierLabel } from "../state"
 import { matchesShortcut } from "./input"
 import { statusSymbol } from "./symbols"
 
 function formatFrontierLabel(node: FrontierNode): string {
-  const parts: string[] = [node.user_id ?? node.node_path, `[${node.node_kind}]`]
-  if (node.action) {
-    parts.push(node.action)
-  }
-  if (node.model) {
-    parts.push(node.model)
-  }
-  return parts.join(" · ")
+  return frontierLabel(node)
 }
 
 export function Barrier({

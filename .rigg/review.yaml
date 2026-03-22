@@ -14,12 +14,11 @@ steps:
       - id: review
         type: codex
         with:
-          action: review
+          kind: review
           model: gpt-5.4
-          review:
-            target:
-              type: base
-              branch: main
+          target:
+            type: base
+            branch: main
 
       - id: triage
         type: shell
@@ -140,7 +139,7 @@ steps:
         if: ${{ len(steps.triage.result.findings) > 0 }}
         type: codex
         with:
-          action: run
+          kind: turn
           model: gpt-5.4
           prompt: |
             You are a senior engineer. Below are triaged code review findings for the current branch
@@ -221,7 +220,7 @@ steps:
   - id: report
     type: cursor
     with:
-      action: run
+      mode: agent
       model: composer-2
       prompt: |
         You are a senior engineer summarizing a code review remediation cycle.

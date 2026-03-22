@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test"
 import { WorkflowDocumentSchema } from "../../src/workflow/schema"
 
 describe("workflow/schema", () => {
-  test("accepts codex plan steps in the workflow schema", () => {
+  test("accepts codex plan collaboration turns in the workflow schema", () => {
     expect(
       WorkflowDocumentSchema.parse({
         id: "plan-step",
@@ -12,7 +12,8 @@ describe("workflow/schema", () => {
             id: "draft_plan",
             type: "codex",
             with: {
-              action: "plan",
+              kind: "turn",
+              collaboration_mode: "plan",
               prompt: "Clarify requirements and produce a plan.",
             },
           },
@@ -25,7 +26,8 @@ describe("workflow/schema", () => {
           id: "draft_plan",
           type: "codex",
           with: {
-            action: "plan",
+            kind: "turn",
+            collaboration_mode: "plan",
             prompt: "Clarify requirements and produce a plan.",
           },
         },
@@ -42,7 +44,7 @@ describe("workflow/schema", () => {
             id: "implement",
             type: "codex",
             with: {
-              action: "run",
+              kind: "turn",
               effort: "high",
               prompt: "Implement the feature.",
             },
@@ -51,7 +53,8 @@ describe("workflow/schema", () => {
             id: "draft_plan",
             type: "codex",
             with: {
-              action: "plan",
+              kind: "turn",
+              collaboration_mode: "plan",
               effort: "low",
               prompt: "Produce a plan.",
             },
@@ -65,7 +68,7 @@ describe("workflow/schema", () => {
           id: "implement",
           type: "codex",
           with: {
-            action: "run",
+            kind: "turn",
             effort: "high",
             prompt: "Implement the feature.",
           },
@@ -74,7 +77,8 @@ describe("workflow/schema", () => {
           id: "draft_plan",
           type: "codex",
           with: {
-            action: "plan",
+            kind: "turn",
+            collaboration_mode: "plan",
             effort: "low",
             prompt: "Produce a plan.",
           },
@@ -83,7 +87,7 @@ describe("workflow/schema", () => {
     })
   })
 
-  test("accepts cursor action steps", () => {
+  test("accepts cursor mode steps", () => {
     expect(
       WorkflowDocumentSchema.parse({
         id: "cursor-step",
@@ -92,7 +96,7 @@ describe("workflow/schema", () => {
             id: "draft_plan",
             type: "cursor",
             with: {
-              action: "plan",
+              mode: "plan",
               prompt: "Clarify requirements and produce a plan.",
             },
           },
@@ -100,7 +104,7 @@ describe("workflow/schema", () => {
             id: "ask_followup",
             type: "cursor",
             with: {
-              action: "ask",
+              mode: "ask",
               prompt: "Ask a concise question.",
             },
           },
@@ -113,7 +117,7 @@ describe("workflow/schema", () => {
           id: "draft_plan",
           type: "cursor",
           with: {
-            action: "plan",
+            mode: "plan",
             prompt: "Clarify requirements and produce a plan.",
           },
         },
@@ -121,7 +125,7 @@ describe("workflow/schema", () => {
           id: "ask_followup",
           type: "cursor",
           with: {
-            action: "ask",
+            mode: "ask",
             prompt: "Ask a concise question.",
           },
         },
@@ -129,7 +133,7 @@ describe("workflow/schema", () => {
     })
   })
 
-  test("rejects provider-specific invalid actions", () => {
+  test("rejects provider-specific invalid modes and unknown keys", () => {
     expect(() =>
       WorkflowDocumentSchema.parse({
         id: "invalid-actions",
@@ -137,7 +141,7 @@ describe("workflow/schema", () => {
           {
             type: "cursor",
             with: {
-              action: "review",
+              mode: "review",
               prompt: "nope",
             },
           },
@@ -147,12 +151,12 @@ describe("workflow/schema", () => {
 
     expect(() =>
       WorkflowDocumentSchema.parse({
-        id: "invalid-codex-action",
+        id: "invalid-codex-kind",
         steps: [
           {
             type: "codex",
             with: {
-              action: "ask",
+              kind: "ask",
               prompt: "nope",
             },
           },
@@ -167,7 +171,7 @@ describe("workflow/schema", () => {
           {
             type: "cursor",
             with: {
-              action: "run",
+              mode: "agent",
               prompt: "nope",
               result: "json",
             },

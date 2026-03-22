@@ -95,7 +95,7 @@ steps:
     }
   })
 
-  test("rejects unsupported codex fields and invalid actions", () => {
+  test("rejects unsupported codex fields and invalid kinds", () => {
     const invalidField = decode(
       {
         id: "check",
@@ -103,7 +103,7 @@ steps:
           {
             type: "codex",
             with: {
-              action: "run",
+              kind: "turn",
               invalid_field: "draft",
               prompt: "hello",
             },
@@ -112,14 +112,14 @@ steps:
       },
       "/workspace/.rigg/check.yaml",
     )
-    const invalidAction = decode(
+    const invalidKind = decode(
       {
         id: "check",
         steps: [
           {
             type: "codex",
             with: {
-              action: "launch",
+              kind: "launch",
               prompt: "hello",
             },
           },
@@ -127,19 +127,17 @@ steps:
       },
       "/workspace/.rigg/check.yaml",
     )
-    const invalidPlanCombination = decode(
+    const invalidTurnCombination = decode(
       {
         id: "check",
         steps: [
           {
             type: "codex",
             with: {
-              action: "plan",
+              kind: "turn",
               prompt: "hello",
-              review: {
-                target: {
-                  type: "uncommitted",
-                },
+              target: {
+                type: "uncommitted",
               },
             },
           },
@@ -154,7 +152,7 @@ steps:
           {
             type: "codex",
             with: {
-              action: "run",
+              kind: "turn",
               effort: "minimal",
               prompt: "hello",
             },
@@ -170,12 +168,10 @@ steps:
           {
             type: "codex",
             with: {
-              action: "review",
               effort: "high",
-              review: {
-                target: {
-                  type: "uncommitted",
-                },
+              kind: "review",
+              target: {
+                type: "uncommitted",
               },
             },
           },
@@ -185,19 +181,19 @@ steps:
     )
 
     expect(invalidField.kind).toBe("invalid_workflow")
-    expect(invalidAction.kind).toBe("invalid_workflow")
-    expect(invalidPlanCombination.kind).toBe("invalid_workflow")
+    expect(invalidKind.kind).toBe("invalid_workflow")
+    expect(invalidTurnCombination.kind).toBe("invalid_workflow")
     expect(invalidEffort.kind).toBe("invalid_workflow")
     expect(reviewEffort.kind).toBe("invalid_workflow")
 
     if (invalidField.kind === "invalid_workflow") {
       expect(invalidField.error.message).toContain("Workflow schema validation failed.")
     }
-    if (invalidAction.kind === "invalid_workflow") {
-      expect(invalidAction.error.message).toContain("Workflow schema validation failed.")
+    if (invalidKind.kind === "invalid_workflow") {
+      expect(invalidKind.error.message).toContain("Workflow schema validation failed.")
     }
-    if (invalidPlanCombination.kind === "invalid_workflow") {
-      expect(invalidPlanCombination.error.message).toContain("Workflow schema validation failed.")
+    if (invalidTurnCombination.kind === "invalid_workflow") {
+      expect(invalidTurnCombination.error.message).toContain("Workflow schema validation failed.")
     }
     if (invalidEffort.kind === "invalid_workflow") {
       expect(invalidEffort.error.message).toContain("Workflow schema validation failed.")

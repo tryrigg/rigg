@@ -265,6 +265,20 @@ nav .nav-links .gh-link svg {
   margin-top: var(--space-xl);
 }
 
+.hero-demo {
+  margin-top: var(--space-xl);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--code-bg);
+}
+
+.hero-demo video {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 .copy-btn {
   display: inline-flex;
   align-items: center;
@@ -714,7 +728,8 @@ footer .footer-links {
 .hero h1,
 .hero .subtitle,
 .hero-install,
-.hero-agents {
+.hero-agents,
+.hero-demo {
   animation: fadeIn 0.4s ease-out both;
 }
 
@@ -732,6 +747,9 @@ footer .footer-links {
 }
 .hero-agents {
   animation-delay: 0.2s;
+}
+.hero-demo {
+  animation-delay: 0.25s;
 }
 
 @media (max-width: 768px) {

@@ -5,7 +5,24 @@ import { parseJson } from "../util/json"
 import { EffortSchema, type Effort } from "../workflow/effort"
 import type { CodexProviderEvent } from "./event"
 import { inferApprovalDecisionIntent, type InteractionRequest } from "../session/interaction"
-import type { CodexReviewResult } from "./review"
+export type CodexReviewResult = {
+  findings: Array<{
+    body: string
+    code_location: {
+      absolute_file_path: string
+      line_range: {
+        end: number
+        start: number
+      }
+    }
+    confidence_score: number
+    priority?: number | null | undefined
+    title: string
+  }>
+  overall_confidence_score: number
+  overall_correctness: string
+  overall_explanation: string
+}
 
 const JsonObjectSchema = z.record(z.string(), z.unknown())
 const NullableStringSchema = z.string().nullable().optional()

@@ -5,6 +5,7 @@ import { parseYaml } from "../workflow/parse"
 import { checkWorkspace } from "../workflow/check"
 import { discover } from "./find"
 import { readWorkspace } from "./read"
+import type { WorkflowDocument } from "../workflow/schema"
 import type { DecodedWorkflowFile, WorkflowProject } from "./model"
 
 export type LoadProjectResult =
@@ -67,4 +68,8 @@ export async function loadProject(startDir: string): Promise<LoadProjectResult> 
 
 export function listWorkflowIds(project: WorkflowProject): string[] {
   return project.files.map((file) => file.workflow.id).sort()
+}
+
+export function workflowById(project: WorkflowProject, workflowId: string): WorkflowDocument | undefined {
+  return project.files.find((file) => file.workflow.id === workflowId)?.workflow
 }

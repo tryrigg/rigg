@@ -101,18 +101,7 @@ export function prepareStep(
     case "write_file":
       return {
         env,
-        frontier: [
-          createFrontierNode(
-            step,
-            nodePath,
-            scope.frameId,
-            context.env,
-            context.inputs,
-            context.run,
-            context.steps,
-            cwd,
-          ),
-        ],
+        frontier: [createFrontierNode(step, nodePath, scope.frameId, context, cwd)],
         kind: "action",
         step,
       }

@@ -1,10 +1,10 @@
 import type { CursorNode } from "../../workflow/schema"
-import { renderString } from "../../workflow/expr"
 import { createCursorRuntimeSession } from "../../cursor/runtime"
 import { isAbortError } from "../../util/error"
 import type { RenderContext } from "../render"
-import { interrupt, stepFailed } from "../error"
+import { interrupt } from "../error"
 import type { ActionStepOutput, ProviderStepOptions } from "./shell"
+import { applyTemplate } from "./template"
 
 export async function runCursorStep(
   step: CursorNode,
@@ -31,19 +31,11 @@ export async function runCursorStep(
       action: step.with.action,
       cwd: options.cwd,
       interactionHandler: options.interactionHandler,
-      onEvent: (event) => options.onProviderEvent?.(event),
+      onEvent: options.onProviderEvent,
       prompt: applyTemplate(step.with.prompt, context),
       signal: options.signal,
     })
   } finally {
     await session.close()
-  }
-}
-
-function applyTemplate(template: string, context: RenderContext): string {
-  try {
-    return renderString(template, context)
-  } catch (error) {
-    throw stepFailed(error)
   }
 }

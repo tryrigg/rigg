@@ -1,10 +1,10 @@
 import type { CodexNode } from "../../workflow/schema"
-import { renderString } from "../../workflow/expr"
 import { createCodexRuntimeSession } from "../../codex/runtime"
 import { isAbortError } from "../../util/error"
 import type { RenderContext } from "../render"
-import { stepFailed, interrupt } from "../error"
+import { interrupt } from "../error"
 import type { ActionStepOutput, ProviderStepOptions } from "./shell"
+import { applyTemplate } from "./template"
 
 export async function runCodexStep(
   step: CodexNode,
@@ -18,14 +18,6 @@ export async function runCodexStep(
       return await runCodexPromptStep(step.with, context, options)
     case "run":
       return await runCodexPromptStep(step.with, context, options)
-  }
-}
-
-function applyTemplate(template: string, context: RenderContext): string {
-  try {
-    return renderString(template, context)
-  } catch (error) {
-    throw stepFailed(error)
   }
 }
 

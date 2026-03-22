@@ -2,35 +2,10 @@ import { callFrame, loopScope, childPath, loopFrame, parallelFrame, type FrameId
 import type { WorkflowProject } from "../project"
 import type { ActionNode, ParallelNode, WorkflowStep } from "../workflow/schema"
 import { preview } from "./node"
-import type { RenderContext, StepBinding } from "./render"
+import type { RenderContext } from "./render"
 import type { FrontierNode } from "./schema"
 import { callEnv, parseCallInputs } from "./call"
-import { createRenderContext, prepareStep, renderStringSafely, type PlannerScope, type PreparedStep } from "./prep"
-
-type ExecutableFrontierPlan = {
-  nodes: FrontierNode[]
-}
-
-export function frontierForPreparedStep(
-  prepared: PreparedStep,
-  _nodePath: NodePath,
-  _scope: PlannerScope,
-  _cwd: string,
-): FrontierNode[] {
-  switch (prepared.kind) {
-    case "action":
-      return prepared.frontier
-    case "parallel":
-      return prepared.frontier
-    case "workflow":
-      return prepared.frontier
-    case "branch":
-    case "group":
-    case "loop":
-    case "skipped":
-      return prepared.frontier
-  }
-}
+import { createRenderContext, prepareStep, renderStringSafely, type PlannerScope } from "./prep"
 
 export function planParallelFrontier(
   step: ParallelNode,
@@ -39,24 +14,21 @@ export function planParallelFrontier(
   context: RenderContext,
   cwd: string,
   project?: WorkflowProject,
-): ExecutableFrontierPlan[] {
-  return step.branches.map((branch, index) => {
-    const branchFrameId = parallelFrame(scope.frameId, nodePath, index)
-    return {
-      nodes: planBlockFrontier(
-        branch.steps,
-        `${nodePath}/${index}`,
-        {
-          activeWorkflowIds: scope.activeWorkflowIds,
-          frameId: branchFrameId,
-        },
-        context,
-        cwd,
-        project,
-        `branch=${branch.id}`,
-      ),
-    }
-  })
+): { nodes: FrontierNode[] }[] {
+  return step.branches.map((branch, index) => ({
+    nodes: planBlockFrontier(
+      branch.steps,
+      `${nodePath}/${index}`,
+      {
+        activeWorkflowIds: scope.activeWorkflowIds,
+        frameId: parallelFrame(scope.frameId, nodePath, index),
+      },
+      context,
+      cwd,
+      project,
+      `branch=${branch.id}`,
+    ),
+  }))
 }
 
 export function planBlockFrontier(
@@ -111,10 +83,7 @@ export function planStepFrontier(
           prepared.step,
           nodePath,
           scope.frameId,
-          prepared.env,
-          context.inputs,
-          context.run,
-          context.steps,
+          createRenderContext(prepared.env, context.inputs, context.run, context.steps),
           cwd,
           detailOverride,
         ),
@@ -206,9 +175,7 @@ export function planStepFrontier(
         cwd,
         project,
       )
-      return detailOverride === undefined
-        ? frontierPlans.flatMap((plan) => plan.nodes)
-        : frontierPlans.flatMap((plan) => plan.nodes)
+      return frontierPlans.flatMap((plan) => plan.nodes)
     }
   }
 }
@@ -217,15 +184,10 @@ export function createFrontierNode(
   step: ActionNode,
   nodePath: NodePath,
   frameId: FrameId,
-  env: Record<string, string | undefined>,
-  inputs: Record<string, unknown>,
-  run: Record<string, unknown>,
-  steps: Record<string, StepBinding>,
+  context: RenderContext,
   cwd: string,
   detailOverride?: string,
 ): FrontierNode {
-  const context = createRenderContext(env, inputs, run, steps)
-
   return {
     action: step.type === "codex" || step.type === "cursor" ? step.with.action : null,
     cwd: step.type === "codex" || step.type === "cursor" ? cwd : null,
@@ -260,32 +222,18 @@ export function summarizeFrontierDetail(step: ActionNode): string | null {
   return "codex run"
 }
 
-export function frontierPromptPreview(step: ActionNode, context: RenderContext): string | null {
+function frontierPromptPreview(step: ActionNode, context: RenderContext): string | null {
   if (step.type === "cursor") {
     return preview(renderStringSafely(step.with.prompt, context))
   }
-  if (step.type === "codex" && step.with.action !== "review") {
-    return preview(renderStringSafely(step.with.prompt, context))
+  if (step.type !== "codex") {
+    return null
   }
-  if (step.type === "codex" && step.with.action === "review") {
-    return summarizeReviewPreview(step, context)
+  if (step.with.action === "review") {
+    const target = step.with.review.target
+    if (target.type === "uncommitted") return "review uncommitted changes"
+    if (target.type === "base") return `review base ${renderStringSafely(target.branch, context)}`
+    return `review commit ${renderStringSafely(target.sha, context)}`
   }
-
-  return null
-}
-
-export function summarizeReviewPreview(step: Extract<ActionNode, { type: "codex" }>, context: RenderContext): string {
-  if (step.with.action !== "review") {
-    return "codex review"
-  }
-
-  const target = step.with.review.target
-  if (target.type === "uncommitted") {
-    return "review uncommitted changes"
-  }
-  if (target.type === "base") {
-    return `review base ${renderStringSafely(target.branch, context)}`
-  }
-
-  return `review commit ${renderStringSafely(target.sha, context)}`
+  return preview(renderStringSafely(step.with.prompt, context))
 }

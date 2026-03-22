@@ -1,5 +1,6 @@
 import { onAbort } from "../util/abort"
 import { isAbortError, normalizeError } from "../util/error"
+import { createPromiseKit } from "../util/promise"
 import { RIGG_VERSION } from "../version"
 import { DEFAULT_EFFORT, type Effort } from "../workflow/effort"
 import type { CodexProviderEvent } from "./event"
@@ -1086,25 +1087,6 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     review,
     run,
   }
-}
-
-function createPromiseKit<T>(): {
-  promise: Promise<T>
-  reject: (error: Error) => void
-  resolve: (value: T) => void
-} {
-  let reject: ((error: Error) => void) | undefined
-  let resolve: ((value: T) => void) | undefined
-  const promise = new Promise<T>((innerResolve, innerReject) => {
-    resolve = innerResolve
-    reject = (error) => innerReject(error)
-  })
-
-  if (resolve === undefined || reject === undefined) {
-    throw new Error("failed to initialize promise kit")
-  }
-
-  return { promise, reject, resolve }
 }
 
 function assertResolutionKind<TKind extends InteractionRequest["kind"]>(

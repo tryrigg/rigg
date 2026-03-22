@@ -1,10 +1,9 @@
-import { renderString } from "../../workflow/expr"
 import type { ActionNode } from "../../workflow/schema"
 import type { RenderContext } from "../render"
-import { stepFailed } from "../error"
 import { runCodexStep } from "./codex"
 import { runCursorStep } from "./cursor"
 import { runShellStep, type ActionStepOutput, type ProviderStepOptions } from "./shell"
+import { applyTemplate } from "./template"
 import { runWriteFileStep } from "./write-file"
 
 export type {
@@ -45,13 +44,5 @@ export async function runActionStep(
       return await runCodexStep(step, context, options)
     case "cursor":
       return await runCursorStep(step, context, options)
-  }
-}
-
-function applyTemplate(template: string, context: RenderContext): string {
-  try {
-    return renderString(template, context)
-  } catch (error) {
-    throw stepFailed(error)
   }
 }

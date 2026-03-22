@@ -1,7 +1,8 @@
-import { spawn, spawnSync } from "node:child_process"
-import readline from "node:readline"
-
 import { filterEnv } from "../util/env"
+import { readLines, type LineSource } from "../util/line"
+import { normalizeError } from "../util/error"
+import { createPromiseKit } from "../util/promise"
+import { spawnSpec } from "../util/spawn"
 import { upgradeMessage, isSupported, parseVersion } from "./version"
 
 const STDERR_BENIGN_PATTERNS = [
@@ -19,27 +20,18 @@ export type CodexAppServerProcess = {
   close: () => Promise<void>
   exited: Promise<{
     code: number | null
+    error?: Error | undefined
     expected: boolean
     signal: NodeJS.Signals | null
   }>
-  stderr: readline.Interface
-  stdout: readline.Interface
+  stderr: LineSource
+  stdout: LineSource
   write: (message: unknown) => void
 }
 
 export function assertVersion(options: CodexProcessOptions): void {
-  const result = spawnSync(options.binaryPath ?? "codex", ["--version"], {
-    cwd: options.cwd,
-    encoding: "utf8",
-    env: filterEnv(options.env),
-    shell: process.platform === "win32",
-  })
-
-  if (result.error !== undefined) {
-    throw result.error
-  }
-
-  const combinedOutput = `${result.stdout ?? ""}\n${result.stderr ?? ""}`
+  const result = runVersion(options.binaryPath ?? "codex", options)
+  const combinedOutput = `${result.stdout}\n${result.stderr}`
   const version = parseVersion(combinedOutput)
   if (result.status !== 0) {
     throw new Error(`Failed to read Codex CLI version: ${combinedOutput.trim()}`)
@@ -49,34 +41,90 @@ export function assertVersion(options: CodexProcessOptions): void {
   }
 }
 
-export function startServer(options: CodexProcessOptions): CodexAppServerProcess {
-  const child = spawn(options.binaryPath ?? "codex", ["app-server"], {
-    cwd: options.cwd,
-    env: filterEnv(options.env),
-    shell: process.platform === "win32",
-    stdio: "pipe",
-  })
+function runVersion(
+  command: string,
+  options: CodexProcessOptions,
+): {
+  status: number
+  stderr: string
+  stdout: string
+} {
+  const env = filterEnv(options.env)
+  const spec = spawnSpec(command, ["--version"], { cwd: options.cwd, env })
+  let result: ReturnType<typeof Bun.spawnSync>
 
-  if (child.stdin === null || child.stdout === null || child.stderr === null) {
-    throw new Error("failed to start codex app-server with piped stdio")
+  try {
+    result = Bun.spawnSync({
+      ...spec,
+      cwd: options.cwd,
+      env,
+      stderr: "pipe",
+      stdout: "pipe",
+    })
+  } catch (error) {
+    throw new Error(`failed to run ${command} --version`, {
+      cause: normalizeError(error),
+    })
   }
 
-  const stdout = readline.createInterface({ input: child.stdout, crlfDelay: Number.POSITIVE_INFINITY })
-  const stderr = readline.createInterface({ input: child.stderr, crlfDelay: Number.POSITIVE_INFINITY })
+  return {
+    status: result.exitCode,
+    stderr: result.stderr === undefined ? "" : result.stderr.toString("utf8"),
+    stdout: result.stdout === undefined ? "" : result.stdout.toString("utf8"),
+  }
+}
+
+export function startServer(options: CodexProcessOptions): CodexAppServerProcess {
+  const env = filterEnv(options.env)
+  const spec = spawnSpec(options.binaryPath ?? "codex", ["app-server"], {
+    cwd: options.cwd,
+    env,
+  })
   let closePromise: Promise<void> | undefined
   let closing = false
-
-  const exited = new Promise<{
+  const stdoutReady = createPromiseKit<LineSource>()
+  const stderrReady = createPromiseKit<LineSource>()
+  const exit = createPromiseKit<{
     code: number | null
+    error?: Error | undefined
     expected: boolean
     signal: NodeJS.Signals | null
-  }>((resolve) => {
-    child.once("exit", (code, signal) => {
-      stdout.close()
-      stderr.close()
-      resolve({ code, expected: closing, signal })
-    })
+  }>()
+  const exited = exit.promise
+
+  const child = Bun.spawn({
+    ...spec,
+    cwd: options.cwd,
+    env,
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+    onExit: (proc, code) => {
+      void Promise.all([stdoutReady.promise, stderrReady.promise])
+        .then(([stdout, stderr]) => Promise.all([stdout.done, stderr.done]))
+        .then(([stdoutError, stderrError]) => {
+          exit.resolve({
+            code,
+            error: stdoutError ?? stderrError,
+            expected: closing,
+            signal: proc.signalCode,
+          })
+        })
+        .catch((error) => {
+          exit.resolve({
+            code,
+            error: normalizeError(error),
+            expected: closing,
+            signal: proc.signalCode,
+          })
+        })
+    },
   })
+
+  const stdout = readLines(child.stdout)
+  const stderr = readLines(child.stderr)
+  stdoutReady.resolve(stdout)
+  stderrReady.resolve(stderr)
 
   return {
     close: async () => {
@@ -87,8 +135,8 @@ export function startServer(options: CodexProcessOptions): CodexAppServerProcess
 
       closing = true
       closePromise = (async () => {
-        if (!child.stdin.destroyed && !child.stdin.writableEnded) {
-          child.stdin.end()
+        if (child.exitCode === null) {
+          await child.stdin.end()
         }
 
         if (child.exitCode !== null) {

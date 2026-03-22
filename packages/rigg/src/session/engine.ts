@@ -23,7 +23,6 @@ import type {
   WorkflowNode,
   WorkflowStep,
 } from "../workflow/schema"
-import { v7 as uuidv7 } from "uuid"
 import { runActionStep, type ActionStepOutput } from "./step"
 import { createControlBroker, resolveInteraction, waitForBarrier, type ControlBroker } from "./barrier"
 import {
@@ -102,7 +101,7 @@ export async function executeWorkflow(options: {
   signal?: AbortSignal | undefined
   workflow: WorkflowDocument
 }): Promise<RunSnapshot> {
-  const runId = uuidv7()
+  const runId = Bun.randomUUIDv7()
   const startedAt = timestampNow()
   const runState = initRunState(runId, options.workflow.id, startedAt)
   const resolvedRunActionStep = options.internals?.runActionStep ?? runActionStep

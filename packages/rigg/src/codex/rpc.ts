@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto"
-
 import { onAbort } from "../util/abort"
 import { createAbortError, normalizeError } from "../util/error"
 import { isJsonObject } from "../util/json"
@@ -64,11 +62,15 @@ export function createRpcClient(process: CodexAppServerProcess): CodexRpcClient 
   function start(nextHandlers: RpcHandlers): void {
     handlers = nextHandlers
 
-    process.stdout.on("line", (line) => {
+    process.stdout.onLine((line) => {
       void handleStdoutLine(line)
     })
     void process.exited.then((exit) => {
       if (exit.expected) {
+        return
+      }
+      if (exit.error !== undefined) {
+        void reportFatal(exit.error)
         return
       }
       void reportFatal(
@@ -103,7 +105,7 @@ export function createRpcClient(process: CodexAppServerProcess): CodexRpcClient 
       throw new Error("codex app-server RPC client is closed")
     }
 
-    const id = randomUUID()
+    const id = Bun.randomUUIDv7()
     const timeoutMs = options.timeoutMs ?? 30_000
     const message = params === undefined ? { id, method } : { id, method, params }
     return new Promise<unknown>((resolve, reject) => {

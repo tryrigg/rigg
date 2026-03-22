@@ -393,7 +393,7 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     await completeInterruptedExecution(execution)
   }
 
-  appServer.stderr.on("line", (line) => {
+  appServer.stderr.onLine((line) => {
     if (isBenignCodexDiagnostic(line)) {
       return
     }

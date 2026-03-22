@@ -1,10 +1,10 @@
 import { EventEmitter } from "node:events"
-import type readline from "node:readline"
 
 import { describe, expect, test } from "bun:test"
 
 import { createRpcClient } from "../../src/codex/rpc"
 import type { CodexAppServerProcess } from "../../src/codex/proc"
+import type { LineSource } from "../../src/util/line"
 
 class AbortOnAddSignal extends EventTarget {
   aborted = false
@@ -31,7 +31,12 @@ class AbortOnAddSignal extends EventTarget {
 }
 
 function createFakeProcess(): {
-  exit: (result: { code: number | null; expected: boolean; signal: NodeJS.Signals | null }) => void
+  exit: (result: {
+    code: number | null
+    error?: Error | undefined
+    expected: boolean
+    signal: NodeJS.Signals | null
+  }) => void
   process: CodexAppServerProcess
   stderr: EventEmitter
   stdout: EventEmitter
@@ -41,7 +46,12 @@ function createFakeProcess(): {
   const stderr = new EventEmitter()
   const writes: unknown[] = []
   let resolveExit:
-    | ((result: { code: number | null; expected: boolean; signal: NodeJS.Signals | null }) => void)
+    | ((result: {
+        code: number | null
+        error?: Error | undefined
+        expected: boolean
+        signal: NodeJS.Signals | null
+      }) => void)
     | undefined
 
   return {
@@ -53,8 +63,8 @@ function createFakeProcess(): {
       exited: new Promise((resolve) => {
         resolveExit = resolve
       }),
-      stderr: stderr as unknown as readline.Interface,
-      stdout: stdout as unknown as readline.Interface,
+      stderr: { done: Promise.resolve(undefined), onLine: stderr.on.bind(stderr, "line") } satisfies LineSource,
+      stdout: { done: Promise.resolve(undefined), onLine: stdout.on.bind(stdout, "line") } satisfies LineSource,
       write: (message) => {
         writes.push(message)
       },

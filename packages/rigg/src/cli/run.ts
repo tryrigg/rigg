@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto"
-
 import type { UserInputQuestion, UserInputResolution } from "../session/interaction"
 import { loadProject, workflowById } from "../project"
 import { runWorkflow } from "../session"
@@ -144,7 +142,7 @@ async function promptForOmittedInvocationInputs(options: {
     return options.invocationInputs
   }
 
-  const requestId = `workflow-inputs-${randomUUID()}`
+  const requestId = `workflow-inputs-${Bun.randomUUIDv7()}`
   const resolution = await options.runSession.handle({
     interaction: {
       created_at: options.now(),

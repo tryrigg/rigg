@@ -1,5 +1,3 @@
-import { v7 as uuidv7 } from "uuid"
-
 import type { NodePath } from "../workflow/id"
 import type { InteractionRequest, InteractionResolution } from "./interaction"
 import { onAbort } from "../util/abort"
@@ -167,7 +165,7 @@ export async function waitForBarrier(
   },
 ): Promise<void> {
   const barrier = {
-    barrier_id: uuidv7(),
+    barrier_id: Bun.randomUUIDv7(),
     completed: input.completed,
     created_at: timestampNow(),
     frame_id: input.frameId,

@@ -1,11 +1,8 @@
-import { constants } from "node:fs"
-import { access } from "node:fs/promises"
-
 import { isMissingPathError } from "../util/error"
 
 export async function exists(path: string): Promise<boolean> {
   try {
-    await access(path, constants.F_OK)
+    await Bun.file(path).stat()
     return true
   } catch (error) {
     if (isMissingPathError(error)) {

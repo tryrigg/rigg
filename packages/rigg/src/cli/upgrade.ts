@@ -1,9 +1,9 @@
-import { chmodSync, rmSync } from "node:fs"
+import { chmodSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, dirname, join } from "node:path"
 
 import { RIGG_VERSION } from "../version"
-import { normalizeError } from "../util/error"
+import { isMissingPathError, normalizeError } from "../util/error"
 
 const DEFAULT_INSTALL_URL = "https://tryrigg.com/install"
 
@@ -132,14 +132,12 @@ export async function fetchScript(url: string): Promise<string> {
 }
 
 export async function runScript(script: string, env: NodeJS.ProcessEnv): Promise<void> {
-  const scriptPath = join(
-    tmpdir(),
-    `rigg-install-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.sh`,
-  )
-  await Bun.write(scriptPath, script)
-  chmodSync(scriptPath, 0o700)
+  const scriptPath = join(tmpdir(), `rigg-install-${Bun.randomUUIDv7()}.sh`)
+  let failure: Error | undefined
 
   try {
+    await Bun.write(scriptPath, script)
+    chmodSync(scriptPath, 0o700)
     const installer = Bun.spawn(["bash", scriptPath], {
       env,
       stdin: "inherit",
@@ -150,8 +148,19 @@ export async function runScript(script: string, env: NodeJS.ProcessEnv): Promise
     if (exitCode !== 0) {
       throw new Error(`Installer failed with exit code ${exitCode}`)
     }
+  } catch (error) {
+    failure = normalizeError(error)
+    throw failure
   } finally {
-    rmSync(scriptPath, { force: true })
+    try {
+      await Bun.file(scriptPath).delete()
+    } catch (error) {
+      if (!isMissingPathError(error)) {
+        const cause =
+          failure !== undefined ? new AggregateError([failure, normalizeError(error)]) : normalizeError(error)
+        throw new Error(`failed to remove installer script: ${scriptPath}`, { cause })
+      }
+    }
   }
 }
 

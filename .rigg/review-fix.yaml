@@ -1,0 +1,35 @@
+id: review-fix
+steps:
+  - id: remediation
+    type: loop
+    max: 5
+    until: ${{ len(steps.review.result.findings) == 0 }}
+    steps:
+      - id: review
+        type: codex
+        with:
+          action: review
+          model: gpt-5.3-codex-spark
+          review:
+            target:
+              type: uncommitted
+
+      - id: fix
+        if: ${{ len(steps.review.result.findings) > 0 }}
+        type: cursor
+        with:
+          action: run
+          model: composer-2-fast
+          prompt: |
+            Fix these code review findings:
+            ${{ toJSON(steps.review.result.findings) }}
+
+  - id: commit
+    type: shell
+    with:
+      command: |
+        git add -A
+        if ! git diff --cached --quiet; then
+          git commit -m "fix: review remediation"
+        fi
+      result: none

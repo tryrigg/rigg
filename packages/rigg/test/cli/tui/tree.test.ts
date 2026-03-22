@@ -410,6 +410,11 @@ describe("extractDetail", () => {
     expect(extractDetail(step)).toBe("ask")
   })
 
+  test("returns action and model for cursor steps with model", () => {
+    const step: WorkflowStep = { type: "cursor", with: { action: "ask", prompt: "do stuff", model: "composer-2" } }
+    expect(extractDetail(step)).toBe("ask · composer-2")
+  })
+
   test("returns action and model for codex steps with model", () => {
     const step: WorkflowStep = { type: "codex", with: { action: "run", prompt: "do stuff", model: "o3" } }
     expect(extractDetail(step)).toBe("run · o3")

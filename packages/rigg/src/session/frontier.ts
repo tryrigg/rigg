@@ -193,7 +193,7 @@ export function createFrontierNode(
     cwd: step.type === "codex" || step.type === "cursor" ? cwd : null,
     detail: detailOverride ?? summarizeFrontierDetail(step),
     frame_id: frameId,
-    model: step.type === "codex" ? (step.with.model ?? null) : null,
+    model: step.type === "codex" || step.type === "cursor" ? (step.with.model ?? null) : null,
     node_kind: step.type,
     node_path: nodePath,
     prompt_preview: frontierPromptPreview(step, context),

@@ -438,6 +438,97 @@ describe("cli/state", () => {
     })
   })
 
+  test("applyEvent includes cursor model in auto-continue frontier labels", () => {
+    const state = createState("auto_continue")
+    const completedNode = {
+      attempt: 1,
+      duration_ms: 1200,
+      exit_code: 0,
+      finished_at: "2026-03-15T10:01:00.000Z",
+      node_kind: "shell",
+      node_path: "/0",
+      result: null,
+      started_at: "2026-03-15T10:00:00.000Z",
+      status: "succeeded" as const,
+      stderr: null,
+      stdout: "repo ready\n",
+      user_id: "collect_context",
+      waiting_for: null,
+    }
+    const completedSnapshot = runSnapshot({ nodes: [completedNode] })
+
+    applyEvent(state, { kind: "run_started", snapshot: completedSnapshot })
+    applyEvent(state, {
+      kind: "node_completed",
+      node: completedNode,
+      snapshot: completedSnapshot,
+    })
+    applyEvent(state, {
+      barrier: {
+        barrier_id: "barrier-1",
+        completed: {
+          node_kind: "shell",
+          node_path: "/0",
+          result: null,
+          status: "succeeded",
+          user_id: "collect_context",
+        },
+        created_at: "2026-03-15T10:01:01.000Z",
+        frame_id: "root",
+        next: [
+          {
+            action: "ask",
+            cwd: "/workspace",
+            detail: "cursor ask",
+            frame_id: "root",
+            model: "composer-2",
+            node_kind: "cursor",
+            node_path: "/1",
+            prompt_preview: "Question?",
+            user_id: "draft_cursor",
+          },
+        ],
+        reason: "step_completed",
+      },
+      kind: "barrier_reached",
+      snapshot: runSnapshot({
+        active_barrier: {
+          barrier_id: "barrier-1",
+          completed: {
+            node_kind: "shell",
+            node_path: "/0",
+            result: null,
+            status: "succeeded",
+            user_id: "collect_context",
+          },
+          created_at: "2026-03-15T10:01:01.000Z",
+          frame_id: "root",
+          next: [
+            {
+              action: "ask",
+              cwd: "/workspace",
+              detail: "cursor ask",
+              frame_id: "root",
+              model: "composer-2",
+              node_kind: "cursor",
+              node_path: "/1",
+              prompt_preview: "Question?",
+              user_id: "draft_cursor",
+            },
+          ],
+          reason: "step_completed",
+        },
+        nodes: [completedNode],
+      }),
+    })
+
+    expect(state.completedOutputs["/0"]?.entries.at(-1)).toEqual({
+      key: null,
+      text: "auto-continue: Next: draft_cursor [cursor] · ask · composer-2",
+      variant: "event",
+    })
+  })
+
   test("applyEvent leaves manual barriers unchanged", () => {
     const state = createState("manual")
     const completedNode = {

@@ -129,8 +129,13 @@ export function extractDetail(step: WorkflowStep): string | undefined {
       }
       return detail
     }
-    case "cursor":
-      return step.with.action
+    case "cursor": {
+      let detail = step.with.action
+      if (step.with.model) {
+        detail += ` · ${step.with.model}`
+      }
+      return detail
+    }
     case "write_file":
       return `→ ${step.with.path}`
     default:

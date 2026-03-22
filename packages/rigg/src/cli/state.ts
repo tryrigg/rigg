@@ -187,7 +187,7 @@ function frontierLabel(node: FrontierNode): string {
   if ((node.node_kind === "codex" || node.node_kind === "cursor") && node.action) {
     parts.push(node.action)
   }
-  if (node.node_kind === "codex" && node.model) {
+  if ((node.node_kind === "codex" || node.node_kind === "cursor") && node.model) {
     parts.push(node.model)
   }
   return parts.join(" · ")

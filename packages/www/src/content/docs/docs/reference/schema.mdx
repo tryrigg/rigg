@@ -79,6 +79,16 @@ overall_explanation: string
 overall_confidence_score: number
 ```
 
+## type: cursor
+
+| Field         | Type                     | Required |
+| ------------- | ------------------------ | -------- |
+| `with.action` | `run` \| `ask` \| `plan` | Yes      |
+| `with.prompt` | template                 | Yes      |
+| `with.model`  | string                   | No       |
+
+`cursor` communicates with Cursor Agent through ACP and returns the final plain-text assistant response.
+
 ## type: write_file
 
 | Field          | Type     | Required |

@@ -6,7 +6,7 @@ As more engineering work moves into local AI agents, teams need a way to turn th
 
 Rigg lets you capture those workflows as `.rigg/*.yaml`, run them locally with Codex, Cursor, and shell commands, and keep them in Git alongside the code they operate on. That makes agent workflows easier to review, share, standardize, and evolve as a team, instead of living as private prompt habits.
 
-<video src="https://tryrigg.com/demo.mp4" autoplay loop muted playsinline></video>
+[![Rigg demo](https://github.com/user-attachments/assets/3e4ba894-33d9-4972-8f34-19c503d421f2)](https://tryrigg.com)
 
 ## Requirements
 

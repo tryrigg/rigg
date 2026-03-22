@@ -50,6 +50,7 @@ type SessionExecution = {
   messageOrder: string[]
   messages: Map<string, string>
   onEvent?: ((event: CursorProviderEvent) => Promise<void> | void) | undefined
+  postPromptActivityObserved: boolean
   postPromptQuietPeriodTimer?: ReturnType<typeof setTimeout> | undefined
   promptStopReason?: string | undefined
   reject: (error: Error) => void
@@ -83,6 +84,7 @@ export type CursorRuntimeSession = {
 export async function createCursorRuntimeSession(options: CursorRuntimeOptions): Promise<CursorRuntimeSession> {
   const INTERRUPT_REQUEST_TIMEOUT_MS = 1_000
   const INTERRUPT_TIMEOUT_MESSAGE = "timed out waiting for cursor agent acp response to session/cancel"
+  const POST_PROMPT_QUIET_PERIOD_MS = 50
 
   assertVersion(options)
 
@@ -252,6 +254,7 @@ export async function createCursorRuntimeSession(options: CursorRuntimeOptions):
     }
 
     clearPromptSettlement(execution)
+    execution.postPromptActivityObserved = false
     const generation = execution.settlementGeneration + 1
     execution.settlementGeneration = generation
     execution.postPromptQuietPeriodTimer = setTimeout(() => {
@@ -259,11 +262,23 @@ export async function createCursorRuntimeSession(options: CursorRuntimeOptions):
       void settlePromptTurn(execution, generation).catch((error) => {
         rejectExecution(execution, normalizeError(error))
       })
-    }, 0)
+    }, POST_PROMPT_QUIET_PERIOD_MS)
+  }
+
+  function recordPostPromptActivity(execution: SessionExecution): void {
+    if (execution.promptStopReason === undefined) {
+      return
+    }
+
+    execution.postPromptActivityObserved = true
   }
 
   async function interruptExecution(execution: SessionExecution): Promise<void> {
-    if (execution.settled || execution.interrupting) {
+    if (
+      execution.settled ||
+      execution.interrupting ||
+      (execution.promptStopReason !== undefined && !execution.postPromptActivityObserved)
+    ) {
       return
     }
 
@@ -387,6 +402,7 @@ export async function createCursorRuntimeSession(options: CursorRuntimeOptions):
       messageOrder: [],
       messages: new Map(),
       onEvent: options_.onEvent,
+      postPromptActivityObserved: false,
       promptStopReason: undefined,
       postPromptQuietPeriodTimer: undefined,
       reject: resultPromise.reject,
@@ -517,11 +533,16 @@ export async function createCursorRuntimeSession(options: CursorRuntimeOptions):
           case "noop":
             schedulePromptTurnSettlement(execution)
             continue
+          case "tool_call":
+            recordPostPromptActivity(execution)
+            schedulePromptTurnSettlement(execution)
+            continue
           case "message_delta": {
             if (update.text.length === 0) {
               schedulePromptTurnSettlement(execution)
               continue
             }
+            recordPostPromptActivity(execution)
             const messageId = ensureMessage(execution, update.messageId)
             execution.messages.set(messageId, (execution.messages.get(messageId) ?? "") + update.text)
             await captureEvent(
@@ -539,6 +560,7 @@ export async function createCursorRuntimeSession(options: CursorRuntimeOptions):
             continue
           }
           case "diagnostic":
+            recordPostPromptActivity(execution)
             execution.capture.diagnostics.push(update.message)
             await captureEvent(
               execution.capture,
@@ -553,6 +575,7 @@ export async function createCursorRuntimeSession(options: CursorRuntimeOptions):
             schedulePromptTurnSettlement(execution)
             continue
           case "error":
+            recordPostPromptActivity(execution)
             execution.capture.diagnostics.push(update.message)
             await captureEvent(
               execution.capture,
@@ -571,6 +594,7 @@ export async function createCursorRuntimeSession(options: CursorRuntimeOptions):
               schedulePromptTurnSettlement(execution)
               continue
             }
+            recordPostPromptActivity(execution)
             appendDiagnostic(`cursor acp notification: session/update:${update.type}`, update.sessionId)
             schedulePromptTurnSettlement(execution)
             continue

@@ -52,6 +52,10 @@ export type CursorSessionUpdate =
       text: string
     }
   | {
+      kind: "tool_call"
+      sessionId: string
+    }
+  | {
       kind: "diagnostic"
       message: string
       sessionId: string
@@ -135,9 +139,7 @@ function parseSessionUpdateObject(sessionId: string, update: Record<string, unkn
     kind === "user_message_chunk" ||
     kind === "available_commands_update" ||
     kind === "agent_thought_chunk" ||
-    kind === "plan" ||
-    kind === "tool_call" ||
-    kind === "tool_call_update"
+    kind === "plan"
   ) {
     return { kind: "noop", sessionId }
   }
@@ -149,6 +151,12 @@ function parseSessionUpdateObject(sessionId: string, update: Record<string, unkn
         messageId: readMessageId(normalized),
         sessionId,
         text: agentBodyText(normalized, update),
+      }
+    case "tool_call":
+    case "tool_call_update":
+      return {
+        kind: "tool_call",
+        sessionId,
       }
     case "diagnostic": {
       const message =

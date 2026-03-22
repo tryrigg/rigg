@@ -184,7 +184,7 @@ describe("cursor/runtime", () => {
           signal: controller.signal,
         })
 
-        await Bun.sleep(25)
+        await Bun.sleep(45)
         controller.abort()
 
         await expect(run).rejects.toThrow("cancel rejected")
@@ -258,7 +258,7 @@ describe("cursor/runtime", () => {
           signal: controller.signal,
         })
 
-        await Bun.sleep(25)
+        await Bun.sleep(45)
         controller.abort()
 
         await expect(firstRun).resolves.toMatchObject({
@@ -485,6 +485,7 @@ describe("cursor/runtime", () => {
                 },
               },
             },
+            { kind: "delay", ms: 20 },
             {
               kind: "notification",
               method: "session/update",
@@ -514,6 +515,326 @@ describe("cursor/runtime", () => {
           exitCode: 0,
           stderr: "delayed diagnostic",
           stdout: "delayed tail",
+          termination: "completed",
+        })
+      } finally {
+        await runtime.close()
+      }
+    } finally {
+      await rm(cwd, { force: true, recursive: true })
+    }
+  })
+
+  test("does not convert completed runs into interrupts during the post-response quiet period", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "rigg-cursor-runtime-post-response-abort-"))
+
+    try {
+      const binDir = await installFakeCursor(cwd, {
+        sessionPrompt: {
+          dispatch: "immediate",
+          respondAfterSteps: false,
+          steps: [
+            { kind: "delay", ms: 20 },
+            {
+              kind: "notification",
+              method: "session/update",
+              params: {
+                sessionId: "__SESSION_ID__",
+                update: {
+                  content: { text: "delayed tail", type: "text" },
+                  messageId: "msg_1",
+                  sessionUpdate: "agent_message_chunk",
+                },
+              },
+            },
+            {
+              kind: "notification",
+              method: "session/update",
+              params: {
+                sessionId: "__SESSION_ID__",
+                update: { message: "delayed diagnostic", sessionUpdate: "error" },
+              },
+            },
+          ],
+        },
+      })
+
+      const runtime = await createCursorRuntimeSession({
+        binaryPath: join(binDir, "cursor"),
+        cwd,
+        env: process.env,
+      })
+
+      try {
+        const controller = new AbortController()
+        const run = runtime.run({
+          action: "run",
+          cwd,
+          prompt: "Finish before the timeout abort lands",
+          signal: controller.signal,
+        })
+
+        await Bun.sleep(10)
+        controller.abort()
+
+        await expect(run).resolves.toMatchObject({
+          exitCode: 0,
+          stderr: "delayed diagnostic",
+          stdout: "delayed tail",
+          termination: "completed",
+        })
+      } finally {
+        await runtime.close()
+      }
+    } finally {
+      await rm(cwd, { force: true, recursive: true })
+    }
+  })
+
+  test("does not re-enable interruption for ignored post-response session/update notifications", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "rigg-cursor-runtime-post-response-noop-abort-"))
+
+    try {
+      const binDir = await installFakeCursor(cwd, {
+        sessionPrompt: {
+          dispatch: "immediate",
+          respondAfterSteps: false,
+          steps: [
+            { kind: "delay", ms: 20 },
+            {
+              kind: "notification",
+              method: "session/update",
+              params: {
+                sessionId: "__SESSION_ID__",
+                update: {
+                  content: { text: "thinking", type: "text" },
+                  sessionUpdate: "agent_thought_chunk",
+                },
+              },
+            },
+          ],
+        },
+      })
+
+      const runtime = await createCursorRuntimeSession({
+        binaryPath: join(binDir, "cursor"),
+        cwd,
+        env: process.env,
+      })
+
+      try {
+        const controller = new AbortController()
+        const run = runtime.run({
+          action: "run",
+          cwd,
+          prompt: "Finish even if an ignored update lands before abort",
+          signal: controller.signal,
+        })
+
+        await Bun.sleep(30)
+        controller.abort()
+
+        await expect(run).resolves.toMatchObject({
+          exitCode: 0,
+          stderr: "",
+          stdout: "",
+          termination: "completed",
+        })
+      } finally {
+        await runtime.close()
+      }
+    } finally {
+      await rm(cwd, { force: true, recursive: true })
+    }
+  })
+
+  test("keeps completed runs completed after the last trailing update re-arms settlement", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "rigg-cursor-runtime-post-response-tail-abort-"))
+
+    try {
+      const binDir = await installFakeCursor(cwd, {
+        sessionPrompt: {
+          dispatch: "immediate",
+          respondAfterSteps: false,
+          steps: [
+            { kind: "delay", ms: 20 },
+            {
+              kind: "notification",
+              method: "session/update",
+              params: {
+                sessionId: "__SESSION_ID__",
+                update: {
+                  content: { text: "delayed tail", type: "text" },
+                  messageId: "msg_1",
+                  sessionUpdate: "agent_message_chunk",
+                },
+              },
+            },
+          ],
+        },
+      })
+
+      const runtime = await createCursorRuntimeSession({
+        binaryPath: join(binDir, "cursor"),
+        cwd,
+        env: process.env,
+      })
+
+      try {
+        const controller = new AbortController()
+        const run = runtime.run({
+          action: "run",
+          cwd,
+          prompt: "Finish after the last trailing update lands",
+          signal: controller.signal,
+        })
+
+        await Bun.sleep(60)
+        controller.abort()
+
+        await expect(run).resolves.toMatchObject({
+          exitCode: 0,
+          stderr: "",
+          stdout: "delayed tail",
+          termination: "completed",
+        })
+      } finally {
+        await runtime.close()
+      }
+    } finally {
+      await rm(cwd, { force: true, recursive: true })
+    }
+  })
+
+  test("keeps honoring aborts while a substantive post-response update is still being handled", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "rigg-cursor-runtime-post-response-cancel-"))
+
+    try {
+      const binDir = await installFakeCursor(cwd, {
+        sessionPrompt: {
+          dispatch: "immediate",
+          respondAfterSteps: false,
+          steps: [
+            {
+              kind: "notification",
+              method: "session/update",
+              params: {
+                sessionId: "__SESSION_ID__",
+                update: {
+                  content: { text: "still", type: "text" },
+                  messageId: "msg_1",
+                  sessionUpdate: "agent_message_chunk",
+                },
+              },
+            },
+            { kind: "delay", ms: 200 },
+          ],
+        },
+      })
+
+      const runtime = await createCursorRuntimeSession({
+        binaryPath: join(binDir, "cursor"),
+        cwd,
+        env: process.env,
+      })
+
+      try {
+        const controller = new AbortController()
+        const run = runtime.run({
+          action: "run",
+          cwd,
+          onEvent: async (event) => {
+            if (event.kind !== "message_delta") {
+              return
+            }
+            await Bun.sleep(100)
+          },
+          prompt: "Abort after trailing updates start",
+          signal: controller.signal,
+        })
+
+        await Bun.sleep(30)
+        controller.abort()
+
+        await expect(run).resolves.toMatchObject({
+          exitCode: 130,
+          stderr: "",
+          stdout: "still",
+          termination: "interrupted",
+        })
+      } finally {
+        await runtime.close()
+      }
+    } finally {
+      await rm(cwd, { force: true, recursive: true })
+    }
+  })
+
+  test("does not reopen interruption during the quiet period after a post-response tool call update", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "rigg-cursor-runtime-post-response-tool-call-cancel-"))
+
+    try {
+      const binDir = await installFakeCursor(cwd, {
+        sessionPrompt: {
+          dispatch: "immediate",
+          respondAfterSteps: false,
+          steps: [
+            {
+              kind: "notification",
+              method: "session/update",
+              params: {
+                sessionId: "__SESSION_ID__",
+                update: {
+                  sessionUpdate: "tool_call",
+                  status: "pending",
+                  title: "Run formatter",
+                  toolCallId: "call_1",
+                },
+              },
+            },
+            { kind: "delay", ms: 200 },
+          ],
+        },
+        sessionCancel: {
+          steps: [
+            {
+              kind: "notification",
+              method: "session/update",
+              params: {
+                sessionId: "__SESSION_ID__",
+                update: {
+                  sessionUpdate: "tool_call_update",
+                  status: "cancelled",
+                  toolCallId: "call_1",
+                },
+              },
+            },
+          ],
+        },
+      })
+
+      const runtime = await createCursorRuntimeSession({
+        binaryPath: join(binDir, "cursor"),
+        cwd,
+        env: process.env,
+      })
+
+      try {
+        const controller = new AbortController()
+        const run = runtime.run({
+          action: "run",
+          cwd,
+          prompt: "Abort after stopReason when a tool call is still pending",
+          signal: controller.signal,
+        })
+
+        await Bun.sleep(30)
+        controller.abort()
+
+        await expect(run).resolves.toMatchObject({
+          exitCode: 0,
+          stderr: "",
+          stdout: "",
           termination: "completed",
         })
       } finally {

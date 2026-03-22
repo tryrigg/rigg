@@ -146,6 +146,9 @@ steps:
             You are a senior engineer. Below are triaged code review findings for the current branch
             (diff against main). These have been validated as genuine issues worth fixing.
 
+            First, read `private/typescript-implementation-guide.md` for coding standards.
+            Every fix you apply must conform to the guide.
+
             ## Findings
             ${{ toJSON(steps.triage.result.findings) }}
 

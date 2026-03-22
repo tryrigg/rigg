@@ -124,7 +124,7 @@ describe("cursor/parse", () => {
       },
       {
         expected: {
-          kind: "noop",
+          kind: "tool_call",
           sessionId: "session_1",
         },
         input: {
@@ -139,7 +139,7 @@ describe("cursor/parse", () => {
       },
       {
         expected: {
-          kind: "noop",
+          kind: "tool_call",
           sessionId: "session_1",
         },
         input: {

@@ -31,4 +31,5 @@ steps:
         if ! git diff --cached --quiet; then
           git commit -m "fix: review remediation"
         fi
-      result: none
+      stdout:
+        mode: none

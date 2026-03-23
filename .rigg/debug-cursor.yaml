@@ -17,7 +17,8 @@ steps:
   - id: headless_json
     type: shell
     with:
-      result: json
+      stdout:
+        mode: json
       command: |
         cursor agent --print --output-format json --trust --model composer-2 "$(cat <<'EOF'
         Do all work silently. Output only the final JSON object.

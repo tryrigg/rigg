@@ -478,4 +478,5 @@ steps:
         if grep -q '^### 1\. Persona' "$TARGET"; then
           sed -n '/^### 1\. Persona/,$p' "$TARGET" > "$TARGET.tmp" && mv "$TARGET.tmp" "$TARGET"
         fi
-      result: none
+      stdout:
+        mode: none

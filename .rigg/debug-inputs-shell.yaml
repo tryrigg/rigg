@@ -51,21 +51,24 @@ steps:
       command: |
         printf '{"greeting":"%s","owner":"%s","priority":"%s","enabled":%s,"count":%s,"rating":%s,"tags":%s}\n' \
           "$DEBUG_GREETING" "$OWNER" "$PRIORITY" "$ENABLED" "$COUNT" "$RATING" "$TAGS_JSON"
-      result: json
+      stdout:
+        mode: json
 
   - id: render_summary
     type: shell
     with:
       command: |
         echo "owner=${{ steps.inspect_inputs.result.owner }} enabled=${{ steps.inspect_inputs.result.enabled }} tags=${{ env.DEBUG_TAGS }}"
-      result: text
+      stdout:
+        mode: text
 
   - id: maybe_noop
     if: ${{ inputs.enabled }}
     type: shell
     with:
       command: "true"
-      result: none
+      stdout:
+        mode: none
 
   - id: write_snapshot
     type: write_file

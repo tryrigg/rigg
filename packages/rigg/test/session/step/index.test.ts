@@ -110,7 +110,7 @@ describe("session/step", () => {
       type: "shell",
       with: {
         command: "echo $RIGG_TEST_VALUE && pwd",
-        result: "text",
+        stdout: { mode: "text" },
       },
     }
 

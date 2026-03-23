@@ -39,12 +39,14 @@ Encapsulates steps into a single unit. Internal results are hidden unless export
       type: shell
       with:
         command: git log --oneline -20
-        result: text
+        stdout:
+          mode: text
     - id: diff
       type: shell
       with:
         command: git diff --stat
-        result: text
+        stdout:
+          mode: text
   exports:
     log: ${{ steps.log.result }}
     diff: ${{ steps.diff.result }}

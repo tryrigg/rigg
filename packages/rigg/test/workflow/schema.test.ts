@@ -166,14 +166,16 @@ describe("workflow/schema", () => {
 
     expect(() =>
       WorkflowDocumentSchema.parse({
-        id: "invalid-cursor-result",
+        id: "invalid-cursor-stdout",
         steps: [
           {
             type: "cursor",
             with: {
               mode: "agent",
               prompt: "nope",
-              result: "json",
+              stdout: {
+                mode: "json",
+              },
             },
           },
         ],

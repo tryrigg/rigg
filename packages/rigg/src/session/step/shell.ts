@@ -45,7 +45,7 @@ export type StreamEventParser<TEvent> = {
 
 export async function runShellStep(
   command: string,
-  options: ActionExecutionOptions & { resultMode: "json" | "none" | "text" },
+  options: ActionExecutionOptions & { stdoutMode: "json" | "none" | "text" },
 ): Promise<ActionStepOutput> {
   const output = await runShellProcess(command, options)
 
@@ -58,11 +58,11 @@ export async function runShellStep(
     }
   }
 
-  if (options.resultMode === "none") {
+  if (options.stdoutMode === "none") {
     return { ...output, providerEvents: [], result: null, termination: output.termination }
   }
 
-  if (options.resultMode === "json") {
+  if (options.stdoutMode === "json") {
     return {
       ...output,
       providerEvents: [],

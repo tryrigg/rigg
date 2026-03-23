@@ -537,7 +537,7 @@ describe("workflow/check", () => {
               type: "shell",
               with: {
                 command: 'echo \'{"count": 3, "config": {"enabled": true}}\'',
-                result: "json",
+                stdout: { mode: "json" },
               },
             },
             {
@@ -665,7 +665,7 @@ describe("workflow/check", () => {
               type: "shell",
               with: {
                 command: 'echo \'{"enabled": true, "extra": "value"}\'',
-                result: "json",
+                stdout: { mode: "json" },
               },
             },
             {

@@ -209,12 +209,12 @@ function validateActionStep(
   switch (step.type) {
     case "shell":
       checkTpl(step.with.command, filePath, scope, errors)
+      const stdoutMode = step.with.stdout?.mode ?? "text"
       return {
         availableStepShapes: new Map(scope.availableStepShapes),
         guaranteedResultShape:
-          step.with.result === "none" ? { kind: "none" } : step.with.result === "json" ? AnyJsonShape : StringShape,
-        resultShape:
-          step.with.result === "none" ? { kind: "none" } : step.with.result === "json" ? AnyJsonShape : StringShape,
+          stdoutMode === "none" ? { kind: "none" } : stdoutMode === "json" ? AnyJsonShape : StringShape,
+        resultShape: stdoutMode === "none" ? { kind: "none" } : stdoutMode === "json" ? AnyJsonShape : StringShape,
       }
     case "write_file":
       checkTpl(step.with.path, filePath, scope, errors)

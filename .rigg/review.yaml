@@ -23,7 +23,8 @@ steps:
       - id: triage
         type: shell
         with:
-          result: json
+          stdout:
+            mode: json
           command: |
             if [ "${{ len(steps.review.result.findings) }}" -eq 0 ]; then
               printf '%s\n' '{"findings":[],"directives":[],"discarded":[],"oscillations":[]}'
@@ -174,7 +175,8 @@ steps:
         if: ${{ len(steps.triage.result.findings) > 0 }}
         type: shell
         with:
-          result: text
+          stdout:
+            mode: text
           command: |
             cursor agent --print --output-format json --trust --model composer-2 "$(cat <<'EOF'
             You are a senior engineer validating automated code review fixes.
@@ -215,7 +217,8 @@ steps:
             if ! git diff --cached --quiet; then
               git commit -m "fix: review remediation (iteration ${{ run.iteration }})"
             fi
-          result: none
+          stdout:
+            mode: none
 
   - id: report
     type: cursor

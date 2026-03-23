@@ -116,14 +116,16 @@ steps:
             type: shell
             with:
               command: npm test
-              result: text
+              stdout:
+                mode: text
       - id: lint
         steps:
           - id: run_lint
             type: shell
             with:
               command: npm run lint
-              result: text
+              stdout:
+                mode: text
     exports:
       unit: ${{ steps.run_unit.result }}
       lint: ${{ steps.run_lint.result }}

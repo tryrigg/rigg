@@ -4,7 +4,8 @@ steps:
     type: shell
     with:
       command: sleep 2
-      result: none
+      stdout:
+        mode: none
 
   - id: codex_probe
     type: codex
@@ -24,7 +25,8 @@ steps:
     type: shell
     with:
       command: sleep 2
-      result: none
+      stdout:
+        mode: none
 
   - id: summarize
     type: codex

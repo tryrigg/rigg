@@ -20,7 +20,8 @@ steps:
         type: shell
         with:
           command: echo "route=${{ inputs.route }}"
-          result: text
+          stdout:
+            mode: text
 
       - id: metadata
         type: shell
@@ -30,7 +31,8 @@ steps:
         with:
           command: |
             printf '{"route":"%s","target_iterations":%s}\n' "$ROUTE" "$TARGET_ITERATIONS"
-          result: json
+          stdout:
+            mode: json
     exports:
       baseline: ${{ steps.baseline.result }}
       route: ${{ steps.metadata.result.route }}
@@ -41,7 +43,8 @@ steps:
     type: shell
     with:
       command: echo "optional-note=${{ steps.gather.result.route }}"
-      result: text
+      stdout:
+        mode: text
 
   - id: decide
     type: branch
@@ -52,7 +55,8 @@ steps:
             type: shell
             with:
               command: printf '{"executor":"parallel"}\n'
-              result: json
+              stdout:
+                mode: json
         exports:
           executor: ${{ steps.choose_parallel.result.executor }}
           limit: ${{ steps.gather.result.target_iterations }}
@@ -62,7 +66,8 @@ steps:
             type: shell
             with:
               command: printf '{"executor":"single"}\n'
-              result: json
+              stdout:
+                mode: json
         exports:
           executor: ${{ steps.choose_single.result.executor }}
           limit: ${{ steps.gather.result.target_iterations }}
@@ -76,7 +81,8 @@ steps:
         type: shell
         with:
           command: echo "iteration=${{ run.iteration }} path=${{ run.node_path }} executor=${{ steps.decide.result.executor }}"
-          result: text
+          stdout:
+            mode: text
 
       - id: stop
         type: shell
@@ -86,7 +92,8 @@ steps:
         with:
           command: |
             printf '{"done":%s,"label":"%s"}\n' "$DONE" "$LABEL"
-          result: json
+          stdout:
+            mode: json
     exports:
       last_tick: ${{ steps.tick.result }}
       label: ${{ steps.stop.result.label }}
@@ -100,7 +107,8 @@ steps:
             type: shell
             with:
               command: echo "summary:${{ steps.iterate.result.label }}"
-              result: text
+              stdout:
+                mode: text
       - id: trace
         steps:
           - id: emit_trace
@@ -111,7 +119,8 @@ steps:
             with:
               command: |
                 printf '{"label":"%s","route":"%s"}\n' "$LABEL" "$ROUTE"
-              result: json
+              stdout:
+                mode: json
     exports:
       summary: ${{ steps.emit_summary.result }}
       trace: ${{ steps.emit_trace.result }}

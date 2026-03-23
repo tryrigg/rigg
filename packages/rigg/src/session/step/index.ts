@@ -26,7 +26,7 @@ export async function runActionStep(
         cwd: options.cwd,
         env: options.env,
         onOutput: options.onOutput,
-        resultMode: step.with.result ?? "text",
+        stdoutMode: step.with.stdout?.mode ?? "text",
         signal: options.signal,
       })
     case "write_file": {

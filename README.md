@@ -87,7 +87,8 @@ steps:
     type: shell
     with:
       command: echo "hello ${{ inputs.name }}"
-      result: text
+      stdout:
+        mode: text
 ```
 
 Supported step types:

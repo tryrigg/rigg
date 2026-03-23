@@ -14,10 +14,11 @@ Runs a shell command.
   type: shell
   with:
     command: npm test
-    result: text # none | text | json (default: text)
+    stdout:
+      mode: text # none | text | json (default: text)
 ```
 
-`result` controls stdout capture: `none` discards it, `text` captures as string, `json` parses as structured data.
+`stdout.mode` controls stdout capture: `none` discards it, `text` captures as string, `json` parses as structured data.
 
 ## codex
 

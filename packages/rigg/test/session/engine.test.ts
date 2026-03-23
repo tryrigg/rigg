@@ -38,7 +38,7 @@ describe("session/engine", () => {
             type: "shell",
             with: {
               command: "pwd",
-              result: "text",
+              stdout: { mode: "text" },
             },
           },
           {
@@ -85,7 +85,7 @@ describe("session/engine", () => {
               type: "shell",
               with: {
                 command: "printf 'partial output'; exit 9",
-                result: "text",
+                stdout: { mode: "text" },
               },
             },
           ],
@@ -131,7 +131,7 @@ describe("session/engine", () => {
                 type: "shell",
                 with: {
                   command: "printf 'group'; exit 3",
-                  result: "text",
+                  stdout: { mode: "text" },
                 },
               },
             ],
@@ -155,7 +155,7 @@ describe("session/engine", () => {
                     type: "shell",
                     with: {
                       command: "printf 'branch'; exit 4",
-                      result: "text",
+                      stdout: { mode: "text" },
                     },
                   },
                 ],
@@ -186,7 +186,7 @@ describe("session/engine", () => {
                     type: "shell",
                     with: {
                       command: "printf 'parallel'; exit 5",
-                      result: "text",
+                      stdout: { mode: "text" },
                     },
                   },
                 ],
@@ -236,7 +236,7 @@ describe("session/engine", () => {
                 type: "shell",
                 with: {
                   command: "echo inner",
-                  result: "text",
+                  stdout: { mode: "text" },
                 },
               },
             ],
@@ -343,7 +343,7 @@ describe("session/engine", () => {
                 type: "shell",
                 with: {
                   command: "child-first",
-                  result: "text",
+                  stdout: { mode: "text" },
                 },
               },
               {
@@ -351,7 +351,7 @@ describe("session/engine", () => {
                 type: "shell",
                 with: {
                   command: "child-second",
-                  result: "text",
+                  stdout: { mode: "text" },
                 },
               },
             ],
@@ -796,7 +796,7 @@ describe("session/engine", () => {
                         type: "shell",
                         with: {
                           command: "slow",
-                          result: "text",
+                          stdout: { mode: "text" },
                         },
                       },
                     ],
@@ -809,7 +809,7 @@ describe("session/engine", () => {
                         type: "shell",
                         with: {
                           command: "boom",
-                          result: "text",
+                          stdout: { mode: "text" },
                         },
                       },
                     ],
@@ -879,7 +879,7 @@ describe("session/engine", () => {
               type: "shell",
               with: {
                 command: "wait",
-                result: "text",
+                stdout: { mode: "text" },
               },
             },
           ],
@@ -938,7 +938,7 @@ describe("session/engine", () => {
                 type: "shell",
                 with: {
                   command: "first",
-                  result: "text",
+                  stdout: { mode: "text" },
                 },
               },
             ],
@@ -1065,7 +1065,7 @@ describe("session/engine", () => {
                   type: "shell",
                   with: {
                     command: "work",
-                    result: "text",
+                    stdout: { mode: "text" },
                   },
                 },
               ],
@@ -1116,7 +1116,7 @@ describe("session/engine", () => {
                   type: "shell",
                   with: {
                     command: "inside-loop",
-                    result: "text",
+                    stdout: { mode: "text" },
                   },
                 },
               ],
@@ -1174,7 +1174,7 @@ describe("session/engine", () => {
               type: "shell",
               with: {
                 command: "first",
-                result: "text",
+                stdout: { mode: "text" },
               },
             },
             {
@@ -1182,7 +1182,7 @@ describe("session/engine", () => {
               type: "shell",
               with: {
                 command: "second",
-                result: "text",
+                stdout: { mode: "text" },
               },
             },
           ],
@@ -1243,7 +1243,7 @@ describe("session/engine", () => {
               type: "shell",
               with: {
                 command: "before-group",
-                result: "text",
+                stdout: { mode: "text" },
               },
             },
             {
@@ -1254,7 +1254,7 @@ describe("session/engine", () => {
                   type: "shell",
                   with: {
                     command: "inside-group",
-                    result: "text",
+                    stdout: { mode: "text" },
                   },
                 },
               ],
@@ -1270,7 +1270,7 @@ describe("session/engine", () => {
                       type: "shell",
                       with: {
                         command: "inside-branch",
-                        result: "text",
+                        stdout: { mode: "text" },
                       },
                     },
                   ],
@@ -1288,7 +1288,7 @@ describe("session/engine", () => {
                   type: "shell",
                   with: {
                     command: "inside-loop",
-                    result: "text",
+                    stdout: { mode: "text" },
                   },
                 },
               ],
@@ -1372,7 +1372,7 @@ describe("session/engine", () => {
               type: "shell",
               with: {
                 command: "skip-action",
-                result: "text",
+                stdout: { mode: "text" },
               },
             },
             {
@@ -1388,7 +1388,7 @@ describe("session/engine", () => {
                       type: "shell",
                       with: {
                         command: "left-inner",
-                        result: "text",
+                        stdout: { mode: "text" },
                       },
                     },
                   ],
@@ -1400,7 +1400,7 @@ describe("session/engine", () => {
               type: "shell",
               with: {
                 command: "run-now",
-                result: "text",
+                stdout: { mode: "text" },
               },
             },
           ],
@@ -1443,7 +1443,7 @@ describe("session/engine", () => {
                       type: "shell",
                       with: {
                         command: "echo slow",
-                        result: "text",
+                        stdout: { mode: "text" },
                       },
                     },
                   ],
@@ -1487,11 +1487,11 @@ describe("session/engine", () => {
               cases: [
                 {
                   if: "${{ false }}",
-                  steps: [{ id: "fast", type: "shell", with: { command: "echo fast", result: "text" } }],
+                  steps: [{ id: "fast", type: "shell", with: { command: "echo fast", stdout: { mode: "text" } } }],
                 },
                 {
                   if: "${{ false }}",
-                  steps: [{ id: "slow", type: "shell", with: { command: "echo slow", result: "text" } }],
+                  steps: [{ id: "slow", type: "shell", with: { command: "echo slow", stdout: { mode: "text" } } }],
                 },
               ],
             },
@@ -1500,7 +1500,7 @@ describe("session/engine", () => {
               type: "shell",
               with: {
                 command: "echo after",
-                result: "text",
+                stdout: { mode: "text" },
               },
             },
           ],
@@ -1573,7 +1573,7 @@ describe("session/engine", () => {
                       type: "shell",
                       with: {
                         command: "left",
-                        result: "text",
+                        stdout: { mode: "text" },
                       },
                     },
                     {
@@ -1581,7 +1581,7 @@ describe("session/engine", () => {
                       type: "shell",
                       with: {
                         command: "left-after",
-                        result: "text",
+                        stdout: { mode: "text" },
                       },
                     },
                   ],
@@ -1594,7 +1594,7 @@ describe("session/engine", () => {
                       type: "shell",
                       with: {
                         command: "right",
-                        result: "text",
+                        stdout: { mode: "text" },
                       },
                     },
                     {
@@ -1602,7 +1602,7 @@ describe("session/engine", () => {
                       type: "shell",
                       with: {
                         command: "right-after",
-                        result: "text",
+                        stdout: { mode: "text" },
                       },
                     },
                   ],
@@ -1671,7 +1671,7 @@ describe("session/engine", () => {
                           type: "shell",
                           with: {
                             command: "left",
-                            result: "text",
+                            stdout: { mode: "text" },
                           },
                         },
                       ],
@@ -1690,7 +1690,7 @@ describe("session/engine", () => {
                           type: "shell",
                           with: {
                             command: "middle",
-                            result: "text",
+                            stdout: { mode: "text" },
                           },
                         },
                       ],
@@ -1714,7 +1714,7 @@ describe("session/engine", () => {
                               type: "shell",
                               with: {
                                 command: "right",
-                                result: "text",
+                                stdout: { mode: "text" },
                               },
                             },
                           ],
@@ -1727,7 +1727,7 @@ describe("session/engine", () => {
                               type: "shell",
                               with: {
                                 command: "wrong-right",
-                                result: "text",
+                                stdout: { mode: "text" },
                               },
                             },
                           ],
@@ -1764,7 +1764,7 @@ describe("session/engine", () => {
                 type: "shell",
                 with: {
                   command: "child",
-                  result: "text",
+                  stdout: { mode: "text" },
                 },
               },
             ],
@@ -1798,7 +1798,7 @@ describe("session/engine", () => {
                         type: "shell",
                         with: {
                           command: "right",
-                          result: "text",
+                          stdout: { mode: "text" },
                         },
                       },
                     ],
@@ -1872,7 +1872,7 @@ describe("session/engine", () => {
                       type: "shell",
                       with: {
                         command: "printf 'ok'",
-                        result: "text",
+                        stdout: { mode: "text" },
                       },
                     },
                   ],
@@ -2258,7 +2258,7 @@ describe("session/engine", () => {
                       type: "shell",
                       with: {
                         command: "printf 'boom'; exit 1",
-                        result: "text",
+                        stdout: { mode: "text" },
                       },
                     },
                   ],
@@ -2358,12 +2358,12 @@ describe("session/engine", () => {
                     {
                       id: "left_first",
                       type: "shell",
-                      with: { command: "left-first", result: "text" },
+                      with: { command: "left-first", stdout: { mode: "text" } },
                     },
                     {
                       id: "left_second",
                       type: "shell",
-                      with: { command: "left-second", result: "text" },
+                      with: { command: "left-second", stdout: { mode: "text" } },
                     },
                   ],
                 },
@@ -2373,7 +2373,7 @@ describe("session/engine", () => {
                     {
                       id: "right_ask",
                       type: "shell",
-                      with: { command: "right-ask", result: "text" },
+                      with: { command: "right-ask", stdout: { mode: "text" } },
                     },
                   ],
                 },
@@ -2478,7 +2478,7 @@ describe("session/engine", () => {
                     {
                       id: "left_wait",
                       type: "shell",
-                      with: { command: "left-wait", result: "text" },
+                      with: { command: "left-wait", stdout: { mode: "text" } },
                     },
                   ],
                 },
@@ -2488,7 +2488,7 @@ describe("session/engine", () => {
                     {
                       id: "right_fail",
                       type: "shell",
-                      with: { command: "right-fail", result: "text" },
+                      with: { command: "right-fail", stdout: { mode: "text" } },
                     },
                   ],
                 },
@@ -2697,7 +2697,7 @@ describe("session/engine", () => {
                       type: "shell",
                       with: {
                         command: "echo right",
-                        result: "text",
+                        stdout: { mode: "text" },
                       },
                     },
                   ],
@@ -2795,7 +2795,7 @@ describe("session/engine", () => {
                       type: "shell",
                       with: {
                         command: "boom",
-                        result: "text",
+                        stdout: { mode: "text" },
                       },
                     },
                   ],
@@ -2866,7 +2866,7 @@ describe("session/engine", () => {
               type: "shell",
               with: {
                 command: "first",
-                result: "text",
+                stdout: { mode: "text" },
               },
             },
           ],
@@ -2957,12 +2957,12 @@ describe("session/engine", () => {
                     {
                       id: "left_first",
                       type: "shell",
-                      with: { command: "left-first", result: "text" },
+                      with: { command: "left-first", stdout: { mode: "text" } },
                     },
                     {
                       id: "left_second",
                       type: "shell",
-                      with: { command: "left-second", result: "text" },
+                      with: { command: "left-second", stdout: { mode: "text" } },
                     },
                   ],
                 },
@@ -2972,7 +2972,7 @@ describe("session/engine", () => {
                     {
                       id: "right_first",
                       type: "shell",
-                      with: { command: "right-first", result: "text" },
+                      with: { command: "right-first", stdout: { mode: "text" } },
                     },
                   ],
                 },
@@ -3031,7 +3031,7 @@ describe("session/engine", () => {
                       type: "shell",
                       with: {
                         command: "echo left-first",
-                        result: "text",
+                        stdout: { mode: "text" },
                       },
                     },
                     {
@@ -3039,7 +3039,7 @@ describe("session/engine", () => {
                       type: "shell",
                       with: {
                         command: "echo left-second",
-                        result: "text",
+                        stdout: { mode: "text" },
                       },
                     },
                   ],
@@ -3052,7 +3052,7 @@ describe("session/engine", () => {
                       type: "shell",
                       with: {
                         command: "echo right-first",
-                        result: "text",
+                        stdout: { mode: "text" },
                       },
                     },
                     {
@@ -3060,7 +3060,7 @@ describe("session/engine", () => {
                       type: "shell",
                       with: {
                         command: "echo right-second",
-                        result: "text",
+                        stdout: { mode: "text" },
                       },
                     },
                   ],

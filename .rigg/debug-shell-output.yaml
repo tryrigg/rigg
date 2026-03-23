@@ -4,19 +4,22 @@ steps:
     type: shell
     with:
       command: echo "hello"
-      result: text
+      stdout:
+        mode: text
 
   - id: printf_text
     type: shell
     with:
       command: printf 'hello'
-      result: text
+      stdout:
+        mode: text
 
   - id: json_text
     type: shell
     with:
       command: printf '{"message":"hello","safe_for_fields":true}\n'
-      result: json
+      stdout:
+        mode: json
 
   - id: write_snapshot
     type: write_file
@@ -30,6 +33,6 @@ steps:
         json_text_raw: ${{ toJSON(steps.json_text.result) }}
 
         notes:
-        - `echo` with `result: text` includes the trailing newline.
-        - `printf` with `result: text` preserves exactly what was printed.
-        - `result: json` is the safe option when downstream steps need field access.
+        - `echo` with `stdout.mode: text` includes the trailing newline.
+        - `printf` with `stdout.mode: text` preserves exactly what was printed.
+        - `stdout.mode: json` is the safe option when downstream steps need field access.

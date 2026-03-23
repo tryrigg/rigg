@@ -21,10 +21,15 @@ export type StepKind = (typeof StepKind)[keyof typeof StepKind]
 
 const EnvSchema = z.record(z.string(), z.string())
 const ExportsSchema = z.record(z.string(), z.string())
+const ShellStdoutSchema = z
+  .object({
+    mode: z.enum(["json", "none", "text"]).optional(),
+  })
+  .strict()
 const ShellWithSchema = z
   .object({
     command: z.string().min(1),
-    result: z.enum(["json", "none", "text"]).optional(),
+    stdout: ShellStdoutSchema.optional(),
   })
   .strict()
 

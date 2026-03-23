@@ -34,7 +34,8 @@ steps:
   type: shell
   with:
     command: echo "hello ${{ inputs.name }}"
-    result: text # none | text | json (default: text)
+    stdout:
+      mode: text # none | text | json (default: text)
 ```
 
 ### codex

@@ -259,7 +259,8 @@ steps:
                 if grep -q '^### 1\. Summary' "$TARGET"; then
                   sed -n '/^### 1\. Summary/,$p' "$TARGET" > "$TARGET.tmp" && mv "$TARGET.tmp" "$TARGET"
                 fi
-              result: none
+              stdout:
+                mode: none
 
       - else:
         steps:
@@ -318,4 +319,5 @@ steps:
                 if grep -q '^### 1\. Summary' "$TARGET"; then
                   sed -n '/^### 1\. Summary/,$p' "$TARGET" > "$TARGET.tmp" && mv "$TARGET.tmp" "$TARGET"
                 fi
-              result: none
+              stdout:
+                mode: none

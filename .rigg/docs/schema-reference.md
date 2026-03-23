@@ -20,10 +20,10 @@
 
 ## type: shell
 
-| Field          | Type                       | Required | Default |
-| -------------- | -------------------------- | -------- | ------- |
-| `with.command` | template                   | Yes      | —       |
-| `with.result`  | `none` \| `text` \| `json` | No       | `text`  |
+| Field              | Type                       | Required | Default |
+| ------------------ | -------------------------- | -------- | ------- |
+| `with.command`     | template                   | Yes      | —       |
+| `with.stdout.mode` | `none` \| `text` \| `json` | No       | `text`  |
 
 ## type: codex (`kind: turn`)
 

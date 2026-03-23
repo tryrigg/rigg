@@ -13,9 +13,9 @@ function t(text: string, color = TEXT, bold = false) {
     type: "span",
     props: {
       style: {
-        fontSize: 14,
+        fontSize: 17,
         fontFamily: "JetBrains Mono",
-        lineHeight: "26px",
+        lineHeight: "32px",
         whiteSpace: "pre" as const,
         color,
         ...(bold ? { fontWeight: 700 } : {}),
@@ -30,9 +30,9 @@ function inv(text: string, bg: string) {
     type: "span",
     props: {
       style: {
-        fontSize: 14,
+        fontSize: 17,
         fontFamily: "JetBrains Mono",
-        lineHeight: "26px",
+        lineHeight: "32px",
         background: bg,
         color: "#1a1a1e",
         padding: "2px 6px",
@@ -45,7 +45,7 @@ function inv(text: string, bg: string) {
 }
 
 function dot(color: string, opts?: { hollow?: boolean; glow?: boolean; size?: number }) {
-  const size = opts?.size ?? 12
+  const size = opts?.size ?? 16
   return {
     type: "div",
     props: {
@@ -65,8 +65,21 @@ function row(...children: unknown[]) {
   return {
     type: "div",
     props: {
-      style: { display: "flex", alignItems: "center", minHeight: 26 },
+      style: { display: "flex", alignItems: "center", minHeight: 32 },
       children,
+    },
+  }
+}
+
+function spacedRow(left: unknown[], right: unknown[]) {
+  return {
+    type: "div",
+    props: {
+      style: { display: "flex", alignItems: "center", justifyContent: "space-between", minHeight: 32 },
+      children: [
+        { type: "div", props: { style: { display: "flex", alignItems: "center" }, children: left } },
+        { type: "div", props: { style: { display: "flex", alignItems: "center", gap: 8 }, children: right } },
+      ],
     },
   }
 }
@@ -90,86 +103,25 @@ function ruleLine() {
 
 export const GET: APIRoute = async () => {
   const tuiContent = [
-    row(
-      t("  "),
-      t("> ", "#86efac", true),
-      t("rigg", TEXT, true),
-      t(" plan", TEXT, true),
-      t("  3/4 steps", DIM),
-      t("                                    "),
-      t("6.1s ", DIM),
-      t("running", CYAN, true),
+    spacedRow(
+      [t("  "), t("> ", "#86efac", true), t("rigg", TEXT, true), t(" plan", TEXT, true), t("  3/4 steps", DIM)],
+      [t("6.1s ", DIM), t("running", CYAN, true)],
     ),
     ruleLine(),
-    row(t(" ")),
-    row(
-      t("  "),
-      dot(GREEN),
-      t("  draft", DIM),
-      t("  "),
-      t("(codex)", BLUE),
-      t("                                          "),
-      t("2.3s", DIM),
-    ),
+    spacedRow([t("  "), dot(GREEN), t("  draft  ", DIM), t("(codex)", BLUE)], [t("2.3s", DIM)]),
     row(t("  |  | Drafted implementation plan for auth module", DIM)),
     row(t("  |", DIM)),
-    row(
-      t("  "),
-      dot(GREEN),
-      t("  critique", DIM),
-      t("  "),
-      t("(claude)", MAGENTA),
-      t("                                      "),
-      t("1.9s", DIM),
-    ),
+    spacedRow([t("  "), dot(GREEN), t("  critique  ", DIM), t("(claude)", MAGENTA)], [t("1.9s", DIM)]),
     row(t("  |  | Found 2 gaps in error handling", DIM)),
     row(t("  |", DIM)),
-    row(
-      t("  "),
-      dot(CYAN, { glow: true }),
-      t("  "),
-      inv("refine", CYAN),
-      t("  "),
-      t("(codex)", BLUE),
-      t("                                        "),
-      dot(CYAN, { size: 8 }),
+    spacedRow(
+      [t("  "), dot(CYAN, { glow: true }), t("  "), inv("refine", CYAN), t("  "), t("(codex)", BLUE)],
+      [dot(CYAN, { size: 10 })],
     ),
     row(t("  |  | Improving draft with critique feedback...")),
     row(t("  |", DIM)),
-    row(t("  "), dot("#666", { hollow: true }), t("  save", DIM), t("  "), t("(write_file)", MAGENTA)),
+    row(t("  "), dot("#666", { hollow: true }), t("  save  ", DIM), t("(write_file)", MAGENTA)),
     row(t("     -> PLAN.md", DIM)),
-    row(t(" ")),
-    {
-      type: "div",
-      props: {
-        style: { display: "flex", alignItems: "center", minHeight: 26, paddingLeft: 16 },
-        children: [
-          {
-            type: "div",
-            props: {
-              style: {
-                width: 320,
-                height: 8,
-                borderRadius: 4,
-                background: "rgba(255,255,255,0.06)",
-                display: "flex",
-                overflow: "hidden",
-              },
-              children: [
-                { type: "div", props: { style: { width: "75%", height: "100%", background: CYAN, borderRadius: 4 } } },
-              ],
-            },
-          },
-          {
-            type: "span",
-            props: {
-              style: { fontSize: 12, fontFamily: "JetBrains Mono", color: DIM, marginLeft: 12 },
-              children: "3/4",
-            },
-          },
-        ],
-      },
-    },
   ]
 
   const image = {
@@ -190,11 +142,11 @@ export const GET: APIRoute = async () => {
           props: {
             style: { display: "flex", alignItems: "center", gap: 10 },
             children: [
-              { type: "img", props: { src: iconDataUri, width: 28, height: 28, style: { borderRadius: 6 } } },
+              { type: "img", props: { src: iconDataUri, width: 32, height: 32, style: { borderRadius: 6 } } },
               {
                 type: "span",
                 props: {
-                  style: { fontSize: 20, fontWeight: 700, color: "#111", letterSpacing: "-0.02em" },
+                  style: { fontSize: 24, fontWeight: 700, color: "#111", letterSpacing: "-0.02em" },
                   children: "Rigg",
                 },
               },
@@ -205,7 +157,7 @@ export const GET: APIRoute = async () => {
           type: "span",
           props: {
             style: {
-              fontSize: 40,
+              fontSize: 48,
               fontWeight: 700,
               fontFamily: "Inter",
               color: "#111",
@@ -219,7 +171,7 @@ export const GET: APIRoute = async () => {
         {
           type: "span",
           props: {
-            style: { fontSize: 17, color: "#666", marginTop: 8 },
+            style: { fontSize: 20, color: "#666", marginTop: 8 },
             children: "No cloud, no browser. One command to run any workflow.",
           },
         },
@@ -275,7 +227,7 @@ export const GET: APIRoute = async () => {
               {
                 type: "div",
                 props: {
-                  style: { display: "flex", flexDirection: "column", padding: "20px 28px 24px" },
+                  style: { display: "flex", flexDirection: "column", padding: "24px 32px 28px" },
                   children: tuiContent,
                 },
               },

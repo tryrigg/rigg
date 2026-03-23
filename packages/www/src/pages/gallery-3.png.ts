@@ -14,9 +14,9 @@ function t(text: string, color = TEXT, bold = false) {
     type: "span",
     props: {
       style: {
-        fontSize: 14,
+        fontSize: 17,
         fontFamily: "JetBrains Mono",
-        lineHeight: "24px",
+        lineHeight: "30px",
         whiteSpace: "pre" as const,
         color,
         ...(bold ? { fontWeight: 700 } : {}),
@@ -27,14 +27,14 @@ function t(text: string, color = TEXT, bold = false) {
 }
 
 function row(...children: unknown[]) {
-  return { type: "div", props: { style: { display: "flex", minHeight: 24 }, children } }
+  return { type: "div", props: { style: { display: "flex", minHeight: 30 }, children } }
 }
 
 function diffRow(text: string) {
   return {
     type: "div",
     props: {
-      style: { display: "flex", minHeight: 24, background: DIFF_BG, borderRadius: 2, margin: "1px 0", paddingLeft: 4 },
+      style: { display: "flex", minHeight: 30, background: DIFF_BG, borderRadius: 2, margin: "1px 0", paddingLeft: 4 },
       children: [t(text, DIFF_TEXT)],
     },
   }
@@ -80,7 +80,7 @@ function codePanel(title: string, lines: unknown[], flexVal = 1) {
               {
                 type: "span",
                 props: {
-                  style: { marginLeft: 8, fontSize: 13, color: "rgba(255,255,255,0.35)", fontFamily: "JetBrains Mono" },
+                  style: { marginLeft: 8, fontSize: 14, color: "rgba(255,255,255,0.35)", fontFamily: "JetBrains Mono" },
                   children: title,
                 },
               },
@@ -90,7 +90,7 @@ function codePanel(title: string, lines: unknown[], flexVal = 1) {
         {
           type: "div",
           props: {
-            style: { display: "flex", flexDirection: "column", padding: "16px 20px" },
+            style: { display: "flex", flexDirection: "column", padding: "20px 24px" },
             children: lines,
           },
         },
@@ -149,11 +149,11 @@ export const GET: APIRoute = async () => {
           props: {
             style: { display: "flex", alignItems: "center", gap: 10 },
             children: [
-              { type: "img", props: { src: iconDataUri, width: 28, height: 28, style: { borderRadius: 6 } } },
+              { type: "img", props: { src: iconDataUri, width: 32, height: 32, style: { borderRadius: 6 } } },
               {
                 type: "span",
                 props: {
-                  style: { fontSize: 20, fontWeight: 700, color: "#111", letterSpacing: "-0.02em" },
+                  style: { fontSize: 24, fontWeight: 700, color: "#111", letterSpacing: "-0.02em" },
                   children: "Rigg",
                 },
               },
@@ -164,7 +164,7 @@ export const GET: APIRoute = async () => {
           type: "span",
           props: {
             style: {
-              fontSize: 40,
+              fontSize: 48,
               fontWeight: 700,
               fontFamily: "Inter",
               color: "#111",
@@ -178,7 +178,7 @@ export const GET: APIRoute = async () => {
         {
           type: "span",
           props: {
-            style: { fontSize: 17, color: "#666", marginTop: 8 },
+            style: { fontSize: 20, color: "#666", marginTop: 8 },
             children: "Drop .rigg/*.yaml into your repo. Review workflows in PRs like code.",
           },
         },

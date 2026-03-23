@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import { normalizeError } from "../util/error"
-import { parseJson } from "../util/json"
+import { compactJson, parseJson } from "../util/json"
 import { EffortSchema, type Effort } from "../workflow/effort"
 import type { CodexProviderEvent } from "./event"
 import { inferApprovalDecisionIntent, type InteractionRequest } from "../session/interaction"
@@ -58,9 +58,14 @@ const CollaborationModeListResponseSchema = z.object({
 })
 
 const ErrorNotificationSchema = z.object({
-  message: z.string().optional(),
+  error: z
+    .object({
+      message: z.string(),
+    })
+    .optional(),
   threadId: NullableStringSchema,
   turnId: NullableStringSchema,
+  willRetry: z.boolean().optional(),
 })
 
 const MessageDeltaNotificationSchema = z.object({
@@ -90,12 +95,26 @@ const TurnScopedParamsSchema = z.object({
   turnId: z.string(),
 })
 
-const ApprovalRequestSchema = z.object({
-  availableDecisions: z.array(z.string()),
-  command: z.string().optional(),
-  cwd: z.string().optional(),
+const CmdApprovalSchema = z.object({
+  availableDecisions: z.array(z.unknown()).nullable().optional(),
+  command: z.string().nullable().optional(),
+  cwd: z.string().nullable().optional(),
   itemId: z.string(),
-  reason: z.string().optional(),
+  reason: z.string().nullable().optional(),
+  turnId: z.string(),
+})
+
+const FileApprovalSchema = z.object({
+  grantRoot: z.string().nullable().optional(),
+  itemId: z.string(),
+  reason: z.string().nullable().optional(),
+  turnId: z.string(),
+})
+
+const PermApprovalSchema = z.object({
+  itemId: z.string(),
+  permissions: JsonObjectSchema,
+  reason: z.string().nullable().optional(),
   turnId: z.string(),
 })
 
@@ -262,7 +281,7 @@ export function parseError(params: unknown): ErrorNotification {
   const parsed = parseWithSchema(ErrorNotificationSchema, params, "codex app-server sent an invalid error notification")
 
   return {
-    message: parsed.message ?? "codex app-server reported an error",
+    message: parsed.error?.message ?? "codex app-server reported an error",
     threadId: parsed.threadId ?? null,
     turnId: parsed.turnId ?? null,
   }
@@ -314,32 +333,17 @@ export function parseApproval(
   requestId: string,
   params: unknown,
 ): Extract<InteractionRequest, { kind: "approval" }> {
-  const parsed = parseWithSchema(
-    ApprovalRequestSchema,
-    params,
-    `codex app-server sent invalid ${requestKind} approval params`,
-  )
+  const message = `codex app-server sent invalid ${requestKind} approval params`
 
-  return {
-    command: parsed.command,
-    cwd: parsed.cwd,
-    decisions: parsed.availableDecisions.map((value) => ({
-      intent: inferApprovalDecisionIntent(value),
-      value,
-    })),
-    itemId: parsed.itemId,
-    kind: "approval",
-    message: parsed.reason ?? `${requestKind.replaceAll("_", " ")} approval requested`,
-    requestId,
-    requestKind,
-    turnId: parsed.turnId,
+  if (requestKind === "command_execution") {
+    return parseCmdApproval(requestId, requestKind, params, message)
   }
-}
 
-export function readPermissionsPayload(params: unknown): Record<string, unknown> {
-  const record = parseWithSchema(JsonObjectSchema, params, "codex app-server sent invalid permissions approval params")
-  const permissions = JsonObjectSchema.safeParse(record["permissions"])
-  return permissions.success ? permissions.data : {}
+  if (requestKind === "file_change") {
+    return parseFileApproval(requestId, requestKind, params, message)
+  }
+
+  return parsePermApproval(requestId, requestKind, params, message)
 }
 
 export function parseUserInput(
@@ -694,4 +698,182 @@ function summarizePairs(value: Record<string, unknown>, keys: readonly string[])
     .filter((detail): detail is string => detail !== undefined)
 
   return details.length === 0 ? undefined : details.join(" ")
+}
+
+function parseCmdApproval(
+  requestId: string,
+  requestKind: "command_execution",
+  params: unknown,
+  message: string,
+): Extract<InteractionRequest, { kind: "approval" }> {
+  const parsed = parseWithSchema(CmdApprovalSchema, params, message)
+  return {
+    command: parsed.command ?? undefined,
+    cwd: parsed.cwd ?? undefined,
+    decisions: parseCmdDecisions(parsed.availableDecisions),
+    itemId: parsed.itemId,
+    kind: "approval",
+    message: approvalMsg(requestKind, parsed.reason),
+    requestId,
+    requestKind,
+    turnId: parsed.turnId,
+  }
+}
+
+function parseFileApproval(
+  requestId: string,
+  requestKind: "file_change",
+  params: unknown,
+  message: string,
+): Extract<InteractionRequest, { kind: "approval" }> {
+  const parsed = parseWithSchema(FileApprovalSchema, params, message)
+  const values = parsed.grantRoot
+    ? ["accept", "acceptForSession", "decline", "cancel"]
+    : ["accept", "decline", "cancel"]
+  return {
+    command: undefined,
+    cwd: undefined,
+    decisions: values.map((value) => makeDecision(value)),
+    itemId: parsed.itemId,
+    kind: "approval",
+    message: approvalMsg(requestKind, parsed.reason),
+    requestId,
+    requestKind,
+    turnId: parsed.turnId,
+  }
+}
+
+function parsePermApproval(
+  requestId: string,
+  requestKind: "permissions",
+  params: unknown,
+  message: string,
+): Extract<InteractionRequest, { kind: "approval" }> {
+  const parsed = parseWithSchema(PermApprovalSchema, params, message)
+  const permissions = { ...parsed.permissions }
+  return {
+    command: undefined,
+    cwd: undefined,
+    decisions: [
+      makeDecision("grant", { permissions, scope: "turn" }),
+      makeDecision("grant_for_session", { permissions, scope: "session" }),
+      makeDecision("decline", { permissions: {}, scope: "turn" }),
+    ],
+    itemId: parsed.itemId,
+    kind: "approval",
+    message: approvalMsg(requestKind, parsed.reason),
+    requestId,
+    requestKind,
+    turnId: parsed.turnId,
+  }
+}
+
+function approvalMsg(
+  kind: "command_execution" | "file_change" | "permissions",
+  reason: string | null | undefined,
+): string {
+  if (reason) return reason
+  return `${kind.replaceAll("_", " ")} approval requested`
+}
+
+function parseCmdDecisions(
+  input: unknown[] | null | undefined,
+): Extract<InteractionRequest, { kind: "approval" }>["decisions"] {
+  const source = input === undefined || input === null || input.length === 0 ? ["accept", "decline", "cancel"] : input
+  const counts = new Map<string, number>()
+  for (const item of source) {
+    const key = decisionKey(item)
+    if (key === null) {
+      continue
+    }
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+
+  const seen = new Map<string, number>()
+  return source.map((item) => {
+    if (typeof item === "string") {
+      const index = (seen.get(item) ?? 0) + 1
+      seen.set(item, index)
+      return makeDecision(uniqueDecisionValue(item, index, counts.get(item) ?? 0), item)
+    }
+
+    if (item !== null && typeof item === "object") {
+      const entries = Object.entries(item)
+      if (entries.length === 1) {
+        const [key, payload] = entries[0]!
+        const index = (seen.get(key) ?? 0) + 1
+        seen.set(key, index)
+        return makeDecision(uniqueDecisionValue(key, index, counts.get(key) ?? 0), item, decisionLabel(key, payload))
+      }
+    }
+
+    throw new Error("codex app-server sent unsupported approval decision")
+  })
+}
+
+function decisionKey(item: unknown): string | null {
+  if (typeof item === "string") {
+    return item
+  }
+  if (item === null || typeof item !== "object") {
+    return null
+  }
+  const entries = Object.entries(item)
+  if (entries.length !== 1) {
+    return null
+  }
+  const [key] = entries[0]!
+  return key
+}
+
+function makeDecision(
+  value: string,
+  response?: unknown,
+  label?: string,
+): Extract<InteractionRequest, { kind: "approval" }>["decisions"][number] {
+  return {
+    intent: inferApprovalDecisionIntent(normalizeApprovalIntentToken(value)),
+    ...(label === undefined ? {} : { label }),
+    ...(response === undefined ? {} : { response }),
+    value,
+  }
+}
+
+function decisionLabel(key: string, payload: unknown): string {
+  if (!isRecord(payload)) {
+    return key
+  }
+
+  const keys = ["host", "action", "path", "root", "cwd", "command"]
+  const detail = summarizePairs(payload, keys)
+  if (detail === undefined) {
+    return `${key} ${compactJson(payload)}`
+  }
+  if (
+    Object.entries(payload).some(
+      ([name, value]) => !keys.includes(name) || typeof value !== "string" || value.length === 0,
+    )
+  ) {
+    return `${key} ${compactJson(payload)}`
+  }
+  return `${key} ${detail}`
+}
+
+function uniqueDecisionValue(key: string, index: number, total: number): string {
+  if (total <= 1) {
+    return key
+  }
+  return `${key}:${index}`
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+}
+
+function normalizeApprovalIntentToken(value: string): string {
+  if (value === "acceptForSession") return "accept"
+  if (value === "acceptWithExecpolicyAmendment" || value.startsWith("acceptWithExecpolicyAmendment:")) return "accept"
+  if (value === "applyNetworkPolicyAmendment" || value.startsWith("applyNetworkPolicyAmendment:")) return "accept"
+  if (value === "grant" || value === "grant_for_session") return "accept"
+  return value
 }

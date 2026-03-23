@@ -31,9 +31,10 @@ function approvalShortcut(decision: ApprovalDecision, index: number): string {
 }
 
 function shortcutCandidates(decision: ApprovalDecision, index: number): string[] {
-  const normalizedValue = normalizeApprovalChoiceInput(decision.value)
-  const words = normalizedValue.split(/[^a-z0-9]+/).filter((word) => word.length > 0)
-  const compactValue = normalizedValue.replace(/[^a-z0-9]+/g, "")
+  const words = approvalSearchText(decision)
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length > 0)
+  const compactValue = approvalSearchText(decision).replace(/[^a-z0-9]+/g, "")
   const candidates = new Set<string>([approvalShortcut(decision, index)])
 
   for (const word of words) {
@@ -60,6 +61,14 @@ function normalizeApprovalChoiceInput(input: string): string {
   return input.trim().toLowerCase()
 }
 
+function approvalLabel(decision: ApprovalDecision): string {
+  return decision.label ?? decision.value
+}
+
+function approvalSearchText(decision: ApprovalDecision): string {
+  return normalizeApprovalChoiceInput(`${approvalLabel(decision)} ${decision.value}`)
+}
+
 export function buildChoices(decisions: ReadonlyArray<ApprovalDecision>): PromptChoice[] {
   const choices: PromptChoice[] = []
   const usedShortcuts = new Set<string>()
@@ -67,15 +76,19 @@ export function buildChoices(decisions: ReadonlyArray<ApprovalDecision>): Prompt
     const tokens = new Set<string>()
     const completionTokens = new Set<string>()
     const indexToken = String(index + 1)
-    const normalizedValue = normalizeApprovalChoiceInput(decision.value)
+    const normalizedLabel = normalizeApprovalChoiceInput(approvalLabel(decision))
     const shortcut =
       shortcutCandidates(decision, index).find((candidate) => !usedShortcuts.has(candidate)) ?? indexToken
 
     usedShortcuts.add(shortcut)
 
+    if (normalizedLabel.length > 0) {
+      tokens.add(normalizedLabel)
+      completionTokens.add(normalizedLabel)
+    }
+    const normalizedValue = normalizeApprovalChoiceInput(decision.value)
     if (normalizedValue.length > 0) {
       tokens.add(normalizedValue)
-      completionTokens.add(normalizedValue)
     }
     tokens.add(indexToken)
     completionTokens.add(indexToken)
@@ -248,7 +261,7 @@ function ApprovalPanel({
             <Text bold color="cyan" underline={choice.intent === "approve"}>
               [{choice.shortcut}]
             </Text>{" "}
-            {choice.decision}
+            {request.decisions.find((decision) => decision.value === choice.decision)?.label ?? choice.decision}
             {"  "}
           </Text>
         ))}

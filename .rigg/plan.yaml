@@ -24,21 +24,15 @@ steps:
         fi
 
   - id: explore
-    type: shell
-    env:
-      REQUIREMENTS: ${{ inputs.requirements }}
-      UX_DESIGN: ${{ steps.read_ux.result }}
+    type: cursor
     with:
-      command: |
-        claude -p \
-          --model claude-opus-4-6 \
-          --append-system-prompt-file private/typescript-implementation-guide.md \
-          --tools "Read,Glob,Grep,Bash,WebSearch" \
-          --allowedTools "Read,Glob,Grep,Bash,WebSearch" \
-          --no-session-persistence \
-          --output-format text \
-          "You are a senior software architect preparing implementation context.
+      mode: agent
+      model: composer-2-fast
+      prompt: |
+        You are a senior software architect preparing implementation context.
         Your job is to find the code that needs to change to realize the requirements below.
+
+        First, read `private/typescript-implementation-guide.md` in full — all implementation decisions must conform to it.
 
         # Project: Rigg
         - Language: TypeScript 5.9 (strict, erasableSyntaxOnly)
@@ -51,17 +45,20 @@ steps:
         - CI: GitHub Actions
 
         # Requirements
-        $REQUIREMENTS
+        ${{ inputs.requirements }}
 
         # UX design
-        $(if [ -n "$UX_DESIGN" ]; then echo 'The following UX design is finalized — implementation must match it exactly.'; echo; echo "$UX_DESIGN"; else echo 'No UX design was provided. Derive the UX from the requirements and existing codebase patterns.'; fi)
+        ${{ steps.read_ux.result }}
+        NOTE: If the UX design above is empty, no separate UX design was provided.
+        In that case, derive the UX from the requirements and existing codebase patterns.
+        If a UX design IS provided, implementation must match it exactly.
 
         # Task
         Explore the codebase to gather ALL implementation context needed.
         Focus entirely on HOW to build it.
 
         ## Implementation exploration
-        1. Use Glob and Grep to find files related to the requirements
+        1. Find files related to the requirements
         2. Read the actual source code of relevant modules, types, and tests
         3. Map how the relevant code connects to the rest of the system
         4. Find similar patterns and conventions already in the codebase
@@ -97,7 +94,7 @@ steps:
         ### Constraints and gotchas
         Anything discovered during exploration that the implementer needs to know.
 
-        Base everything on what you actually read from the codebase. No assumptions."
+        Base everything on what you actually read from the codebase. No assumptions.
 
   - id: draft
     type: codex

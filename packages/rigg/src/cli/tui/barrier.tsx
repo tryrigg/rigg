@@ -1,13 +1,9 @@
 import { Box, Text, useInput } from "ink"
 
-import type { FrontierNode, StepBarrier } from "../../session/schema"
+import type { StepBarrier } from "../../session/schema"
 import { frontierLabel } from "../state"
 import { matchesShortcut } from "./input"
 import { statusSymbol } from "./symbols"
-
-function formatFrontierLabel(node: FrontierNode): string {
-  return frontierLabel(node)
-}
 
 export function Barrier({
   barrier,
@@ -35,12 +31,12 @@ export function Barrier({
           {completedInfo.status}
         </Text>
       )}
-      <Text>Next: {barrier.next.length === 0 ? "(none)" : formatFrontierLabel(barrier.next[0]!)}</Text>
+      <Text>Next: {barrier.next.length === 0 ? "(none)" : frontierLabel(barrier.next[0]!)}</Text>
       {barrier.next.length > 1 &&
         barrier.next.slice(1).map((node) => (
           <Text key={node.node_path} dimColor>
             {"  "}
-            {formatFrontierLabel(node)}
+            {frontierLabel(node)}
           </Text>
         ))}
       <Text>{""}</Text>

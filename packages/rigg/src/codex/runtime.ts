@@ -4,12 +4,7 @@ import { createPromiseKit } from "../util/promise"
 import { RIGG_VERSION } from "../version"
 import { DEFAULT_EFFORT, type Effort } from "../workflow/effort"
 import type { CodexProviderEvent } from "./event"
-import {
-  findDecision,
-  type InteractionHandler,
-  type InteractionRequest,
-  type InteractionResolution,
-} from "../session/interaction"
+import { type InteractionHandler, type InteractionRequest, type InteractionResolution } from "../session/interaction"
 import { startServer, assertVersion, isBenignCodexDiagnostic, type CodexProcessOptions } from "./proc"
 import { createRpcClient } from "./rpc"
 import {
@@ -29,7 +24,6 @@ import {
   parseTurnDone,
   parseTurnStart,
   parseUserInput,
-  readPermissionsPayload,
   readTurnId,
   type CollaborationModeKind,
   type ReviewStartTarget,
@@ -762,15 +756,11 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
     assertApprovalDecision(request, resolution.decision)
 
     if (input.requestKind === "permissions") {
-      const approvedDecision = findDecision(request, "approve")
-      rpc.respond(input.id, {
-        permissions: approvedDecision?.value === resolution.decision ? readPermissionsPayload(input.params) : {},
-        scope: "turn",
-      })
+      rpc.respond(input.id, permApprovalResponse(request, resolution.decision))
       return
     }
 
-    rpc.respond(input.id, { decision: resolution.decision })
+    rpc.respond(input.id, { decision: approvalResponse(request, resolution.decision) })
   }
 
   async function handleUserInputRequest(
@@ -1104,4 +1094,49 @@ function assertApprovalDecision(request: Extract<InteractionRequest, { kind: "ap
   }
 
   throw new Error(`interaction handler returned invalid approval decision: ${decision}`)
+}
+
+function approvalResponse(request: Extract<InteractionRequest, { kind: "approval" }>, decision: string): unknown {
+  const match = request.decisions.find((candidate) => candidate.value === decision)
+  return match?.response ?? decision
+}
+
+function permApprovalResponse(
+  request: Extract<InteractionRequest, { kind: "approval" }>,
+  decision: string,
+): { permissions: Record<string, unknown>; scope: "turn" | "session" } {
+  const value = approvalResponse(request, decision)
+  const parsed = parsePermResponse(value)
+  if (parsed !== null) {
+    return parsed
+  }
+
+  return {
+    permissions: {},
+    scope: "turn",
+  }
+}
+
+function parsePermResponse(value: unknown): { permissions: Record<string, unknown>; scope: "turn" | "session" } | null {
+  if (value === null || typeof value !== "object") {
+    return null
+  }
+  if (!("permissions" in value) || !("scope" in value)) {
+    return null
+  }
+
+  const permissions = value["permissions"]
+  const scope = value["scope"]
+  if (!isRecord(permissions)) {
+    return null
+  }
+  if (scope !== "turn" && scope !== "session") {
+    return null
+  }
+
+  return { permissions, scope }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object"
 }

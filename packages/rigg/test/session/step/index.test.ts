@@ -800,15 +800,20 @@ describe("session/step", () => {
                 itemId: "perm_1",
                 reason: "Need permissions",
                 permissions: {
-                  mode: "workspace-write",
-                  writableRoots: [root],
+                  fileSystem: {
+                    read: null,
+                    write: [root],
+                  },
+                  network: null,
                 },
-                availableDecisions: ["accept", "decline", "cancel"],
               },
               expectResult: {
                 permissions: {
-                  mode: "workspace-write",
-                  writableRoots: [root],
+                  fileSystem: {
+                    read: null,
+                    write: [root],
+                  },
+                  network: null,
                 },
                 scope: "turn",
               },
@@ -906,7 +911,10 @@ describe("session/step", () => {
           interactionHandler: async (request) => {
             switch (request.kind) {
               case "approval":
-                return { decision: "accept", kind: "approval" }
+                return {
+                  decision: request.decisions.find((decision) => decision.intent === "approve")?.value ?? "decline",
+                  kind: "approval",
+                }
               case "user_input":
                 return { answers: { choice: { answers: ["A"] } }, kind: "user_input" }
               case "elicitation":

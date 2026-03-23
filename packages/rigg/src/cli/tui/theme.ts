@@ -10,6 +10,7 @@ export const colors = {
 
 export const kindColors: Record<string, string> = {
   shell: "yellow",
+  claude: "magenta",
   codex: "blue",
   cursor: "cyan",
   write_file: "magenta",

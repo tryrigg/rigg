@@ -3,18 +3,48 @@ import { spawn } from "node:child_process"
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
+import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk"
 
 import type { ActionNode } from "../../../src/workflow/schema"
+import type { ClaudeProviderEvent } from "../../../src/claude/event"
 import type { CodexProviderEvent } from "../../../src/codex/event"
 import type { CursorProviderEvent } from "../../../src/cursor/event"
 import { createCodexRuntimeSession } from "../../../src/codex/runtime"
 import { RIGG_VERSION } from "../../../src/version"
 import { runActionStep } from "../../../src/session/step"
 import { renderContext } from "../../fixture/builders"
+import { createFakeClaudeSdk, installFakeClaude } from "../../fixture/fake-claude"
 import { installFakeCodex } from "../../fixture/fake-codex"
 import { installFakeCursor } from "../../fixture/fake-cursor"
 
 const FAKE_CODEX_LIFECYCLE_LOG = ".fake-codex-app-server-events.log"
+
+function claudeResult(text: string): SDKMessage {
+  return {
+    type: "result",
+    subtype: "success",
+    duration_api_ms: 1,
+    duration_ms: 1,
+    is_error: false,
+    modelUsage: {},
+    num_turns: 1,
+    permission_denials: [],
+    result: text,
+    session_id: "session_1",
+    stop_reason: "end_turn",
+    total_cost_usd: 0,
+    usage: {
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+      input_tokens: 0,
+      output_tokens: 0,
+      server_tool_use: null,
+      service_tier: null,
+      cache_creation: null,
+    },
+    uuid: "00000000-0000-4000-8000-000000000001",
+  } as unknown as SDKMessage
+}
 
 async function readFakeCodexLifecycleEvents(root: string): Promise<string[]> {
   try {
@@ -1257,6 +1287,128 @@ describe("session/step", () => {
       const lifecycleEvents = await waitForFakeCodexExitEvents(root, 2)
       expect(lifecycleEvents.filter((line) => line.startsWith("started:"))).toHaveLength(2)
       expect(lifecycleEvents.filter((line) => line.startsWith("exit:"))).toHaveLength(2)
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("runs claude steps through the runtime and maps snake_case options", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-claude-step-"))
+    try {
+      const binDir = await installFakeClaude(root)
+      const events: ClaudeProviderEvent[] = []
+      const { sdk, state } = createFakeClaudeSdk({
+        messages: [claudeResult("done")],
+      })
+
+      const result = await runActionStep(
+        {
+          type: "claude",
+          with: {
+            effort: "high",
+            max_thinking_tokens: 12000,
+            max_turns: 8,
+            model: "claude-opus-4-6",
+            permission_mode: "accept_edits",
+            prompt: "Implement the change.",
+          },
+        },
+        renderContext(),
+        {
+          claudeSdk: sdk,
+          cwd: root,
+          env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+          onProviderEvent: (event) => {
+            if (event.provider === "claude") {
+              events.push(event)
+            }
+          },
+        },
+      )
+
+      expect(result.exitCode).toBe(0)
+      expect(result.result).toBe("done")
+      expect(events).toEqual([
+        {
+          kind: "session_completed",
+          provider: "claude",
+          sessionId: "session_1",
+          status: "completed",
+        },
+      ])
+      expect(state.queries[0]).toMatchObject({
+        cwd: root,
+        effort: "high",
+        maxThinkingTokens: 12000,
+        maxTurns: 8,
+        model: "claude-opus-4-6",
+        permissionMode: "acceptEdits",
+      })
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("uses separate claude sessions for concurrent steps", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-claude-concurrent-"))
+    try {
+      const binDir = await installFakeClaude(root)
+      const { sdk, state } = createFakeClaudeSdk({
+        onQuery: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 50))
+          return [claudeResult("done")]
+        },
+      })
+      const step: ActionNode = {
+        type: "claude",
+        with: {
+          prompt: "run in isolated session",
+        },
+      }
+
+      const [first, second] = await Promise.all([
+        runActionStep(step, renderContext(), {
+          claudeSdk: sdk,
+          cwd: root,
+          env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+        }),
+        runActionStep(step, renderContext(), {
+          claudeSdk: sdk,
+          cwd: root,
+          env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+        }),
+      ])
+
+      expect(first.result).toBe("done")
+      expect(second.result).toBe("done")
+      expect(state.queries).toHaveLength(2)
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("rejects unsupported claude versions", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-claude-version-gate-"))
+    try {
+      const binDir = await installFakeClaude(root, {
+        versionOutput: "claude 2.1.75",
+      })
+
+      await expect(
+        runActionStep(
+          {
+            type: "claude",
+            with: {
+              prompt: "Say hi",
+            },
+          },
+          renderContext(),
+          {
+            cwd: root,
+            env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+          },
+        ),
+      ).rejects.toThrow("Upgrade to v2.1.76 or newer")
     } finally {
       await rm(root, { force: true, recursive: true })
     }

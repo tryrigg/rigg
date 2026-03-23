@@ -33,6 +33,7 @@ export type UiState = {
 }
 
 const labels: Record<string, string> = {
+  claude: "claude",
   codex: "codex",
   cursor: "cursor",
   shell: "cmd",
@@ -190,6 +191,12 @@ export function frontierLabel(node: FrontierNode): string {
       parts.push("plan")
     }
   }
+  if (node.node_kind === "claude") {
+    if (node.model) {
+      parts.push(node.model)
+    }
+    return parts.join(" · ")
+  }
   if (node.node_kind === "cursor" && node.cursor_mode) {
     parts.push(node.cursor_mode)
   }
@@ -227,7 +234,11 @@ function appendProviderEvent(state: UiState, nodePath: string, event: ProviderEv
       )
       return
     case "message_completed":
-      upsertAssistant(output, event.itemId ?? event.turnId, () => event.text)
+      upsertAssistant(
+        output,
+        event.provider === "codex" ? (event.itemId ?? event.turnId) : (event.messageId ?? event.sessionId),
+        () => event.text,
+      )
       return
     case "tool_started":
       output.entries.push({

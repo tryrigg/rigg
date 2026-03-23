@@ -10,18 +10,12 @@ inputs:
 
 steps:
   - id: explore
-    type: shell
-    env:
-      REQUIREMENTS: ${{ inputs.requirements }}
+    type: claude
     with:
-      command: |
-        claude -p \
-          --model claude-opus-4-6 \
-          --tools "Read,Glob,Grep,Bash,WebSearch" \
-          --allowedTools "Read,Glob,Grep,Bash,WebSearch" \
-          --no-session-persistence \
-          --output-format text \
-          "You are a UX researcher and product designer preparing context for a CLI user experience design.
+      model: claude-opus-4-6
+      permission_mode: bypass_permissions
+      prompt: |
+        You are a UX researcher and product designer preparing context for a CLI user experience design.
 
         # Project: Rigg
         - Language: TypeScript 5.9
@@ -31,7 +25,7 @@ steps:
           - packages/www — documentation site (Astro 6, Starlight)
 
         # Requirements
-        $REQUIREMENTS
+        ${{ inputs.requirements }}
 
         # Task
         Explore the codebase AND the external tools/protocols referenced in the requirements to gather ALL context needed for UX design.
@@ -110,7 +104,7 @@ steps:
         ### Constraints and opportunities
         UX constraints from the codebase. Opportunities for improvement.
 
-        Base everything on what you actually read and researched. No assumptions. Do NOT assume an external tool works the same way as an existing integration just because they belong to the same category."
+        Base everything on what you actually read and researched. No assumptions. Do NOT assume an external tool works the same way as an existing integration just because they belong to the same category.
 
   - id: designs
     type: parallel
@@ -118,26 +112,19 @@ steps:
       - id: claude_branch
         steps:
           - id: claude_design
-            type: shell
-            env:
-              CONTEXT: ${{ steps.explore.result }}
-              REQUIREMENTS: ${{ inputs.requirements }}
+            type: claude
             with:
-              command: |
-                claude -p \
-                  --model claude-opus-4-6 \
-                  --tools "Read,Glob,Grep,WebSearch" \
-                  --allowedTools "Read,Glob,Grep,WebSearch" \
-                  --no-session-persistence \
-                  --output-format text \
-                  "You are a product designer specializing in developer tools and CLI experiences.
+              model: claude-opus-4-6
+              permission_mode: bypass_permissions
+              prompt: |
+                You are a product designer specializing in developer tools and CLI experiences.
                 Your north star: 'Don't Make Me Think.' Every interaction obvious, every output scannable, every error actionable.
 
                 # Codebase context
-                $CONTEXT
+                ${{ steps.explore.result }}
 
                 # Requirements
-                $REQUIREMENTS
+                ${{ inputs.requirements }}
 
                 # Task
                 Create a comprehensive UX design from scratch.
@@ -236,7 +223,7 @@ steps:
                 | Pattern | Existing behavior | This feature | Same? | If different, why |
                 |---------|------------------|--------------|-------|-------------------|
                 Consistency is desirable where the underlying capabilities are genuinely the same.
-                Where they differ, the design SHOULD differ — document why."
+                Where they differ, the design SHOULD differ — document why.
 
       - id: codex_branch
         steps:
@@ -351,36 +338,27 @@ steps:
       codex: ${{ steps.codex_design.result }}
 
   - id: synthesize
-    type: shell
-    env:
-      CLAUDE_DESIGN: ${{ steps.designs.result.claude }}
-      CODEX_DESIGN: ${{ steps.designs.result.codex }}
-      CONTEXT: ${{ steps.explore.result }}
-      REQUIREMENTS: ${{ inputs.requirements }}
+    type: claude
     with:
-      command: |
-        claude -p \
-          --model claude-opus-4-6 \
-          --tools "Read,Glob,Grep,WebSearch" \
-          --allowedTools "Read,Glob,Grep,WebSearch" \
-          --no-session-persistence \
-          --output-format text \
-          "You are a principal product designer creating the definitive UX design document.
+      model: claude-opus-4-6
+      permission_mode: bypass_permissions
+      prompt: |
+        You are a principal product designer creating the definitive UX design document.
 
         Two AI models independently designed the user experience. Your job: critically evaluate both,
         then synthesize the BEST ideas into a single, authoritative design.
 
         # Codebase context
-        $CONTEXT
+        ${{ steps.explore.result }}
 
         # Requirements
-        $REQUIREMENTS
+        ${{ inputs.requirements }}
 
         # Claude's design
-        $CLAUDE_DESIGN
+        ${{ steps.designs.result.claude }}
 
         # Codex's design
-        $CODEX_DESIGN
+        ${{ steps.designs.result.codex }}
 
         # Evaluation criteria (apply to both designs before synthesizing)
         Before merging, score each design on these dimensions to identify strengths and weaknesses:
@@ -483,7 +461,7 @@ steps:
         |---------|------------------|--------------|-------|-------------------|
         Consistency is adopted where the underlying capabilities are genuinely the same.
         Where they differ, the design SHOULD differ — document why.
-        Flag any place where consistency was tempting but would have misrepresented the tool."
+        Flag any place where consistency was tempting but would have misrepresented the tool.
 
   - id: write_output
     type: write_file

@@ -191,25 +191,22 @@ steps:
         REMINDER: Your entire response goes into a file as-is. No preamble. First line = "### 1. Summary".
 
   - id: critique
-    type: shell
-    env:
-      PLAN: ${{ steps.draft.result }}
-      UX_DESIGN: ${{ steps.read_ux.result }}
+    type: claude
     with:
-      command: |
-        printf '%s' "$PLAN" | claude -p \
-          --model claude-opus-4-6 \
-          --append-system-prompt-file private/typescript-implementation-guide.md \
-          --tools "Read,Glob,Grep,Bash,WebSearch" \
-          --allowedTools "Read,Glob,Grep,Bash,WebSearch" \
-          --no-session-persistence \
-          --output-format text \
-          "You are auditing an implementation plan for the Rigg project (TypeScript 5.9, Bun 1.3.10).
+      model: claude-opus-4-6
+      permission_mode: bypass_permissions
+      prompt: |
+        You are auditing an implementation plan for the Rigg project (TypeScript 5.9, Bun 1.3.10).
 
-        The implementation plan is provided via stdin. Read it carefully.
+        First, read `private/typescript-implementation-guide.md` in full — all your judgments must conform to it.
+
+        ## Implementation plan
+        ${{ steps.draft.result }}
 
         ## UX design
-        $(if [ -n "$UX_DESIGN" ]; then echo 'The following UX design is the spec that the plan must implement:'; echo; echo "$UX_DESIGN"; else echo 'No separate UX design was provided. The plan derives UX from the requirements directly.'; fi)
+        ${{ steps.read_ux.result }}
+        NOTE: If the UX design above is empty, no separate UX design was provided.
+        The plan derives UX from the requirements directly. Auto-PASS UX fidelity checks.
 
         ## Task
         ACTIVELY VERIFY the plan against the actual codebase:
@@ -240,7 +237,7 @@ steps:
 
         If all items PASS, respond with exactly: LGTM
 
-        Otherwise, list only the FAILing items with specific, actionable fixes. Be concise — one fix per item."
+        Otherwise, list only the FAILing items with specific, actionable fixes. Be concise — one fix per item.
 
   - id: finalize
     type: branch

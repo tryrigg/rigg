@@ -10,6 +10,7 @@ import type { TreeEntry } from "./tree"
 
 const KIND_LABELS: Record<string, string> = {
   shell: "cmd",
+  claude: "claude",
   codex: "codex",
   cursor: "cursor",
   write_file: "write_file",

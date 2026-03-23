@@ -1,6 +1,6 @@
 ---
 title: Examples
-description: Workflow patterns for common coding tasks using Codex, Cursor, and other agents.
+description: Workflow patterns for common coding tasks using Codex, Claude, Cursor, and shell steps.
 sidebar:
   order: 1
 ---
@@ -82,9 +82,27 @@ steps:
       content: ${{ steps.refine.result }}
 ```
 
+## Implement with Claude
+
+```yaml
+id: implement
+inputs:
+  requirements:
+    type: string
+steps:
+  - id: build
+    type: claude
+    with:
+      prompt: |
+        Implement the following change in the current repository.
+
+        Requirements:
+        ${{ inputs.requirements }}
+```
+
 ## Parallel checks
 
-Runs multiple shell checks concurrently, then summarizes them with Codex.
+Runs multiple shell checks concurrently, then summarizes them with Claude.
 
 ```yaml
 id: parallel-checks
@@ -111,9 +129,8 @@ steps:
       lint: ${{ steps.run_lint.result }}
 
   - id: report
-    type: codex
+    type: claude
     with:
-      kind: turn
       prompt: |
         Summarize:
         Unit: ${{ steps.all.result.unit }}

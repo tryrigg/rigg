@@ -71,6 +71,22 @@ overall_explanation: string
 overall_confidence_score: number
 ```
 
+## type: claude
+
+| Field                      | Type                                                          | Required |
+| -------------------------- | ------------------------------------------------------------- | -------- |
+| `with.prompt`              | template                                                      | Yes      |
+| `with.model`               | string                                                        | No       |
+| `with.effort`              | `low` \| `medium` \| `high`                                   | No       |
+| `with.max_turns`           | integer                                                       | No       |
+| `with.max_thinking_tokens` | integer                                                       | No       |
+| `with.permission_mode`     | `default` \| `accept_edits` \| `bypass_permissions` \| `plan` | No       |
+
+`claude` returns the final plain-text assistant response.
+Claude YAML fields are `snake_case` and map directly to Claude Agent SDK options in `camelCase`.
+Do not set `with.kind`, `with.mode`, or `with.action` on Claude steps.
+Use a locally installed and authenticated Claude Code CLI (`claude login`).
+
 ## type: cursor
 
 | Field         | Type                       | Required              |

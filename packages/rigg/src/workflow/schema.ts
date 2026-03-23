@@ -6,6 +6,7 @@ import { InputSchema } from "./input"
 
 export const StepKind = {
   Branch: "branch",
+  Claude: "claude",
   Codex: "codex",
   Cursor: "cursor",
   Group: "group",
@@ -53,6 +54,19 @@ const CodexTurnWithSchema = z
 
 const CodexWithSchema = z.discriminatedUnion("kind", [CodexTurnWithSchema, CodexReviewWithSchema])
 
+const ClaudePermissionModeSchema = z.enum(["default", "accept_edits", "bypass_permissions", "plan"])
+const ClaudeEffortSchema = z.enum(["low", "medium", "high"])
+const ClaudeWithSchema = z
+  .object({
+    effort: ClaudeEffortSchema.optional(),
+    max_thinking_tokens: z.number().int().positive().optional(),
+    max_turns: z.number().int().positive().optional(),
+    model: z.string().min(1).optional(),
+    permission_mode: ClaudePermissionModeSchema.optional(),
+    prompt: z.string().min(1),
+  })
+  .strict()
+
 const CursorWithSchema = z
   .object({
     mode: z.enum(["agent", "ask", "plan"]).default("agent"),
@@ -94,6 +108,11 @@ export type ShellNode = BaseNode & {
 export type CodexNode = BaseNode & {
   type: "codex"
   with: z.infer<typeof CodexTurnWithSchema> | z.infer<typeof CodexReviewWithSchema>
+}
+
+export type ClaudeNode = BaseNode & {
+  type: "claude"
+  with: z.infer<typeof ClaudeWithSchema>
 }
 
 export type CursorNode = BaseNode & {
@@ -152,6 +171,7 @@ export type WorkflowNode = BaseNode & {
 
 export type WorkflowStep =
   | BranchNode
+  | ClaudeNode
   | CodexNode
   | CursorNode
   | GroupNode
@@ -198,6 +218,11 @@ const ShellNodeSchema: z.ZodType<ShellNode> = BaseNodeSchema.extend({
 const CodexNodeSchema: z.ZodType<CodexNode> = BaseNodeSchema.extend({
   type: z.literal("codex"),
   with: CodexWithSchema,
+}).strict()
+
+const ClaudeNodeSchema: z.ZodType<ClaudeNode> = BaseNodeSchema.extend({
+  type: z.literal("claude"),
+  with: ClaudeWithSchema,
 }).strict()
 
 const CursorNodeSchema: z.ZodType<CursorNode> = BaseNodeSchema.extend({
@@ -252,6 +277,7 @@ export const WorkflowStepSchema: z.ZodType<WorkflowStep> = z.lazy(() =>
   z.union([
     ShellNodeSchema,
     CodexNodeSchema,
+    ClaudeNodeSchema,
     CursorNodeSchema,
     WriteFileNodeSchema,
     WorkflowNodeSchema,
@@ -271,4 +297,4 @@ export const WorkflowDocumentSchema: z.ZodType<WorkflowDocument> = z
   })
   .strict()
 
-export type ActionNode = CodexNode | CursorNode | ShellNode | WriteFileNode
+export type ActionNode = ClaudeNode | CodexNode | CursorNode | ShellNode | WriteFileNode

@@ -31,11 +31,11 @@ export const GET: APIRoute = async () => {
 
 Rigg captures multi-step agent workflows as \`.rigg/*.yaml\` files in your repository. Instead of ad-hoc prompts and terminal sessions, teams define explicit pipelines for implementation planning, review loops, fix verification, and codebase checks. Every run is recorded under \`.rigg/runs/\`.
 
-Supported agents: Codex (OpenAI), Cursor. Coming soon: Claude Code (Anthropic), opencode, Kimi Code.
+Supported agents: Codex (OpenAI), Claude Code (Anthropic), Cursor. Coming soon: opencode, Kimi Code.
 
 Key features:
 - YAML-based pipeline definitions with sequential steps, parallel branches, and loops with conditions
-- Plain-text Codex run steps and built-in structured Codex review results
+- Plain-text Codex/Claude run steps and built-in structured Codex review results
 - Conditional execution with expression evaluation
 - File I/O steps for saving results
 - Git-versioned workflows shared across the team

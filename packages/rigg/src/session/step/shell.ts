@@ -26,6 +26,7 @@ export type ActionExecutionOptions = {
 }
 
 export type ProviderStepOptions = ActionExecutionOptions & {
+  claudeSdk?: Pick<typeof import("@anthropic-ai/claude-agent-sdk"), "query"> | undefined
   interactionHandler?: InteractionHandler | undefined
   onProviderEvent?: ((event: ProviderEvent) => Promise<void> | void) | undefined
 }

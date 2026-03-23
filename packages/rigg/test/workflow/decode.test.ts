@@ -203,6 +203,143 @@ steps:
     }
   })
 
+  test("decodes valid claude steps and rejects unsupported claude fields", () => {
+    const valid = decode(
+      {
+        id: "check",
+        steps: [
+          {
+            type: "claude",
+            with: {
+              effort: "high",
+              max_thinking_tokens: 12000,
+              max_turns: 8,
+              model: "claude-opus-4-6",
+              permission_mode: "accept_edits",
+              prompt: "Implement the change.",
+            },
+          },
+        ],
+      },
+      "/workspace/.rigg/check.yaml",
+    )
+    const invalidKind = decode(
+      {
+        id: "check",
+        steps: [
+          {
+            type: "claude",
+            with: {
+              kind: "turn",
+              prompt: "Implement the change.",
+            },
+          },
+        ],
+      },
+      "/workspace/.rigg/check.yaml",
+    )
+    const invalidMode = decode(
+      {
+        id: "check",
+        steps: [
+          {
+            type: "claude",
+            with: {
+              mode: "agent",
+              prompt: "Implement the change.",
+            },
+          },
+        ],
+      },
+      "/workspace/.rigg/check.yaml",
+    )
+    const invalidAction = decode(
+      {
+        id: "check",
+        steps: [
+          {
+            type: "claude",
+            with: {
+              action: "draft",
+              prompt: "Implement the change.",
+            },
+          },
+        ],
+      },
+      "/workspace/.rigg/check.yaml",
+    )
+    const emptyPrompt = decode(
+      {
+        id: "check",
+        steps: [
+          {
+            type: "claude",
+            with: {
+              prompt: "",
+            },
+          },
+        ],
+      },
+      "/workspace/.rigg/check.yaml",
+    )
+    const invalidPermissionMode = decode(
+      {
+        id: "check",
+        steps: [
+          {
+            type: "claude",
+            with: {
+              permission_mode: "approve_edits",
+              prompt: "Implement the change.",
+            },
+          },
+        ],
+      },
+      "/workspace/.rigg/check.yaml",
+    )
+    const unknownKey = decode(
+      {
+        id: "check",
+        steps: [
+          {
+            type: "claude",
+            with: {
+              prompt: "Implement the change.",
+              temperature: 0,
+            },
+          },
+        ],
+      },
+      "/workspace/.rigg/check.yaml",
+    )
+
+    expect(valid).toEqual({
+      kind: "decoded",
+      workflow: {
+        id: "check",
+        steps: [
+          {
+            type: "claude",
+            with: {
+              effort: "high",
+              max_thinking_tokens: 12000,
+              max_turns: 8,
+              model: "claude-opus-4-6",
+              permission_mode: "accept_edits",
+              prompt: "Implement the change.",
+            },
+          },
+        ],
+      },
+    })
+    expect(invalidKind.kind).toBe("invalid_workflow")
+    expect(invalidMode.kind).toBe("invalid_workflow")
+    expect(invalidAction.kind).toBe("invalid_workflow")
+    expect(emptyPrompt.kind).toBe("invalid_workflow")
+    expect(invalidPermissionMode.kind).toBe("invalid_workflow")
+    expect(unknownKey.kind).toBe("invalid_workflow")
+  })
+
   test("rejects invalid workflow identifiers", () => {
     const result = decode(
       {

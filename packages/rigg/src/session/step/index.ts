@@ -1,5 +1,6 @@
 import type { ActionNode } from "../../workflow/schema"
 import type { RenderContext } from "../render"
+import { runClaudeStep } from "./claude"
 import { runCodexStep } from "./codex"
 import { runCursorStep } from "./cursor"
 import { runShellStep, type ActionStepOutput, type ProviderStepOptions } from "./shell"
@@ -42,6 +43,8 @@ export async function runActionStep(
     }
     case "codex":
       return await runCodexStep(step, context, options)
+    case "claude":
+      return await runClaudeStep(step, context, options)
     case "cursor":
       return await runCursorStep(step, context, options)
   }

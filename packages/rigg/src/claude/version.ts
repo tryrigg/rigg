@@ -1,0 +1,135 @@
+const CLAUDE_VERSION_PATTERN = /\bv?(\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.-]+)?)\b/
+
+export const MINIMUM_SUPPORTED_CLAUDE_CODE_VERSION = "2.1.76"
+
+type ParsedSemver = {
+  major: number
+  minor: number
+  patch: number
+  prerelease: string[]
+}
+
+function normalizeVersion(version: string): string {
+  const [main, prerelease] = version.trim().split("-", 2)
+  const segments = (main ?? "")
+    .split(".")
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0)
+
+  if (segments.length === 2) {
+    segments.push("0")
+  }
+
+  return prerelease === undefined ? segments.join(".") : `${segments.join(".")}-${prerelease}`
+}
+
+function parseSemver(version: string): ParsedSemver | null {
+  const normalized = normalizeVersion(version)
+  const [main = "", prerelease] = normalized.split("-", 2)
+  const segments = main.split(".")
+  if (segments.length !== 3) {
+    return null
+  }
+
+  const [majorSegment, minorSegment, patchSegment] = segments
+  if (majorSegment === undefined || minorSegment === undefined || patchSegment === undefined) {
+    return null
+  }
+
+  const major = Number.parseInt(majorSegment, 10)
+  const minor = Number.parseInt(minorSegment, 10)
+  const patch = Number.parseInt(patchSegment, 10)
+  if (![major, minor, patch].every(Number.isInteger)) {
+    return null
+  }
+
+  return {
+    major,
+    minor,
+    patch,
+    prerelease:
+      prerelease
+        ?.split(".")
+        .map((segment) => segment.trim())
+        .filter((segment) => segment.length > 0) ?? [],
+  }
+}
+
+function comparePrereleaseIdentifier(left: string, right: string): number {
+  const leftNumeric = /^\d+$/.test(left)
+  const rightNumeric = /^\d+$/.test(right)
+
+  if (leftNumeric && rightNumeric) {
+    return Number.parseInt(left, 10) - Number.parseInt(right, 10)
+  }
+  if (leftNumeric) {
+    return -1
+  }
+  if (rightNumeric) {
+    return 1
+  }
+  return left.localeCompare(right)
+}
+
+export function compareVersions(left: string, right: string): number {
+  const parsedLeft = parseSemver(left)
+  const parsedRight = parseSemver(right)
+  if (parsedLeft === null || parsedRight === null) {
+    return left.localeCompare(right)
+  }
+
+  if (parsedLeft.major !== parsedRight.major) {
+    return parsedLeft.major - parsedRight.major
+  }
+  if (parsedLeft.minor !== parsedRight.minor) {
+    return parsedLeft.minor - parsedRight.minor
+  }
+  if (parsedLeft.patch !== parsedRight.patch) {
+    return parsedLeft.patch - parsedRight.patch
+  }
+  if (parsedLeft.prerelease.length === 0 && parsedRight.prerelease.length === 0) {
+    return 0
+  }
+  if (parsedLeft.prerelease.length === 0) {
+    return 1
+  }
+  if (parsedRight.prerelease.length === 0) {
+    return -1
+  }
+
+  const length = Math.max(parsedLeft.prerelease.length, parsedRight.prerelease.length)
+  for (let index = 0; index < length; index += 1) {
+    const leftIdentifier = parsedLeft.prerelease[index]
+    const rightIdentifier = parsedRight.prerelease[index]
+    if (leftIdentifier === undefined) {
+      return -1
+    }
+    if (rightIdentifier === undefined) {
+      return 1
+    }
+    const comparison = comparePrereleaseIdentifier(leftIdentifier, rightIdentifier)
+    if (comparison !== 0) {
+      return comparison
+    }
+  }
+
+  return 0
+}
+
+export function parseVersion(output: string): string | null {
+  const match = CLAUDE_VERSION_PATTERN.exec(output)
+  if (!match?.[1]) {
+    return null
+  }
+
+  return parseSemver(match[1]) === null ? null : normalizeVersion(match[1])
+}
+
+export function isSupported(version: string): boolean {
+  return compareVersions(version, MINIMUM_SUPPORTED_CLAUDE_CODE_VERSION) >= 0
+}
+
+export function upgradeMessage(version: string | null): string {
+  const current = version === null ? "the installed version" : `v${version}`
+  return `Claude Code ${current} is too old for Rigg. Upgrade to v${MINIMUM_SUPPORTED_CLAUDE_CODE_VERSION} or newer.`
+}

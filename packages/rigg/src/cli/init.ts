@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { normalizeError } from "../util/error"
 import { examplesDoc, schemaDoc, syntaxDoc } from "./docs"
 import { skillDoc } from "./skill"
-import { branchTemplate, commitTemplate, planTemplate, uncommittedTemplate } from "./templates"
+import { branchTemplate, commitTemplate, implementTemplate, planTemplate, uncommittedTemplate } from "./templates"
 import { writeIfMissing } from "./write"
 
 type CommandResult = {
@@ -27,6 +27,7 @@ async function writeInitialWorkspace(cwd: string): Promise<string[]> {
   await mkdir(docsDir, { recursive: true })
 
   await Promise.all([
+    writeIfMissing(join(riggDir, "implement.yaml"), implementTemplate),
     writeIfMissing(join(riggDir, "plan.yaml"), planTemplate),
     writeIfMissing(join(riggDir, "review-uncommitted.yaml"), uncommittedTemplate),
     writeIfMissing(join(riggDir, "review-branch.yaml"), branchTemplate),
@@ -41,10 +42,11 @@ async function writeInitialWorkspace(cwd: string): Promise<string[]> {
 
   return [
     "Initialized .rigg/ with example workflows.",
-    "Generated workflows: plan, review-uncommitted, review-branch, review-commit.",
+    "Generated workflows: implement, plan, review-uncommitted, review-branch, review-commit.",
     "Generated .rigg/docs/ with workflow authoring documentation.",
     "Generated .agents/skills/rigg/ for AI-assisted workflow authoring.",
     "Examples:",
+    "  rigg run implement --input requirements='...'",
     "  rigg run plan --input requirements='...' --input output_path=plan.md",
     "  rigg run review-uncommitted",
     "  rigg run review-branch --input base_branch=main",

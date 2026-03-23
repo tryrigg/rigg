@@ -1,3 +1,20 @@
+export const implementTemplate = `
+id: implement
+inputs:
+  requirements:
+    type: string
+    description: Task or change request to implement
+steps:
+  - id: build
+    type: claude
+    with:
+      prompt: |
+        Implement the following change in the current repository.
+
+        Requirements:
+        \${{ inputs.requirements }}
+`.trimStart()
+
 export const planTemplate = `
 id: plan
 inputs:

@@ -218,6 +218,21 @@ export function createFrontierNode(
       user_id: step.id ?? null,
     }
   }
+  if (step.type === "claude") {
+    return {
+      codex_collaboration_mode: null,
+      codex_kind: null,
+      cursor_mode: null,
+      cwd,
+      detail: detailOverride ?? summarizeFrontierDetail(step),
+      frame_id: frameId,
+      model: step.with.model ?? null,
+      node_kind: step.type,
+      node_path: nodePath,
+      prompt_preview: frontierPromptPreview(step, context),
+      user_id: step.id ?? null,
+    }
+  }
   if (step.type === "cursor") {
     return {
       codex_collaboration_mode: null,
@@ -255,6 +270,9 @@ export function summarizeFrontierDetail(step: ActionNode): string | null {
   if (step.type === "write_file") {
     return step.with.path
   }
+  if (step.type === "claude") {
+    return "claude"
+  }
   if (step.type === "cursor") {
     return `cursor ${step.with.mode}`
   }
@@ -270,6 +288,9 @@ export function summarizeFrontierDetail(step: ActionNode): string | null {
 }
 
 function frontierPromptPreview(step: ActionNode, context: RenderContext): string | null {
+  if (step.type === "claude") {
+    return preview(renderStringSafely(step.with.prompt, context))
+  }
   if (step.type === "cursor") {
     return preview(renderStringSafely(step.with.prompt, context))
   }

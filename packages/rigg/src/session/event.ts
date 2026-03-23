@@ -1,10 +1,11 @@
+import type { ClaudeProviderEvent } from "../claude/event"
 import type { CodexProviderEvent } from "../codex/event"
 import type { CursorProviderEvent } from "../cursor/event"
 import type { InteractionResolution } from "./interaction"
 import type { NodeSnapshot, PendingInteraction, RunSnapshot, StepBarrier } from "./schema"
 
 export type StreamKind = "stdout" | "stderr"
-export type ProviderEvent = CodexProviderEvent | CursorProviderEvent
+export type ProviderEvent = ClaudeProviderEvent | CodexProviderEvent | CursorProviderEvent
 
 export type RunEvent =
   | {

@@ -5,6 +5,7 @@ import type { NodeSnapshot, RunSnapshot } from "../../session/schema"
 
 const ACTION_STEP_KINDS = new Set<string>([
   StepKind.Shell,
+  StepKind.Claude,
   StepKind.Codex,
   StepKind.Cursor,
   StepKind.WriteFile,
@@ -31,6 +32,7 @@ function collectActionNodes(
     const nodePath = parentPath === null ? rootPath(index) : childPath(parentPath, index)
     switch (step.type) {
       case "shell":
+      case "claude":
       case "codex":
       case "cursor":
       case "write_file":

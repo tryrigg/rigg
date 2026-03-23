@@ -246,6 +246,65 @@ describe("cli/state", () => {
     ])
   })
 
+  test("applyEvent renders claude provider events in live output", () => {
+    const state = createState()
+    const snapshot = runSnapshot()
+    applyEvent(state, { kind: "run_started", snapshot })
+    applyEvent(state, {
+      kind: "provider_event",
+      event: {
+        kind: "message_delta",
+        messageId: "msg_claude",
+        provider: "claude",
+        sessionId: "session_1",
+        text: "hello",
+      },
+      node_path: "/0",
+      user_id: "claude-step",
+    })
+    applyEvent(state, {
+      kind: "provider_event",
+      event: {
+        detail: "npm test",
+        kind: "tool_started",
+        provider: "claude",
+        sessionId: "session_1",
+        tool: "Bash",
+      },
+      node_path: "/0",
+      user_id: "claude-step",
+    })
+    applyEvent(state, {
+      kind: "provider_event",
+      event: {
+        kind: "error",
+        message: "permission denied",
+        provider: "claude",
+        sessionId: "session_1",
+      },
+      node_path: "/0",
+      user_id: "claude-step",
+    })
+
+    expect(state.liveOutputs["/0"]?.entries).toEqual([
+      {
+        key: "msg_claude",
+        text: "hello",
+        variant: "assistant",
+      },
+      {
+        key: null,
+        text: "tool started: Bash (npm test)",
+        variant: "event",
+      },
+      {
+        key: null,
+        text: "error: permission denied",
+        variant: "event",
+      },
+    ])
+  })
+
   test("previewOutput prefers stderr for failed nodes and stdout for succeeded nodes", () => {
     expect(
       previewOutput({
@@ -537,6 +596,101 @@ describe("cli/state", () => {
     expect(state.completedOutputs["/0"]?.entries.at(-1)).toEqual({
       key: null,
       text: "auto-continue: Next: draft_cursor [cursor] · ask · composer-2",
+      variant: "event",
+    })
+  })
+
+  test("applyEvent includes claude model in auto-continue frontier labels", () => {
+    const state = createState("auto_continue")
+    const completedNode = {
+      attempt: 1,
+      duration_ms: 1200,
+      exit_code: 0,
+      finished_at: "2026-03-15T10:01:00.000Z",
+      node_kind: "shell",
+      node_path: "/0",
+      result: null,
+      started_at: "2026-03-15T10:00:00.000Z",
+      status: "succeeded" as const,
+      stderr: null,
+      stdout: "repo ready\n",
+      user_id: "collect_context",
+      waiting_for: null,
+    }
+    const completedSnapshot = runSnapshot({ nodes: [completedNode] })
+
+    applyEvent(state, { kind: "run_started", snapshot: completedSnapshot })
+    applyEvent(state, {
+      kind: "node_completed",
+      node: completedNode,
+      snapshot: completedSnapshot,
+    })
+    applyEvent(state, {
+      barrier: {
+        barrier_id: "barrier-1",
+        completed: {
+          node_kind: "shell",
+          node_path: "/0",
+          result: null,
+          status: "succeeded",
+          user_id: "collect_context",
+        },
+        created_at: "2026-03-15T10:01:01.000Z",
+        frame_id: "root",
+        next: [
+          {
+            codex_collaboration_mode: null,
+            codex_kind: null,
+            cursor_mode: null,
+            cwd: "/workspace",
+            detail: "claude",
+            frame_id: "root",
+            model: "claude-opus-4-6",
+            node_kind: "claude",
+            node_path: "/1",
+            prompt_preview: "Implement the change",
+            user_id: "draft_claude",
+          },
+        ],
+        reason: "step_completed",
+      },
+      kind: "barrier_reached",
+      snapshot: runSnapshot({
+        active_barrier: {
+          barrier_id: "barrier-1",
+          completed: {
+            node_kind: "shell",
+            node_path: "/0",
+            result: null,
+            status: "succeeded",
+            user_id: "collect_context",
+          },
+          created_at: "2026-03-15T10:01:01.000Z",
+          frame_id: "root",
+          next: [
+            {
+              codex_collaboration_mode: null,
+              codex_kind: null,
+              cursor_mode: null,
+              cwd: "/workspace",
+              detail: "claude",
+              frame_id: "root",
+              model: "claude-opus-4-6",
+              node_kind: "claude",
+              node_path: "/1",
+              prompt_preview: "Implement the change",
+              user_id: "draft_claude",
+            },
+          ],
+          reason: "step_completed",
+        },
+        nodes: [completedNode],
+      }),
+    })
+
+    expect(state.completedOutputs["/0"]?.entries.at(-1)).toEqual({
+      key: null,
+      text: "auto-continue: Next: draft_claude [claude] · claude-opus-4-6",
       variant: "event",
     })
   })

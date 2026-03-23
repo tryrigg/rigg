@@ -27,6 +27,7 @@ import type {
   ActionNode,
   BranchCase,
   BranchNode,
+  ClaudeNode,
   CodexNode,
   CursorNode,
   GroupNode,
@@ -176,6 +177,7 @@ function validateStep(
     switch (step.type) {
       case "shell":
       case "write_file":
+      case "claude":
       case "codex":
       case "cursor":
         return validateActionStep(step, filePath, scope, errors)
@@ -224,6 +226,8 @@ function validateActionStep(
       }
     case "codex":
       return validateCodex(step, filePath, scope, errors)
+    case "claude":
+      return validateClaude(step, filePath, scope, errors)
     case "cursor":
       return validateCursor(step, filePath, scope, errors)
   }
@@ -635,6 +639,20 @@ function validateCodex(
 
 function validateCursor(
   step: CursorNode,
+  filePath: string,
+  scope: VisibleScope,
+  errors: CompileDiagnostic[],
+): ValidationSummary & { guaranteedResultShape: ResultShape; resultShape: ResultShape } {
+  checkTpl(step.with.prompt, filePath, scope, errors)
+  return {
+    availableStepShapes: new Map(scope.availableStepShapes),
+    guaranteedResultShape: StringShape,
+    resultShape: StringShape,
+  }
+}
+
+function validateClaude(
+  step: ClaudeNode,
   filePath: string,
   scope: VisibleScope,
   errors: CompileDiagnostic[],
@@ -1132,6 +1150,7 @@ function walkCalls(steps: WorkflowStep[], visit: (step: WorkflowNode) => void): 
         }
         break
       case "shell":
+      case "claude":
       case "codex":
       case "cursor":
       case "write_file":

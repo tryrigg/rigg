@@ -4,9 +4,16 @@ import { workflowById, type WorkflowProject } from "../../project"
 import type { NodeStatus, RunSnapshot, NodeSnapshot } from "../../session/schema"
 import { formatDuration } from "./symbols"
 
-export const ACTION_KINDS = new Set<string>([StepKind.Shell, StepKind.Codex, StepKind.Cursor, StepKind.WriteFile])
+export const ACTION_KINDS = new Set<string>([
+  StepKind.Shell,
+  StepKind.Claude,
+  StepKind.Codex,
+  StepKind.Cursor,
+  StepKind.WriteFile,
+])
 export const SUMMARY_KINDS = new Set<string>([
   StepKind.Shell,
+  StepKind.Claude,
   StepKind.Codex,
   StepKind.Cursor,
   StepKind.WriteFile,
@@ -139,6 +146,19 @@ export function extractDetail(step: WorkflowStep): string | undefined {
       }
       return detail
     }
+    case "claude": {
+      let detail = "claude"
+      if (step.with.model) {
+        detail += ` · ${step.with.model}`
+      }
+      if (step.with.permission_mode) {
+        detail += ` · ${step.with.permission_mode}`
+      }
+      if (step.with.effort) {
+        detail += ` · ${step.with.effort}`
+      }
+      return detail
+    }
     case "cursor": {
       const mode = step.with.mode ?? "agent"
       let detail = mode
@@ -197,6 +217,7 @@ function walkStep(
 
   switch (step.type) {
     case "shell":
+    case "claude":
     case "codex":
     case "cursor":
     case "write_file":

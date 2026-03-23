@@ -433,6 +433,19 @@ describe("extractDetail", () => {
     expect(extractDetail(step)).toBe("turn · low")
   })
 
+  test("returns claude model, permission mode, and effort", () => {
+    const step: WorkflowStep = {
+      type: "claude",
+      with: {
+        effort: "high",
+        model: "claude-opus-4-6",
+        permission_mode: "accept_edits",
+        prompt: "do stuff",
+      },
+    }
+    expect(extractDetail(step)).toBe("claude · claude-opus-4-6 · accept_edits · high")
+  })
+
   test("returns path for write_file steps", () => {
     const step: WorkflowStep = { type: "write_file", with: { path: "out.txt", content: "hi" } }
     expect(extractDetail(step)).toBe("→ out.txt")

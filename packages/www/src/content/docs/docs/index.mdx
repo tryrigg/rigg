@@ -24,7 +24,7 @@ rigg upgrade v0.1.0
 
 macOS only (prebuilt binary).
 
-**Requirements:** `codex` on `PATH` and `codex-cli 0.114.0` or newer for codex steps.
+**Requirements:** `codex` on `PATH` and `codex-cli 0.114.0` or newer for codex steps. `claude` on `PATH` for claude steps (`claude login` to authenticate).
 
 `rigg upgrade` only works from an installed release binary, not from `bun run`.
 
@@ -41,7 +41,7 @@ rigg run hello --auto-continue         # skip step barriers in the TTY UI
 
 ## Output
 
-`rigg run` requires an interactive terminal. It opens a stateful terminal UI that switches between a live running view, a waiting view for barriers and interactions, and a final result view. During `codex` steps, the running view also shows live codex activity such as assistant text and tool progress. Use `continue` or `abort` at barriers, and use `Ctrl-C` to interrupt the active step.
+`rigg run` requires an interactive terminal. It opens a stateful terminal UI that switches between a live running view, a waiting view for barriers and interactions, and a final result view. During `codex` and `claude` steps, the running view shows live agent activity such as assistant text and tool progress. Use `continue` or `abort` at barriers, and use `Ctrl-C` to interrupt the active step.
 
 With `--auto-continue`, step barriers advance automatically while approvals, questions, and other input prompts still pause normally.
 

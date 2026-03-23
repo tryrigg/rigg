@@ -2576,6 +2576,244 @@ describe("session/engine", () => {
     }
   })
 
+  test("includes claude preview data in step barriers", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-claude-barrier-preview-"))
+    const barriers: RunEvent[] = []
+
+    try {
+      await runWorkflow({
+        controlHandler: async (request) => {
+          if (request.kind !== "step_barrier") {
+            throw new Error(`unexpected control request ${request.kind}`)
+          }
+          return { action: "continue", kind: "step_barrier" }
+        },
+        internals: {
+          runActionStep: async () => ({
+            exitCode: 0,
+            providerEvents: [],
+            result: "ok",
+            stderr: "",
+            stdout: "ok",
+            termination: "completed",
+          }),
+        },
+        invocationInputs: { branch: "main" },
+        onEvent: (event) => {
+          if (event.kind === "barrier_reached") {
+            barriers.push(event)
+          }
+        },
+        parentEnv: process.env,
+        projectRoot: root,
+        workflow: {
+          id: "claude-barrier-preview",
+          steps: [
+            {
+              env: {
+                BRANCH: "${{ inputs.branch }}",
+              },
+              id: "implement",
+              type: "claude",
+              with: {
+                model: "claude-opus-4-6",
+                prompt: "Review branch ${{ env.BRANCH }}",
+              },
+            },
+          ],
+        },
+      })
+
+      const firstBarrier = barriers[0]
+      expect(firstBarrier?.kind).toBe("barrier_reached")
+      if (firstBarrier?.kind !== "barrier_reached") {
+        throw new Error("missing barrier")
+      }
+      expect(firstBarrier.barrier.next[0]).toMatchObject({
+        codex_collaboration_mode: null,
+        codex_kind: null,
+        cursor_mode: null,
+        cwd: root,
+        model: "claude-opus-4-6",
+        node_kind: "claude",
+        prompt_preview: "Review branch main",
+        user_id: "implement",
+      })
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("includes claude steps in parallel barrier frontiers", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-claude-parallel-barrier-"))
+    const barrierNext: string[][] = []
+
+    try {
+      await runWorkflow({
+        controlHandler: async (request) => {
+          if (request.kind === "step_barrier") {
+            barrierNext.push(request.barrier.next.map((step) => step.user_id ?? step.node_path))
+            return { action: "continue", kind: "step_barrier" }
+          }
+          throw new Error(`unexpected control request ${request.kind}`)
+        },
+        internals: {
+          runActionStep: async () => ({
+            exitCode: 0,
+            providerEvents: [],
+            result: "ok",
+            stderr: "",
+            stdout: "ok",
+            termination: "completed",
+          }),
+        },
+        invocationInputs: {},
+        parentEnv: process.env,
+        projectRoot: root,
+        workflow: {
+          id: "parallel-claude-barrier",
+          steps: [
+            {
+              id: "fanout",
+              type: "parallel",
+              branches: [
+                {
+                  id: "left",
+                  steps: [
+                    {
+                      id: "left_claude",
+                      type: "claude",
+                      with: {
+                        prompt: "left",
+                      },
+                    },
+                  ],
+                },
+                {
+                  id: "right",
+                  steps: [
+                    {
+                      id: "right_shell",
+                      type: "shell",
+                      with: {
+                        command: "echo right",
+                        result: "text",
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      })
+
+      expect(barrierNext[0]).toEqual(["left_claude", "right_shell"])
+      expect(barrierNext).toHaveLength(1)
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("interrupts a hanging claude sibling when another parallel branch fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-claude-parallel-failfast-"))
+
+    try {
+      const snapshot = await runWorkflow({
+        controlHandler: async (request) => {
+          if (request.kind === "step_barrier") {
+            return { action: "continue", kind: "step_barrier" }
+          }
+          throw new Error(`unexpected control request ${request.kind}`)
+        },
+        internals: {
+          runActionStep: async (step, _context, options) => {
+            if (step.id === "left_claude") {
+              await new Promise<void>((resolve, reject) => {
+                const timer = setTimeout(resolve, 1_000)
+                const onAbort = () => {
+                  clearTimeout(timer)
+                  reject(interrupt("claude sibling interrupted"))
+                }
+                if (options.signal?.aborted) {
+                  onAbort()
+                  return
+                }
+                options.signal?.addEventListener("abort", onAbort, { once: true })
+              })
+              return {
+                exitCode: 0,
+                providerEvents: [],
+                result: "done",
+                stderr: "",
+                stdout: "done",
+                termination: "completed",
+              }
+            }
+
+            if (step.id === "right_fail") {
+              return {
+                exitCode: 1,
+                providerEvents: [],
+                result: null,
+                stderr: "boom",
+                stdout: "",
+                termination: "failed",
+              }
+            }
+
+            throw new Error(`unexpected step ${step.id ?? "<anonymous>"}`)
+          },
+        },
+        invocationInputs: {},
+        parentEnv: process.env,
+        projectRoot: root,
+        workflow: {
+          id: "parallel-claude-failfast",
+          steps: [
+            {
+              id: "fanout",
+              type: "parallel",
+              branches: [
+                {
+                  id: "left",
+                  steps: [
+                    {
+                      id: "left_claude",
+                      type: "claude",
+                      with: {
+                        prompt: "left",
+                      },
+                    },
+                  ],
+                },
+                {
+                  id: "right",
+                  steps: [
+                    {
+                      id: "right_fail",
+                      type: "shell",
+                      with: {
+                        command: "boom",
+                        result: "text",
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      })
+
+      expect(snapshot.status).toBe("failed")
+      expect(snapshot.nodes.find((node) => node.user_id === "right_fail")?.status).toBe("failed")
+      expect(snapshot.nodes.find((node) => node.user_id === "left_claude")?.status).toBe("interrupted")
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
   test("detaches event and control snapshots from later state mutation", async () => {
     const root = await mkdtemp(join(tmpdir(), "rigg-execute-detached-events-"))
     let runStartedSnapshot: Extract<RunEvent, { kind: "run_started" }>["snapshot"] | undefined

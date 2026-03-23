@@ -1,6 +1,6 @@
 ---
 title: Steps
-description: Action step types — shell, codex, cursor, and write_file.
+description: Action step types — shell, codex, claude, cursor, and write_file.
 sidebar:
   order: 2
 ---
@@ -87,6 +87,38 @@ result:
   overall_confidence_score: number
 ```
 
+## claude
+
+Runs Claude Code through the local Claude CLI and returns the final plain-text assistant response.
+
+```yaml
+- id: build
+  type: claude
+  with:
+    prompt: Implement the requested change.
+    model: claude-opus-4-6
+    effort: high
+    max_turns: 8
+    max_thinking_tokens: 12000
+    permission_mode: accept_edits
+```
+
+Required field:
+
+- `with.prompt`
+
+Optional fields:
+
+- `with.model`
+- `with.effort`
+- `with.max_turns`
+- `with.max_thinking_tokens`
+- `with.permission_mode`
+
+Claude YAML stays `snake_case` and maps directly to Claude Agent SDK options in `camelCase`.
+Do not set `with.kind`, `with.mode`, or `with.action` on Claude steps.
+Claude steps require a locally installed and authenticated Claude Code CLI. Run `claude login` before use.
+
 ## cursor
 
 Runs Cursor Agent through ACP and returns the final plain-text assistant response.
@@ -118,4 +150,5 @@ Writes content to a file.
 
 - `codex` turns: `steps.draft.result`
 - `codex` review: `steps.review.result.findings`
+- `claude`: `steps.build.result`
 - `cursor`: `steps.triage.result`

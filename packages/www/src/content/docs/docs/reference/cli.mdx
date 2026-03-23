@@ -13,6 +13,14 @@ Create a `.rigg/` directory with example workflow files.
 rigg init
 ```
 
+Generated examples include:
+
+- `plan.yaml`
+- `implement.yaml`
+- `review-uncommitted.yaml`
+- `review-branch.yaml`
+- `review-commit.yaml`
+
 ## rigg upgrade
 
 Upgrade an installed Rigg release binary to the latest or a specific version.
@@ -63,3 +71,9 @@ With `--auto-continue`, step barriers advance automatically and the UI emits a m
 Use `Ctrl-C` to interrupt the active step.
 
 Workflows are discovered from the nearest `.rigg/` directory.
+
+Provider prerequisites:
+
+- Codex steps require a local Codex CLI session.
+- Claude steps require a local Claude Code CLI session. Run `claude login` before use.
+- Cursor steps require a local Cursor installation with ACP available.

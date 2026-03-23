@@ -1,118 +1,23 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
 
-const usecases = [
-  {
-    tab: 'Review & Auto-fix',
-    runCmd: 'rigg run review-and-fix',
-    filename: '.rigg/review-and-fix.yaml',
-    code: `<span class="hl-key">id</span>: review-and-fix
-<span class="hl-key">steps</span>:
-  - <span class="hl-key">id</span>: loop
-    <span class="hl-key">type</span>: <span class="hl-type">loop</span>
-    <span class="hl-key">until</span>: <span class="hl-str">\${{ len(steps.review.result.findings) == 0 }}</span>
-    <span class="hl-key">max</span>: 5
-    <span class="hl-key">steps</span>:
-      - <span class="hl-key">id</span>: review
-        <span class="hl-key">type</span>: <span class="hl-type">codex</span>
-        <span class="hl-key">with</span>:
-          <span class="hl-key">action</span>: review
-          <span class="hl-key">review</span>:
-            <span class="hl-key">target</span>:
-              <span class="hl-key">type</span>: <span class="hl-str">uncommitted</span>
-      - <span class="hl-key">id</span>: fix
-        <span class="hl-key">if</span>: <span class="hl-str">\${{ len(steps.review.result.findings) > 0 }}</span>
-        <span class="hl-key">type</span>: <span class="hl-type">codex</span>
-        <span class="hl-key">with</span>:
-          <span class="hl-key">action</span>: run
-          <span class="hl-key">prompt</span>: <span class="hl-str">Address: \${{ toJSON(steps.review.result) }}</span>`,
-    steps: [
-      { num: 1, title: 'Codex reviews your changes', desc: 'Scans uncommitted changes and returns built-in review findings.' },
-      { num: 2, title: 'Codex applies fixes', desc: 'The fix step receives the review object and edits the code directly.' },
-      { num: 3, title: 'The loop stops when findings hit zero', desc: 'No extra parser or schema layer is needed. The review result drives the condition.' },
-    ],
-  },
-  {
-    tab: 'Plan & Refine',
-    runCmd: 'rigg run plan --input requirements="Add auth to the API"',
-    filename: '.rigg/plan.yaml',
-    code: `<span class="hl-key">id</span>: plan
-<span class="hl-key">inputs</span>:
-  <span class="hl-key">requirements</span>: { <span class="hl-key">type</span>: <span class="hl-type">string</span> }
-<span class="hl-key">steps</span>:
-  - <span class="hl-key">id</span>: draft
-    <span class="hl-key">type</span>: <span class="hl-type">codex</span>
-    <span class="hl-key">with</span>:
-      <span class="hl-key">action</span>: run
-      <span class="hl-key">prompt</span>: <span class="hl-str">Draft an implementation plan for: \${{ inputs.requirements }}</span>
-  - <span class="hl-key">id</span>: critique
-    <span class="hl-key">type</span>: <span class="hl-type">codex</span>
-    <span class="hl-key">with</span>:
-      <span class="hl-key">action</span>: run
-      <span class="hl-key">prompt</span>: <span class="hl-str">Review this plan for gaps: \${{ steps.draft.result }}</span>
-  - <span class="hl-key">id</span>: refine
-    <span class="hl-key">type</span>: <span class="hl-type">codex</span>
-    <span class="hl-key">with</span>:
-      <span class="hl-key">action</span>: run
-      <span class="hl-key">prompt</span>: <span class="hl-str">Improve the draft using this critique: \${{ steps.critique.result }}</span>
-  - <span class="hl-key">id</span>: save
-    <span class="hl-key">type</span>: <span class="hl-type">write_file</span>
-    <span class="hl-key">with</span>:
-      <span class="hl-key">path</span>: <span class="hl-str">PLAN.md</span>
-      <span class="hl-key">content</span>: <span class="hl-str">\${{ steps.refine.result }}</span>`,
-    steps: [
-      { num: 1, title: 'Codex drafts the plan', desc: 'The first run step produces plain text that can be reused directly.' },
-      { num: 2, title: 'A second pass critiques it', desc: 'Critique is also just text, so the workflow stays simple.' },
-      { num: 3, title: 'Refine and save', desc: 'The final plan is a plain-text result written straight to PLAN.md.' },
-    ],
-  },
-  {
-    tab: 'Parallel Checks',
-    runCmd: 'rigg run parallel-checks',
-    filename: '.rigg/parallel-checks.yaml',
-    code: `<span class="hl-key">id</span>: parallel-checks
-<span class="hl-key">steps</span>:
-  - <span class="hl-key">id</span>: checks
-    <span class="hl-key">type</span>: <span class="hl-type">parallel</span>
-    <span class="hl-key">branches</span>:
-      - <span class="hl-key">id</span>: security
-        <span class="hl-key">steps</span>:
-          - <span class="hl-key">id</span>: scan
-            <span class="hl-key">type</span>: <span class="hl-type">codex</span>
-            <span class="hl-key">with</span>:
-              <span class="hl-key">action</span>: review
-              <span class="hl-key">prompt</span>: <span class="hl-str">Audit for security vulnerabilities.</span>
-      - <span class="hl-key">id</span>: architecture
-        <span class="hl-key">steps</span>:
-          - <span class="hl-key">id</span>: review
-            <span class="hl-key">type</span>: <span class="hl-type">claude</span>
-            <span class="hl-key">with</span>:
-              <span class="hl-key">prompt</span>: <span class="hl-str">Review architecture and design patterns.</span>
-      - <span class="hl-key">id</span>: tests
-        <span class="hl-key">steps</span>:
-          - <span class="hl-key">id</span>: run
-            <span class="hl-key">type</span>: <span class="hl-type">shell</span>
-            <span class="hl-key">with</span>:
-              <span class="hl-key">command</span>: <span class="hl-str">npm test</span>
-  - <span class="hl-key">id</span>: summary
-    <span class="hl-key">type</span>: <span class="hl-type">claude</span>
-    <span class="hl-key">with</span>:
-      <span class="hl-key">prompt</span>: <span class="hl-str">Summarize all results: \${{ steps.checks.result }}</span>`,
-    steps: [
-      { num: 1, title: 'Three checks run at once', desc: 'Security audit, architecture review, and test suite run simultaneously — not sequentially.' },
-      { num: 2, title: 'Claude summarizes everything', desc: 'All parallel results flow into a single summary step. One command, full picture.' },
-    ],
-  },
-];
-
-const teamExample = `<span class="hl-comment">your-project/</span>
-├── <span class="hl-accent">.rigg/</span>
-│   ├── <span class="hl-str">plan.yaml</span>          <span class="hl-comment"># Claude plans → Codex builds</span>
-│   ├── <span class="hl-str">review.yaml</span>        <span class="hl-comment"># Automated code review loop</span>
-│   └── <span class="hl-str">fix-loop.yaml</span>      <span class="hl-comment"># Review → judge → fix cycle</span>
-├── src/
-├── package.json
-└── ...`;
+const tuiContent = [
+	'<div class="tui-row spaced"><div class="tui-left"><span class="t tc">  ▸ </span><span class="t bold">rigg</span><span class="t bold"> plan</span><span class="t td">  3/4 steps</span></div><div><span class="t td">00:06  </span><span class="t tc bold">running</span></div></div>',
+	'<div class="tui-row" style="overflow:hidden"><span class="t td">  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</span></div>',
+	'<div class="tui-row spaced"><div class="tui-left"><span class="t tg">  ✔</span><span class="t td">  draft  </span><span class="t tb">(codex)</span></div><div><span class="t td">2.3s</span></div></div>',
+	'<div class="tui-row"><span class="t td">  │  Drafted implementation plan for auth module</span></div>',
+	'<div class="tui-row"><span class="t td">  │</span></div>',
+	'<div class="tui-row spaced"><div class="tui-left"><span class="t tg">  ✔</span><span class="t td">  critique  </span><span class="t tm">(claude)</span></div><div><span class="t td">1.9s</span></div></div>',
+	'<div class="tui-row"><span class="t td">  │  Found 2 gaps in error handling</span></div>',
+	'<div class="tui-row"><span class="t td">  │</span></div>',
+	'<div class="tui-row spaced"><div class="tui-left"><span class="t tc">  ◇</span><span class="t">  </span><span class="tui-inv">refine</span><span class="t">  </span><span class="t tb">(codex)</span></div><div><span class="t tc">◇</span></div></div>',
+	'<div class="tui-row"><span class="t td">  ┊  </span><span class="t td">codex · gpt-4.1 · full</span></div>',
+	'<div class="tui-row"><span class="t td">  ┊  </span><span class="t">Improving draft with critique feedback...</span></div>',
+	'<div class="tui-row"><span class="t td">  │</span></div>',
+	'<div class="tui-row"><div class="tui-left"><span class="t td">  ○</span><span class="t td">  save  </span><span class="t tm">(write_file)</span></div></div>',
+	'<div class="tui-row"><span class="t td">     → PLAN.md</span></div>',
+	'<div class="tui-row" style="margin-top:8px"><span class="t">  </span><span class="t tc">████████████████████</span><span class="t td">░░░░░░░</span><span class="t td"> 3/4</span></div>',
+].join('');
 ---
 
 <BaseLayout title="Rigg — Local-first workflow runner for agentic coding">
@@ -132,7 +37,7 @@ const teamExample = `<span class="hl-comment">your-project/</span>
 			<span class="eyebrow">Open Source</span>
 			<h1>Local-first workflows for agentic coding</h1>
 			<p class="subtitle">
-				Wire Codex, Cursor, Claude, and shell commands into repeatable YAML pipelines.
+				Wire Codex, Cursor, Claude, and shell commands into repeatable YAML pipelines.<br />
 				Run locally, version in Git, share with your team.
 			</p>
 			<div class="hero-install" id="hero-install">
@@ -180,88 +85,146 @@ const teamExample = `<span class="hl-comment">your-project/</span>
 			</div>
 		</section>
 
-		<section class="workflow-section" id="example">
-			<span class="section-eyebrow">Use Cases</span>
-			<h2 class="section-title">No more copy-pasting between agents</h2>
+		<section id="orchestration">
+			<span class="section-eyebrow">Orchestration</span>
+			<h2 class="section-title">Wire agents into repeatable workflows</h2>
 			<p class="section-desc">
-				Wire your agents into a repeatable YAML pipeline.
-				Define it once, run it with one command.
+				Define multi-step pipelines in YAML. Codex reviews, Claude fixes, Cursor verifies — all in one command.
 			</p>
 
-			<div class="usecase-tabs" role="tablist">
-				{usecases.map((uc, i) => (
-					<button
-						role="tab"
-						class={`usecase-tab ${i === 0 ? 'active' : ''}`}
-						aria-selected={i === 0 ? 'true' : 'false'}
-						data-tab={i}
-					>
-						{uc.tab}
-					</button>
-				))}
-			</div>
-
-			{usecases.map((uc, i) => (
-				<div class={`usecase-panel ${i === 0 ? 'active' : ''}`} data-panel={i} role="tabpanel">
-					<div class="run-cmd">
-						<span class="prompt">$</span>
-						<code>{uc.runCmd}</code>
-						<button class="copy-btn" type="button" data-copy={uc.runCmd} aria-label="Copy run command">
-							<svg class="copy-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-							<svg class="check-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-						</button>
-					</div>
-					<div class="code-panel">
-						<div class="code-header">
-							<span class="dot"></span>
-							<span class="dot"></span>
-							<span class="dot"></span>
-							<span class="filename">{uc.filename}</span>
+			<div class="flow-wrap">
+				<div class="flow-header">
+					<span>.rigg/review-and-fix.yaml</span>
+					<span>rigg run</span>
+				</div>
+				<div class="flow-body">
+					<div class="flow-diagram">
+						<div class="flow-card">
+							<div class="flow-row">
+								<span class="flow-status done">✔</span>
+								<img src="/icons/openai.svg" alt="" width="16" height="16" />
+								<span class="flow-label">Review</span>
+								<span class="flow-time">1.8s</span>
+							</div>
 						</div>
-						<pre><code set:html={uc.code} /></pre>
-					</div>
-					<div class="step-annotations">
-						{uc.steps.map(step => (
-							<div class="step-annotation">
-								<span class="step-num">{step.num}</span>
-								<div class="step-body">
-									<strong>{step.title}</strong>
-									<span>{step.desc}</span>
+
+						<div class="flow-connector" aria-hidden="true">
+							<span class="flow-connector-dot"></span>
+							<span class="flow-connector-line"></span>
+							<span class="flow-connector-dot"></span>
+						</div>
+
+						<div class="flow-col">
+							<span class="flow-group-tag">Fixes</span>
+							<div class="flow-card">
+								<div class="flow-row">
+									<span class="flow-status done">✔</span>
+									<img src="/icons/claude.svg" alt="" width="18" height="18" />
+									<span class="flow-label">fix-auth</span>
+									<span class="flow-time">2.1s</span>
+								</div>
+								<div class="flow-row">
+									<span class="flow-status done">✔</span>
+									<img src="/icons/openai.svg" alt="" width="18" height="18" />
+									<span class="flow-label">fix-types</span>
+									<span class="flow-time">1.4s</span>
+								</div>
+								<div class="flow-row">
+									<span class="flow-status done">✔</span>
+									<img src="/icons/claude.svg" alt="" width="18" height="18" />
+									<span class="flow-label">fix-perf</span>
+									<span class="flow-time">0.8s</span>
 								</div>
 							</div>
-						))}
+						</div>
+
+						<div class="flow-connector" aria-hidden="true">
+							<span class="flow-connector-dot"></span>
+							<span class="flow-connector-line"></span>
+							<span class="flow-connector-dot"></span>
+						</div>
+
+						<div class="flow-card">
+							<div class="flow-row">
+								<span class="flow-status running">◇</span>
+								<img src="/icons/cursor.svg" alt="" width="16" height="16" />
+								<span class="flow-label">Verify</span>
+								<span class="flow-time" style="color:#06b6d4">running</span>
+							</div>
+						</div>
 					</div>
 				</div>
-			))}
+			</div>
 		</section>
 
-		<section class="team-section">
-			<div class="team-layout">
-				<div class="team-text">
-					<span class="section-eyebrow">For Teams</span>
-					<h2 class="section-title">Same workflow, every engineer</h2>
-					<p class="section-desc">
-						Drop <code>.rigg/*.yaml</code> into your repo. Every engineer runs the same
-						agent pipeline. Update workflows in PRs, review them like code.
-					</p>
-					<p class="team-detail">
-						No more "how do you use Claude for code review?" in Slack.
-						The answer is in the repo.
-					</p>
+		<section id="terminal">
+			<span class="section-eyebrow">Local-first</span>
+			<h2 class="section-title">Runs in your terminal</h2>
+			<p class="section-desc">No cloud, no browser. One command to run any workflow.</p>
+
+			<div class="terminal-window">
+				<div class="terminal-bar">
+					<span>~/your-project</span>
+					<span class="terminal-bar-title">bash</span>
 				</div>
-				<div class="code-panel code-panel-compact">
+				<div class="tui" set:html={tuiContent} />
+			</div>
+		</section>
+
+		<section id="teams">
+			<span class="section-eyebrow">For Teams</span>
+			<h2 class="section-title">Version in Git. Share with your team.</h2>
+			<p class="section-desc">
+				Drop <code>.rigg/*.yaml</code> into your repo. Review workflows in PRs.
+			</p>
+
+			<div class="git-panels">
+				<div class="code-panel">
 					<div class="code-header">
 						<span class="dot"></span>
 						<span class="dot"></span>
 						<span class="dot"></span>
 						<span class="filename">project structure</span>
 					</div>
-					<pre><code set:html={teamExample} /></pre>
+					<pre><code><span class="hl-comment">your-project/</span>
+<span class="hl-comment">├──</span> <span class="hl-accent">.rigg/</span>
+<span class="hl-comment">│   ├──</span> <span class="hl-str">plan.yaml</span>
+<span class="hl-comment">│   ├──</span> <span class="hl-str">review.yaml</span>
+<span class="hl-comment">│   └──</span> <span class="hl-str">parallel-checks.yaml</span>
+<span class="hl-comment">├──</span> src/
+<span class="hl-comment">├──</span> package.json
+<span class="hl-comment">└──</span> ...</code></pre>
+				</div>
+				<div class="code-panel">
+					<div class="code-header">
+						<span class="dot"></span>
+						<span class="dot"></span>
+						<span class="dot"></span>
+						<span class="filename">git diff -- .rigg/review.yaml</span>
+					</div>
+					<pre><code><span class="diff-meta">diff --git a/.rigg/review.yaml b/.rigg/review.yaml</span>
+<span class="diff-meta">new file mode 100644</span>
+<span class="diff-meta">--- /dev/null</span>
+<span class="diff-meta">+++ b/.rigg/review.yaml</span>
+<span class="diff-hunk">@@ -0,0 +1,12 @@</span>
+<span class="diff-add">+id: review</span>
+<span class="diff-add">+steps:</span>
+<span class="diff-add">+  - id: scan</span>
+<span class="diff-add">+    type: codex</span>
+<span class="diff-add">+    with:</span>
+<span class="diff-add">+      action: review</span>
+<span class="diff-add">+  - id: fix</span>
+<span class="diff-add">+    if: $&#123;&#123; len(steps.scan.result.findings) &gt; 0 &#125;&#125;</span>
+<span class="diff-add">+    type: codex</span>
+<span class="diff-add">+    with:</span>
+<span class="diff-add">+      action: run</span>
+<span class="diff-add">+      prompt: Fix all findings</span></code></pre>
 				</div>
 			</div>
 		</section>
 
-		<section class="panel bottom-cta">
+		<section>
+		<div class="panel bottom-cta">
 			<h2>Start building agent workflows</h2>
 			<p>
 				Open source, runs locally.
@@ -281,6 +244,7 @@ const teamExample = `<span class="hl-comment">your-project/</span>
 					Read the Docs
 				</a>
 			</div>
+		</div>
 		</section>
 	</main>
 
@@ -305,22 +269,6 @@ const teamExample = `<span class="hl-comment">your-project/</span>
 			}
 		};
 
-		document.querySelectorAll('.usecase-tab').forEach((tab) => {
-			tab.addEventListener('click', () => {
-				const idx = tab.getAttribute('data-tab');
-				document.querySelectorAll('.usecase-tab').forEach((t) => {
-					t.classList.remove('active');
-					t.setAttribute('aria-selected', 'false');
-				});
-				document.querySelectorAll('.usecase-panel').forEach((p) => {
-					p.classList.remove('active');
-				});
-				tab.classList.add('active');
-				tab.setAttribute('aria-selected', 'true');
-				document.querySelector(`.usecase-panel[data-panel="${idx}"]`)?.classList.add('active');
-			});
-		});
-
 		document.querySelectorAll('.copy-btn').forEach((btn) => {
 			btn.addEventListener('click', async () => {
 				const text = btn.getAttribute('data-copy');
@@ -329,14 +277,14 @@ const teamExample = `<span class="hl-comment">your-project/</span>
 				const copied = await copyText(text);
 				if (!copied) {
 					return;
-					}
+				}
 
-					btn.classList.add('copied');
+				btn.classList.add('copied');
 
-					setTimeout(() => {
-						btn.classList.remove('copied');
-					}, 2000);
-				});
+				setTimeout(() => {
+					btn.classList.remove('copied');
+				}, 2000);
 			});
+		});
 	</script>
 </BaseLayout>

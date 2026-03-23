@@ -1,5 +1,5 @@
 import type { APIRoute } from "astro"
-import { renderPng, iconDataUri, GRADIENT_BG } from "./_gallery-shared"
+import { renderPng, iconDataUri, BG } from "./_gallery-shared"
 
 const GREEN = "#16a34a"
 const CYAN = "#06b6d4"
@@ -13,9 +13,9 @@ function t(text: string, color = TEXT, bold = false) {
     type: "span",
     props: {
       style: {
-        fontSize: 17,
+        fontSize: 16,
         fontFamily: "JetBrains Mono",
-        lineHeight: "32px",
+        lineHeight: "28px",
         whiteSpace: "pre" as const,
         color,
         ...(bold ? { fontWeight: 700 } : {}),
@@ -30,13 +30,12 @@ function inv(text: string, bg: string) {
     type: "span",
     props: {
       style: {
-        fontSize: 17,
+        fontSize: 16,
         fontFamily: "JetBrains Mono",
-        lineHeight: "32px",
+        lineHeight: "28px",
         background: bg,
         color: "#1a1a1e",
-        padding: "2px 6px",
-        borderRadius: 3,
+        padding: "1px 5px",
         fontWeight: 700,
       },
       children: text,
@@ -44,8 +43,8 @@ function inv(text: string, bg: string) {
   }
 }
 
-function dot(color: string, opts?: { hollow?: boolean; glow?: boolean; size?: number }) {
-  const size = opts?.size ?? 16
+function dot(color: string, opts?: { hollow?: boolean; size?: number }) {
+  const size = opts?.size ?? 12
   return {
     type: "div",
     props: {
@@ -55,27 +54,20 @@ function dot(color: string, opts?: { hollow?: boolean; glow?: boolean; size?: nu
         borderRadius: "50%",
         flexShrink: 0,
         ...(opts?.hollow ? { border: `2px solid ${color}` } : { background: color }),
-        ...(opts?.glow ? { boxShadow: `0 0 0 3px ${color}33` } : {}),
       },
     },
   }
 }
 
 function row(...children: unknown[]) {
-  return {
-    type: "div",
-    props: {
-      style: { display: "flex", alignItems: "center", minHeight: 32 },
-      children,
-    },
-  }
+  return { type: "div", props: { style: { display: "flex", alignItems: "center", minHeight: 28 }, children } }
 }
 
 function spacedRow(left: unknown[], right: unknown[]) {
   return {
     type: "div",
     props: {
-      style: { display: "flex", alignItems: "center", justifyContent: "space-between", minHeight: 32 },
+      style: { display: "flex", alignItems: "center", justifyContent: "space-between", minHeight: 28 },
       children: [
         { type: "div", props: { style: { display: "flex", alignItems: "center" }, children: left } },
         { type: "div", props: { style: { display: "flex", alignItems: "center", gap: 8 }, children: right } },
@@ -84,41 +76,24 @@ function spacedRow(left: unknown[], right: unknown[]) {
   }
 }
 
-function ruleLine() {
-  return {
-    type: "div",
-    props: {
-      style: {
-        marginLeft: 16,
-        marginRight: 16,
-        height: 1,
-        background: "rgba(255,255,255,0.08)",
-        minHeight: 1,
-        marginTop: 4,
-        marginBottom: 4,
-      },
-    },
-  }
-}
-
 export const GET: APIRoute = async () => {
   const tuiContent = [
     spacedRow(
       [t("  "), t("> ", "#86efac", true), t("rigg", TEXT, true), t(" plan", TEXT, true), t("  3/4 steps", DIM)],
-      [t("6.1s ", DIM), t("running", CYAN, true)],
+      [t("00:06 ", DIM), t("running", CYAN, true)],
     ),
-    ruleLine(),
+    { type: "div", props: { style: { height: 1, background: "rgba(255,255,255,0.08)", margin: "3px 16px" } } },
     spacedRow([t("  "), dot(GREEN), t("  draft  ", DIM), t("(codex)", BLUE)], [t("2.3s", DIM)]),
-    row(t("  |  | Drafted implementation plan for auth module", DIM)),
+    row(t("  |  Drafted implementation plan for auth module", DIM)),
     row(t("  |", DIM)),
     spacedRow([t("  "), dot(GREEN), t("  critique  ", DIM), t("(claude)", MAGENTA)], [t("1.9s", DIM)]),
-    row(t("  |  | Found 2 gaps in error handling", DIM)),
+    row(t("  |  Found 2 gaps in error handling", DIM)),
     row(t("  |", DIM)),
     spacedRow(
-      [t("  "), dot(CYAN, { glow: true }), t("  "), inv("refine", CYAN), t("  "), t("(codex)", BLUE)],
-      [dot(CYAN, { size: 10 })],
+      [t("  "), dot(CYAN), t("  "), inv("refine", CYAN), t("  "), t("(codex)", BLUE)],
+      [dot(CYAN, { size: 8 })],
     ),
-    row(t("  |  | Improving draft with critique feedback...")),
+    row(t("  :  ", DIM), t("Improving draft with critique feedback...")),
     row(t("  |", DIM)),
     row(t("  "), dot("#666", { hollow: true }), t("  save  ", DIM), t("(write_file)", MAGENTA)),
     row(t("     -> PLAN.md", DIM)),
@@ -132,21 +107,27 @@ export const GET: APIRoute = async () => {
         height: "100%",
         display: "flex",
         flexDirection: "column",
-        backgroundImage: GRADIENT_BG,
-        padding: "44px 64px",
-        fontFamily: "JetBrains Mono",
+        backgroundColor: BG,
+        padding: "56px 72px",
+        fontFamily: "Source Serif 4",
       },
       children: [
         {
           type: "div",
           props: {
-            style: { display: "flex", alignItems: "center", gap: 10 },
+            style: { display: "flex", alignItems: "center", gap: 12, marginBottom: 36 },
             children: [
-              { type: "img", props: { src: iconDataUri, width: 32, height: 32, style: { borderRadius: 6 } } },
+              { type: "img", props: { src: iconDataUri, width: 40, height: 40, style: { borderRadius: 4 } } },
               {
                 type: "span",
                 props: {
-                  style: { fontSize: 24, fontWeight: 700, color: "#111", letterSpacing: "-0.02em" },
+                  style: {
+                    fontSize: 28,
+                    fontWeight: 500,
+                    fontFamily: "JetBrains Mono",
+                    color: "#111",
+                    letterSpacing: "-0.02em",
+                  },
                   children: "Rigg",
                 },
               },
@@ -157,13 +138,12 @@ export const GET: APIRoute = async () => {
           type: "span",
           props: {
             style: {
-              fontSize: 48,
-              fontWeight: 700,
-              fontFamily: "Inter",
+              fontSize: 68,
+              fontWeight: 500,
               color: "#111",
-              lineHeight: 1.15,
-              letterSpacing: "-0.035em",
-              marginTop: 20,
+              lineHeight: 1.12,
+              letterSpacing: "-0.025em",
+              marginBottom: 16,
             },
             children: "Runs in your terminal",
           },
@@ -171,7 +151,7 @@ export const GET: APIRoute = async () => {
         {
           type: "span",
           props: {
-            style: { fontSize: 20, color: "#666", marginTop: 8 },
+            style: { fontSize: 18, color: "#666", fontFamily: "JetBrains Mono", marginBottom: 36 },
             children: "No cloud, no browser. One command to run any workflow.",
           },
         },
@@ -182,11 +162,9 @@ export const GET: APIRoute = async () => {
               display: "flex",
               flexDirection: "column",
               background: "#1a1a1e",
-              borderRadius: 12,
+              borderRadius: 3,
+              border: "1px dashed rgba(0,0,0,0.12)",
               overflow: "hidden",
-              boxShadow: "0 16px 64px rgba(0,0,0,0.25)",
-              width: "100%",
-              marginTop: 24,
               flex: 1,
             },
             children: [
@@ -196,38 +174,23 @@ export const GET: APIRoute = async () => {
                   style: {
                     display: "flex",
                     alignItems: "center",
-                    padding: "12px 18px",
-                    background: "#252528",
-                    gap: 8,
+                    padding: "10px 18px",
+                    borderBottom: "1px solid rgba(255,255,255,0.06)",
+                    gap: 7,
+                    fontSize: 14,
+                    fontFamily: "JetBrains Mono",
+                    color: "rgba(255,255,255,0.35)",
                   },
                   children: [
-                    {
-                      type: "div",
-                      props: { style: { width: 12, height: 12, borderRadius: "50%", background: "#ff5f57" } },
-                    },
-                    {
-                      type: "div",
-                      props: { style: { width: 12, height: 12, borderRadius: "50%", background: "#febc2e" } },
-                    },
-                    {
-                      type: "div",
-                      props: { style: { width: 12, height: 12, borderRadius: "50%", background: "#28c840" } },
-                    },
-                    {
-                      type: "span",
-                      props: {
-                        style: { flex: 1, textAlign: "center" as const, fontSize: 13, color: "rgba(255,255,255,0.4)" },
-                        children: "Terminal",
-                      },
-                    },
-                    { type: "div", props: { style: { width: 44 } } },
+                    { type: "span", props: { children: "~/your-project" } },
+                    { type: "span", props: { style: { marginLeft: "auto" }, children: "bash" } },
                   ],
                 },
               },
               {
                 type: "div",
                 props: {
-                  style: { display: "flex", flexDirection: "column", padding: "24px 32px 28px" },
+                  style: { display: "flex", flexDirection: "column", padding: "16px 28px 20px" },
                   children: tuiContent,
                 },
               },

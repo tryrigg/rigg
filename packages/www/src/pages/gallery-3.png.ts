@@ -1,5 +1,5 @@
 import type { APIRoute } from "astro"
-import { renderPng, iconDataUri, GRADIENT_BG } from "./_gallery-shared"
+import { renderPng, iconDataUri, BG } from "./_gallery-shared"
 
 const TEXT = "#c9d1d9"
 const DIM = "rgba(255,255,255,0.3)"
@@ -14,9 +14,9 @@ function t(text: string, color = TEXT, bold = false) {
     type: "span",
     props: {
       style: {
-        fontSize: 17,
+        fontSize: 16,
         fontFamily: "JetBrains Mono",
-        lineHeight: "30px",
+        lineHeight: "28px",
         whiteSpace: "pre" as const,
         color,
         ...(bold ? { fontWeight: 700 } : {}),
@@ -27,14 +27,14 @@ function t(text: string, color = TEXT, bold = false) {
 }
 
 function row(...children: unknown[]) {
-  return { type: "div", props: { style: { display: "flex", minHeight: 30 }, children } }
+  return { type: "div", props: { style: { display: "flex", minHeight: 28 }, children } }
 }
 
 function diffRow(text: string) {
   return {
     type: "div",
     props: {
-      style: { display: "flex", minHeight: 30, background: DIFF_BG, borderRadius: 2, margin: "1px 0", paddingLeft: 4 },
+      style: { display: "flex", minHeight: 28, background: DIFF_BG, margin: "1px 0", paddingLeft: 4 },
       children: [t(text, DIFF_TEXT)],
     },
   }
@@ -48,9 +48,9 @@ function codePanel(title: string, lines: unknown[], flexVal = 1) {
         display: "flex",
         flexDirection: "column" as const,
         background: "#1a1a1e",
-        borderRadius: 12,
+        borderRadius: 3,
+        border: "1px dashed rgba(0,0,0,0.12)",
         overflow: "hidden",
-        boxShadow: "0 4px 20px rgba(0,0,0,0.2)",
         flex: flexVal,
       },
       children: [
@@ -60,27 +60,15 @@ function codePanel(title: string, lines: unknown[], flexVal = 1) {
             style: {
               display: "flex",
               alignItems: "center",
-              gap: 8,
-              padding: "12px 18px",
+              gap: 7,
+              padding: "10px 18px",
               borderBottom: "1px solid rgba(255,255,255,0.06)",
             },
             children: [
               {
-                type: "div",
-                props: { style: { width: 8, height: 8, borderRadius: "50%", background: "rgba(255,255,255,0.08)" } },
-              },
-              {
-                type: "div",
-                props: { style: { width: 8, height: 8, borderRadius: "50%", background: "rgba(255,255,255,0.08)" } },
-              },
-              {
-                type: "div",
-                props: { style: { width: 8, height: 8, borderRadius: "50%", background: "rgba(255,255,255,0.08)" } },
-              },
-              {
                 type: "span",
                 props: {
-                  style: { marginLeft: 8, fontSize: 14, color: "rgba(255,255,255,0.35)", fontFamily: "JetBrains Mono" },
+                  style: { fontSize: 14, color: "rgba(255,255,255,0.35)", fontFamily: "JetBrains Mono" },
                   children: title,
                 },
               },
@@ -90,7 +78,7 @@ function codePanel(title: string, lines: unknown[], flexVal = 1) {
         {
           type: "div",
           props: {
-            style: { display: "flex", flexDirection: "column", padding: "20px 24px" },
+            style: { display: "flex", flexDirection: "column", padding: "16px 20px" },
             children: lines,
           },
         },
@@ -116,7 +104,7 @@ export const GET: APIRoute = async () => {
     row(t("new file mode 100644", DIFF_HEADER)),
     row(t("--- /dev/null", DIFF_HEADER)),
     row(t("+++ b/.rigg/review.yaml", DIFF_HEADER)),
-    row(t("@@ -0,0 +1,14 @@", "#6e7681")),
+    row(t("@@ -0,0 +1,12 @@", "#6e7681")),
     diffRow("+id: review"),
     diffRow("+steps:"),
     diffRow("+  - id: scan"),
@@ -124,7 +112,7 @@ export const GET: APIRoute = async () => {
     diffRow("+    with:"),
     diffRow("+      action: review"),
     diffRow("+  - id: fix"),
-    diffRow("+    if: ${{ len(steps.scan.result.findings) > 0 }}"),
+    diffRow("+    if: ${{ ... }}"),
     diffRow("+    type: codex"),
     diffRow("+    with:"),
     diffRow("+      action: run"),
@@ -139,21 +127,27 @@ export const GET: APIRoute = async () => {
         height: "100%",
         display: "flex",
         flexDirection: "column",
-        backgroundImage: GRADIENT_BG,
-        padding: "44px 64px",
-        fontFamily: "JetBrains Mono",
+        backgroundColor: BG,
+        padding: "56px 72px",
+        fontFamily: "Source Serif 4",
       },
       children: [
         {
           type: "div",
           props: {
-            style: { display: "flex", alignItems: "center", gap: 10 },
+            style: { display: "flex", alignItems: "center", gap: 12, marginBottom: 36 },
             children: [
-              { type: "img", props: { src: iconDataUri, width: 32, height: 32, style: { borderRadius: 6 } } },
+              { type: "img", props: { src: iconDataUri, width: 40, height: 40, style: { borderRadius: 4 } } },
               {
                 type: "span",
                 props: {
-                  style: { fontSize: 24, fontWeight: 700, color: "#111", letterSpacing: "-0.02em" },
+                  style: {
+                    fontSize: 28,
+                    fontWeight: 500,
+                    fontFamily: "JetBrains Mono",
+                    color: "#111",
+                    letterSpacing: "-0.02em",
+                  },
                   children: "Rigg",
                 },
               },
@@ -164,13 +158,12 @@ export const GET: APIRoute = async () => {
           type: "span",
           props: {
             style: {
-              fontSize: 48,
-              fontWeight: 700,
-              fontFamily: "Inter",
+              fontSize: 68,
+              fontWeight: 500,
               color: "#111",
-              lineHeight: 1.15,
-              letterSpacing: "-0.035em",
-              marginTop: 20,
+              lineHeight: 1.12,
+              letterSpacing: "-0.025em",
+              marginBottom: 16,
             },
             children: "Version in Git. Share with your team.",
           },
@@ -178,14 +171,14 @@ export const GET: APIRoute = async () => {
         {
           type: "span",
           props: {
-            style: { fontSize: 20, color: "#666", marginTop: 8 },
-            children: "Drop .rigg/*.yaml into your repo. Review workflows in PRs like code.",
+            style: { fontSize: 18, color: "#666", fontFamily: "JetBrains Mono", marginBottom: 36 },
+            children: "Drop .rigg/*.yaml into your repo. Review workflows in PRs.",
           },
         },
         {
           type: "div",
           props: {
-            style: { display: "flex", gap: 20, marginTop: 24, flex: 1 },
+            style: { display: "flex", gap: 16, flex: 1 },
             children: [
               codePanel("project structure", treeLines, 1),
               codePanel("git diff -- .rigg/review.yaml", diffLines, 1.5),

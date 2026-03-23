@@ -15,7 +15,7 @@ const findProjectRoot = () => {
 }
 
 const projectRoot = findProjectRoot()
-export const InterBold = readFileSync(join(projectRoot, "src/fonts/Inter-Bold.ttf"))
+export const SourceSerifMedium = readFileSync(join(projectRoot, "src/fonts/SourceSerif4-Medium.ttf"))
 export const JetBrainsMonoRegular = readFileSync(join(projectRoot, "src/fonts/JetBrainsMono-Regular.ttf"))
 const iconPng = readFileSync(join(projectRoot, "public/icon.png"))
 export const iconDataUri = `data:image/png;base64,${iconPng.toString("base64")}`
@@ -34,14 +34,15 @@ export const agentIcons = {
 export const PH_WIDTH = 1270
 export const PH_HEIGHT = 760
 
-export const GRADIENT_BG = "linear-gradient(145deg, #f0f5f1 0%, #e2ede6 35%, #d6e6dc 60%, #ccddd4 100%)"
+export const BG = "#f7f6f3"
+export const GRADIENT_BG = "linear-gradient(145deg, #f0f5f1 0%, #e8f0ea 50%, #e2ede6 100%)"
 
 export async function renderPng(element: Parameters<typeof satori>[0]): Promise<Response> {
   const svg = await satori(element, {
     width: PH_WIDTH,
     height: PH_HEIGHT,
     fonts: [
-      { name: "Inter", data: InterBold, weight: 700, style: "normal" },
+      { name: "Source Serif 4", data: SourceSerifMedium, weight: 500, style: "normal" },
       { name: "JetBrains Mono", data: JetBrainsMonoRegular, weight: 400, style: "normal" },
     ],
   })

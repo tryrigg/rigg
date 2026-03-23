@@ -1,153 +1,95 @@
 import type { APIRoute } from "astro"
-import { renderPng, iconDataUri, agentIcons, GRADIENT_BG } from "./_gallery-shared"
+import { renderPng, iconDataUri, agentIcons, BG, GRADIENT_BG } from "./_gallery-shared"
 
-const AGENT_COLORS: Record<string, string> = {
-  codex: "#3b82f6",
-  claude: "#d97757",
-  cursor: "#555",
+const GREEN = "#16a34a"
+const CYAN = "#06b6d4"
+
+function statusDot(color: string, hollow = false) {
+  return {
+    type: "div",
+    props: {
+      style: {
+        width: 12,
+        height: 12,
+        borderRadius: "50%",
+        flexShrink: 0,
+        ...(hollow ? { border: `2px solid ${color}`, background: "transparent" } : { background: color }),
+      },
+    },
+  }
 }
 
-function agentCard(
-  icon: string,
-  name: string,
-  agentType: string,
-  statusColor: string,
-  detail: string,
-  running = false,
-) {
+function flowCard(icon: string, label: string, statusColor: string, meta: string, metaColor = "#999", hollow = false) {
   return {
     type: "div",
     props: {
       style: {
         display: "flex",
-        flexDirection: "column" as const,
-        alignItems: "center" as const,
-        justifyContent: "center" as const,
-        padding: "32px 44px 28px",
+        alignItems: "center",
+        gap: 12,
+        padding: "14px 22px",
         background: "white",
-        borderRadius: 16,
-        boxShadow: "0 2px 12px rgba(0,0,0,0.07)",
-        minWidth: 190,
-        gap: 6,
+        border: "1px solid rgba(0,0,0,0.08)",
+        borderRadius: 3,
+        fontFamily: "JetBrains Mono",
       },
       children: [
-        {
-          type: "img",
-          props: { src: icon, width: 52, height: 52, style: { marginBottom: 14 } },
-        },
-        {
-          type: "span",
-          props: {
-            style: { fontSize: 20, fontWeight: 700, color: "#111", fontFamily: "JetBrains Mono" },
-            children: name,
-          },
-        },
-        {
-          type: "span",
-          props: {
-            style: { fontSize: 15, color: AGENT_COLORS[agentType] ?? "#999", fontFamily: "JetBrains Mono" },
-            children: agentType,
-          },
-        },
-        {
-          type: "div",
-          props: {
-            style: { display: "flex", alignItems: "center", gap: 6, marginTop: 8 },
-            children: [
-              {
-                type: "div",
-                props: {
-                  style: {
-                    width: 12,
-                    height: 12,
-                    borderRadius: "50%",
-                    background: statusColor,
-                    flexShrink: 0,
-                    ...(running ? { boxShadow: `0 0 0 3px ${statusColor}33` } : {}),
-                  },
-                },
-              },
-              {
-                type: "span",
-                props: {
-                  style: { fontSize: 15, color: running ? statusColor : "#999", fontFamily: "JetBrains Mono" },
-                  children: detail,
-                },
-              },
-            ],
-          },
-        },
+        statusDot(statusColor, hollow),
+        { type: "img", props: { src: icon, width: 22, height: 22 } },
+        { type: "span", props: { style: { fontSize: 18, fontWeight: 600, color: "#111" }, children: label } },
+        { type: "span", props: { style: { fontSize: 15, color: metaColor, marginLeft: 14 }, children: meta } },
       ],
     },
   }
 }
 
-function groupCard(
-  title: string,
-  items: Array<{ icon: string; name: string; agentType: string; statusColor: string; detail: string }>,
-) {
+function flowGroupCard(tag: string, rows: Array<{ icon: string; label: string; statusColor: string; meta: string }>) {
   return {
     type: "div",
     props: {
-      style: {
-        display: "flex",
-        flexDirection: "column" as const,
-        padding: "24px 32px",
-        background: "white",
-        borderRadius: 16,
-        boxShadow: "0 2px 12px rgba(0,0,0,0.07)",
-        minWidth: 300,
-      },
+      style: { display: "flex", flexDirection: "column" as const, gap: 6 },
       children: [
         {
           type: "span",
           props: {
-            style: {
-              fontSize: 14,
-              fontWeight: 700,
-              color: "#888",
-              marginBottom: 18,
-              letterSpacing: "0.04em",
-              textTransform: "uppercase" as const,
-              fontFamily: "JetBrains Mono",
-            },
-            children: title,
+            style: { fontSize: 13, fontWeight: 600, color: "#666", fontFamily: "JetBrains Mono", paddingLeft: 4 },
+            children: tag,
           },
         },
-        ...items.map((item, i) => ({
+        {
           type: "div",
           props: {
             style: {
               display: "flex",
-              alignItems: "center",
-              gap: 12,
-              ...(i > 0 ? { marginTop: 14 } : {}),
+              flexDirection: "column" as const,
+              background: "white",
+              border: "1px solid rgba(0,0,0,0.08)",
+              borderRadius: 3,
             },
-            children: [
-              { type: "img", props: { src: item.icon, width: 30, height: 30, style: { flexShrink: 0 } } },
-              {
-                type: "span",
-                props: {
-                  style: { fontSize: 18, fontWeight: 700, color: "#111", fontFamily: "JetBrains Mono", flex: 1 },
-                  children: item.name,
+            children: rows.map((r, i) => ({
+              type: "div",
+              props: {
+                style: {
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  padding: "12px 22px",
+                  fontFamily: "JetBrains Mono",
+                  ...(i > 0 ? { borderTop: "1px solid rgba(0,0,0,0.05)" } : {}),
                 },
+                children: [
+                  statusDot(r.statusColor),
+                  { type: "img", props: { src: r.icon, width: 22, height: 22 } },
+                  {
+                    type: "span",
+                    props: { style: { fontSize: 18, fontWeight: 600, color: "#111" }, children: r.label },
+                  },
+                  { type: "span", props: { style: { fontSize: 15, color: "#999", marginLeft: 14 }, children: r.meta } },
+                ],
               },
-              {
-                type: "div",
-                props: {
-                  style: { width: 12, height: 12, borderRadius: "50%", background: item.statusColor, flexShrink: 0 },
-                },
-              },
-              {
-                type: "span",
-                props: {
-                  style: { fontSize: 15, color: "#999", fontFamily: "JetBrains Mono" },
-                  children: item.detail,
-                },
-              },
-            ],
+            })),
           },
-        })),
+        },
       ],
     },
   }
@@ -157,17 +99,11 @@ function connector() {
   return {
     type: "div",
     props: {
-      style: { display: "flex", alignItems: "center", justifyContent: "center", width: 56, flexShrink: 0 },
+      style: { display: "flex", alignItems: "center", width: 40, flexShrink: 0, padding: "0 4px" },
       children: [
-        {
-          type: "div",
-          props: { style: { width: 8, height: 8, borderRadius: "50%", background: "rgba(0,0,0,0.12)", flexShrink: 0 } },
-        },
-        { type: "div", props: { style: { flex: 1, height: 2, background: "rgba(0,0,0,0.08)" } } },
-        {
-          type: "div",
-          props: { style: { width: 8, height: 8, borderRadius: "50%", background: "rgba(0,0,0,0.12)", flexShrink: 0 } },
-        },
+        { type: "div", props: { style: { width: 5, height: 5, borderRadius: "50%", background: "rgba(0,0,0,0.12)" } } },
+        { type: "div", props: { style: { flex: 1, height: 1, background: "rgba(0,0,0,0.1)" } } },
+        { type: "div", props: { style: { width: 5, height: 5, borderRadius: "50%", background: "rgba(0,0,0,0.12)" } } },
       ],
     },
   }
@@ -182,58 +118,28 @@ export const GET: APIRoute = async () => {
         height: "100%",
         display: "flex",
         flexDirection: "column",
-        backgroundImage: GRADIENT_BG,
-        padding: "44px 64px",
-        fontFamily: "JetBrains Mono",
+        backgroundColor: BG,
+        padding: "56px 72px",
+        fontFamily: "Source Serif 4",
       },
       children: [
         {
           type: "div",
           props: {
-            style: { display: "flex", alignItems: "center", gap: 10 },
+            style: { display: "flex", alignItems: "center", gap: 12, marginBottom: 36 },
             children: [
-              { type: "img", props: { src: iconDataUri, width: 32, height: 32, style: { borderRadius: 6 } } },
+              { type: "img", props: { src: iconDataUri, width: 40, height: 40, style: { borderRadius: 4 } } },
               {
                 type: "span",
                 props: {
-                  style: { fontSize: 24, fontWeight: 700, color: "#111", letterSpacing: "-0.02em" },
+                  style: {
+                    fontSize: 28,
+                    fontWeight: 500,
+                    fontFamily: "JetBrains Mono",
+                    color: "#111",
+                    letterSpacing: "-0.02em",
+                  },
                   children: "Rigg",
-                },
-              },
-            ],
-          },
-        },
-        {
-          type: "div",
-          props: {
-            style: { display: "flex", flexDirection: "column", marginTop: 20 },
-            children: [
-              {
-                type: "span",
-                props: {
-                  style: {
-                    fontSize: 54,
-                    fontWeight: 700,
-                    fontFamily: "Inter",
-                    color: "#111",
-                    lineHeight: 1.12,
-                    letterSpacing: "-0.035em",
-                  },
-                  children: "Local-first workflows",
-                },
-              },
-              {
-                type: "span",
-                props: {
-                  style: {
-                    fontSize: 54,
-                    fontWeight: 700,
-                    fontFamily: "Inter",
-                    color: "#111",
-                    lineHeight: 1.12,
-                    letterSpacing: "-0.035em",
-                  },
-                  children: "for agentic coding",
                 },
               },
             ],
@@ -245,16 +151,24 @@ export const GET: APIRoute = async () => {
             style: {
               display: "flex",
               flexDirection: "column",
-              fontSize: 18,
-              color: "#666",
-              lineHeight: 1.5,
-              fontFamily: "JetBrains Mono",
-              marginTop: 8,
+              fontSize: 68,
+              fontWeight: 500,
+              color: "#111",
+              lineHeight: 1.12,
+              letterSpacing: "-0.025em",
+              marginBottom: 16,
             },
             children: [
-              { type: "span", props: { children: "Wire Codex, Claude, and Cursor into repeatable YAML pipelines." } },
-              { type: "span", props: { children: "Run locally, version in Git, share with your team." } },
+              { type: "span", props: { children: "Local-first workflows" } },
+              { type: "span", props: { children: "for agentic coding" } },
             ],
+          },
+        },
+        {
+          type: "div",
+          props: {
+            style: { fontSize: 18, color: "#666", lineHeight: 1.6, fontFamily: "JetBrains Mono", marginBottom: 36 },
+            children: "Wire Codex, Claude, and shell commands into repeatable YAML pipelines.",
           },
         },
         {
@@ -265,54 +179,21 @@ export const GET: APIRoute = async () => {
               alignItems: "center",
               justifyContent: "center",
               flex: 1,
-              width: "100%",
+              backgroundImage: GRADIENT_BG,
+              border: "1px dashed rgba(0,0,0,0.06)",
+              borderRadius: 3,
+              padding: "0 24px",
             },
             children: [
-              {
-                type: "div",
-                props: {
-                  style: {
-                    display: "flex",
-                    alignItems: "stretch",
-                    justifyContent: "center",
-                    background: "rgba(255, 255, 255, 0.25)",
-                    border: "1px solid rgba(255, 255, 255, 0.45)",
-                    borderRadius: 20,
-                    boxShadow: "0 8px 32px rgba(0,0,0,0.05)",
-                    padding: "32px 40px",
-                    width: "100%",
-                  },
-                  children: [
-                    agentCard(agentIcons.openai, "Review", "codex", "#16a34a", "1.8s"),
-                    connector(),
-                    groupCard("Fixes", [
-                      {
-                        icon: agentIcons.claude,
-                        name: "fix-auth",
-                        agentType: "claude",
-                        statusColor: "#16a34a",
-                        detail: "2.1s",
-                      },
-                      {
-                        icon: agentIcons.openai,
-                        name: "fix-types",
-                        agentType: "codex",
-                        statusColor: "#16a34a",
-                        detail: "1.4s",
-                      },
-                      {
-                        icon: agentIcons.claude,
-                        name: "fix-perf",
-                        agentType: "claude",
-                        statusColor: "#16a34a",
-                        detail: "0.8s",
-                      },
-                    ]),
-                    connector(),
-                    agentCard(agentIcons.cursor, "Verify", "cursor", "#06b6d4", "running", true),
-                  ],
-                },
-              },
+              flowCard(agentIcons.openai, "Review", GREEN, "1.8s"),
+              connector(),
+              flowGroupCard("Fixes", [
+                { icon: agentIcons.claude, label: "error-handling", statusColor: GREEN, meta: "2.1s" },
+                { icon: agentIcons.openai, label: "type-safety", statusColor: GREEN, meta: "1.4s" },
+                { icon: agentIcons.claude, label: "input-validation", statusColor: GREEN, meta: "0.9s" },
+              ]),
+              connector(),
+              flowCard(agentIcons.cursor, "Verify", CYAN, "running", CYAN, true),
             ],
           },
         },

@@ -1,5 +1,6 @@
 import { Box, Text, useStdout } from "ink"
 
+import { normalizeRunId } from "../../history/id"
 import type { RunSnapshot } from "../../session/schema"
 import { renderRule } from "./layout"
 import { formatDuration, statusSymbol } from "./symbols"
@@ -41,6 +42,10 @@ export function countStatuses(entries: TreeEntry[]): {
   }
 
   return { failedCount, failedSteps, interruptedCount, skippedCount, succeededCount }
+}
+
+export function summaryRunId(runId: string): string {
+  return `run ${normalizeRunId(runId)}`
 }
 
 export function Summary({ snapshot, entries }: { snapshot: RunSnapshot | null; entries: TreeEntry[] }) {
@@ -120,6 +125,11 @@ export function Summary({ snapshot, entries }: { snapshot: RunSnapshot | null; e
             {snapshot.reason}
           </Text>
         )}
+      </Text>
+      <Text>{""}</Text>
+      <Text dimColor>
+        {"  "}
+        {summaryRunId(snapshot.run_id)}
       </Text>
     </Box>
   )

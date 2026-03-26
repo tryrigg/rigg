@@ -29,6 +29,7 @@ export type RunEvent =
       snapshot: RunSnapshot
     }
   | {
+      attempt?: number
       chunk: string
       kind: "step_output"
       node_path: string
@@ -36,6 +37,7 @@ export type RunEvent =
       user_id: string | null
     }
   | {
+      attempt?: number
       event: ProviderEvent
       kind: "provider_event"
       node_path: string

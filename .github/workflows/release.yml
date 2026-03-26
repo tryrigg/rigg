@@ -92,13 +92,23 @@ jobs:
           expected_version="rigg ${GITHUB_REF_NAME#v}"
           actual_version="$(./packages/rigg/dist/rigg --version)"
           [ "${actual_version}" = "${expected_version}" ]
-          cp ./packages/rigg/dist/rigg "$tmpdir/rigg"
+          cp -R ./packages/rigg/dist/. "$tmpdir/"
           (
             cd "$tmpdir"
             chmod 0755 ./rigg
             [ "$(./rigg --version)" = "${expected_version}" ]
             ./rigg init
             ./rigg validate
+            printf '%s\n' \
+              'id: plan' \
+              'steps:' \
+              '  - id: say' \
+              '    type: shell' \
+              '    with:' \
+              '      command: echo hi' > ./.rigg/plan.yaml
+            mkdir -p ./xdg
+            XDG_DATA_HOME="$tmpdir/xdg" script -q /dev/null ./rigg run plan --auto-continue
+            XDG_DATA_HOME="$tmpdir/xdg" ./rigg history | grep "plan"
           )
 
       - name: Package release archive
@@ -106,7 +116,7 @@ jobs:
           archive_name="rigg-${{ matrix.target }}.tar.gz"
 
           mkdir -p dist
-          cp packages/rigg/dist/rigg dist/
+          cp -R packages/rigg/dist/. dist/
 
           tar -C dist -czf "${archive_name}" rigg
 
@@ -189,6 +199,16 @@ jobs:
             cd "$TMP_ROOT/project"
             "$TMP_ROOT/bin/rigg" init
             "$TMP_ROOT/bin/rigg" validate
+            printf '%s\n' \
+              'id: plan' \
+              'steps:' \
+              '  - id: say' \
+              '    type: shell' \
+              '    with:' \
+              '      command: echo hi' > ./.rigg/plan.yaml
+            mkdir -p "$TMP_ROOT/xdg"
+            XDG_DATA_HOME="$TMP_ROOT/xdg" script -q /dev/null "$TMP_ROOT/bin/rigg" run plan --auto-continue
+            XDG_DATA_HOME="$TMP_ROOT/xdg" "$TMP_ROOT/bin/rigg" history | grep "plan"
           )
 
   publish:

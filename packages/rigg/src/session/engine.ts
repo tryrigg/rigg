@@ -349,6 +349,7 @@ async function executeAction(
           await resolveInteraction(environment, request, { nodePath, userId: step.id ?? null }, scope.signal),
         onOutput: async (stream, chunk) => {
           environment.emitEvent({
+            attempt: lifecycle.attempt,
             chunk,
             kind: "step_output",
             node_path: nodePath,
@@ -358,6 +359,7 @@ async function executeAction(
         },
         onProviderEvent: async (event) => {
           environment.emitEvent({
+            attempt: lifecycle.attempt,
             event,
             kind: "provider_event",
             node_path: nodePath,

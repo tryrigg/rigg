@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { countStatuses } from "../../../src/cli/tui/summary"
+import { countStatuses, summaryRunId } from "../../../src/cli/tui/summary"
 import type { TreeEntry } from "../../../src/cli/tui/tree"
 
 function treeEntry(overrides: Partial<TreeEntry>): TreeEntry {
@@ -36,5 +36,9 @@ describe("cli/tui/summary", () => {
       skippedCount: 1,
       succeededCount: 1,
     })
+  })
+
+  test("formats the run id footer with the full copyable id", () => {
+    expect(summaryRunId("d3f8a1c4-9e2b-4f7a-8d1c-3e5f7a9b2c4d")).toBe("run d3f8a1c49e2b4f7a8d1c3e5f7a9b2c4d")
   })
 })

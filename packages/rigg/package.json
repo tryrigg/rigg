@@ -8,7 +8,10 @@
   },
   "scripts": {
     "build:cli": "bun run ../../script/build-cli.ts",
-    "check": "bunx tsc --noEmit",
+    "check": "bun run check:types && bun run check:db",
+    "check:db": "bunx drizzle-kit check --config=./drizzle.config.ts",
+    "check:types": "bunx tsc --noEmit",
+    "db:generate": "bunx drizzle-kit generate --config=./drizzle.config.ts",
     "rigg": "bun run ./src/cli/bootstrap.ts",
     "test": "bun test",
     "test:randomize": "bun test --randomize",
@@ -16,6 +19,7 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.2.81",
+    "drizzle-orm": "0.45.1",
     "figures": "^6.1.0",
     "ink": "^6.8.0",
     "ink-spinner": "^5.0.0",
@@ -27,6 +31,7 @@
     "@types/react": "^19.2.0",
     "@types/node": "^25.4.0",
     "bun-types": "^1.3.10",
+    "drizzle-kit": "0.31.10",
     "react-devtools-core": "^7.0.1",
     "typescript": "^5.9.3"
   }

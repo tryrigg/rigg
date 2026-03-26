@@ -33,7 +33,11 @@ describe("cli/bootstrap", () => {
 
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain("Commands:\n  init")
+    expect(result.stdout).toContain("  list\n")
     expect(result.stdout).toContain("  upgrade [target]\n")
+    expect(result.stdout).toContain(
+      "  history [workflow_id] [--status <status>] [--limit <n>] [--offset <n>] [--json]\n",
+    )
     expect(result.stdout).toContain("Options:\n  -h, --help\n  -V, --version\n")
     expect(result.stdout).not.toContain("Commands:\n  version\n")
   })

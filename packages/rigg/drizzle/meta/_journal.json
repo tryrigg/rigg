@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1774498153156,
+      "tag": "0000_productive_agent_brand",
+      "breakpoints": true
+    }
+  ]
+}

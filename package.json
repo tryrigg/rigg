@@ -7,6 +7,7 @@
   ],
   "scripts": {
     "check": "bun run check:rigg && bun run check:www",
+    "db:generate:rigg": "bun run --cwd packages/rigg db:generate",
     "check:rigg": "bun run --cwd packages/rigg check",
     "check:www": "bun run --cwd packages/www check",
     "format": "prettier --write .",

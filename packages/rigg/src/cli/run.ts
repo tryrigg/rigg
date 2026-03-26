@@ -1,33 +1,18 @@
+import { createRecorder } from "../history/record"
 import type { UserInputQuestion, UserInputResolution } from "../session/interaction"
 import { loadProject, workflowById } from "../project"
 import { runWorkflow } from "../session"
 import { interrupt } from "../session/error"
 import { findOmitted, mergePrompted, parseEntries } from "../session/input"
+import { snapEvent } from "../session/snap"
 import { initRunState } from "../session/state"
 import type { InputDefinition } from "../workflow/input"
 import type { WorkflowDocument } from "../workflow/schema"
 import { normalizeError } from "../util/error"
 import { compactJson } from "../util/json"
 import { renderErrors } from "./out"
+import { type CommandResult, failure, PROJECT_NOT_FOUND_MESSAGE, success } from "./result"
 import { createInkSession } from "./session"
-
-type CommandResult = {
-  exitCode: number
-  stderrLines: string[]
-  stdoutLines: string[]
-}
-
-function success(stdoutLines: string[] = [], stderrLines: string[] = []): CommandResult {
-  return { exitCode: 0, stderrLines, stdoutLines }
-}
-
-function failure(stderrLines: string[] = [], exitCode = 1, stdoutLines: string[] = []): CommandResult {
-  return { exitCode, stderrLines, stdoutLines }
-}
-
-function toTitleCase(value: string): string {
-  return value.slice(0, 1).toUpperCase() + value.slice(1)
-}
 
 function toPascalCase(value: string): string {
   return value
@@ -64,6 +49,7 @@ export function createInterrupt(): InterruptController {
 }
 
 export type Dependencies = {
+  createRecorderImpl: typeof createRecorder
   createInterruptController: () => InterruptController
   createRunSession: typeof createInkSession
   loadProjectImpl: typeof loadProject
@@ -72,6 +58,7 @@ export type Dependencies = {
 }
 
 const defaultDependencies: Dependencies = {
+  createRecorderImpl: createRecorder,
   createInterruptController: createInterrupt,
   createRunSession: createInkSession,
   loadProjectImpl: loadProject,
@@ -170,8 +157,6 @@ async function promptForOmittedInvocationInputs(options: {
   return mergePrompted(options.invocationInputs, answersFromPromptResolution(resolution))
 }
 
-const PROJECT_NOT_FOUND_MESSAGE = "Could not find a .rigg directory from the current working directory."
-
 export async function runCommand(
   cwd: string,
   workflowId: string | undefined,
@@ -215,6 +200,11 @@ export async function runCommand(
       project: projectResult.project,
       workflow,
     })
+    const recorder = await deps.createRecorderImpl({
+      workflowId: workflow.id,
+      workspace: projectResult.project.workspace,
+    })
+    let recorderResult: Awaited<ReturnType<typeof recorder.close>> = { recording_status: "disabled", warnings: [] }
 
     const runResult = await (async () => {
       try {
@@ -229,13 +219,17 @@ export async function runCommand(
         return await deps.runWorkflowImpl({
           controlHandler: runSession.handle,
           invocationInputs,
-          onEvent: runSession.emit,
+          onEvent: (event) => {
+            runSession.emit(event)
+            recorder.emit(snapEvent(event))
+          },
           parentEnv: process.env,
           project: projectResult.project,
           signal: interrupt.signal,
           workflowId,
         })
       } finally {
+        recorderResult = await recorder.close()
         interrupt.dispose()
         runSession.close()
       }
@@ -248,14 +242,16 @@ export async function runCommand(
       return failure(runResult.errors)
     }
 
-    const stdoutLines = [
-      `${runResult.snapshot.workflow_id} finished with status ${toTitleCase(runResult.snapshot.status)}.`,
-    ]
-    if (runResult.snapshot.reason !== null && runResult.snapshot.reason !== undefined) {
-      stdoutLines.push(`Reason: ${toPascalCase(runResult.snapshot.reason)}`)
+    const stderrLines = [...recorderResult.warnings]
+    if (
+      runResult.snapshot.status !== "succeeded" &&
+      runResult.snapshot.reason !== null &&
+      runResult.snapshot.reason !== undefined
+    ) {
+      stderrLines.push(`Reason: ${toPascalCase(runResult.snapshot.reason)}`)
     }
 
-    return runResult.snapshot.status === "succeeded" ? success(stdoutLines) : failure([], 1, stdoutLines)
+    return runResult.snapshot.status === "succeeded" ? success([], stderrLines) : failure(stderrLines, 1)
   } catch (error) {
     return failure([normalizeError(error).message])
   }

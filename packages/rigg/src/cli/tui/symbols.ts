@@ -1,11 +1,12 @@
 import figures from "figures"
 
-import type { NodeStatus } from "../../session/schema"
+import type { NodeStatus, RunStatus } from "../../session/schema"
+import { formatDurationText } from "../../history/render"
 import { colors, kindColors } from "./theme"
 
 export type StatusSymbol = { icon: string; color: string }
 
-export function statusSymbol(status: NodeStatus | "not_started"): StatusSymbol {
+export function statusSymbol(status: NodeStatus | RunStatus | "not_started"): StatusSymbol {
   switch (status) {
     case "not_started":
     case "pending":
@@ -16,6 +17,8 @@ export function statusSymbol(status: NodeStatus | "not_started"): StatusSymbol {
       return { icon: figures.tick, color: colors.success }
     case "failed":
       return { icon: figures.cross, color: colors.error }
+    case "aborted":
+      return { icon: figures.warning, color: colors.warning }
     case "skipped":
       return { icon: figures.circleDotted, color: colors.muted }
     case "interrupted":
@@ -30,8 +33,5 @@ export function kindColor(kind: string): string {
 }
 
 export function formatDuration(ms: number): string {
-  if (ms < 1000) {
-    return `${ms}ms`
-  }
-  return `${(ms / 1000).toFixed(1)}s`
+  return formatDurationText(ms)
 }

@@ -44,6 +44,16 @@ export function deepEqual(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right)
 }
 
+export function stringifyOptional(value: unknown): string | null {
+  if (value === null || value === undefined) {
+    return null
+  }
+  if (typeof value === "string") {
+    return value
+  }
+  return compactJson(value)
+}
+
 export function asJsonValue(value: unknown): JsonValue | undefined {
   if (value === null || typeof value === "boolean" || typeof value === "number" || typeof value === "string") {
     return value

@@ -31,7 +31,7 @@ steps:
               exit 0
             fi
 
-            cursor agent --print --output-format json --trust --model composer-2 "$(cat <<'EOF'
+            claude -p --output-format json --dangerously-skip-permissions --model claude-opus-4-6 "$(cat <<'EOF'
             You are a senior engineer triaging automated code review findings.
             Perform all analysis silently. Do not narrate your process or progress.
 
@@ -134,7 +134,7 @@ steps:
             If no findings survive triage, return {"findings": [], "directives": [], "discarded": [...], "oscillations": [...]}.
             If no oscillations were detected, return empty arrays for directives and oscillations.
             EOF
-            )" | bun -e 'const payload = JSON.parse(await Bun.stdin.text()); if (payload?.type !== "result" || typeof payload.result !== "string") throw new Error("cursor headless output missing result text"); const text = payload.result.trim(); for (let i = 0; i < text.length; i += 1) { const ch = text[i]; if (ch !== "{" && ch !== "[") continue; const suffix = text.slice(i).trim(); try { JSON.parse(suffix); process.stdout.write(suffix); process.exit(0); } catch {} } throw new Error(`cursor headless result did not contain a JSON suffix: ${JSON.stringify(text.slice(0, 200))}`)'
+            )" | bun -e 'const payload = JSON.parse(await Bun.stdin.text()); if (payload?.type !== "result" || typeof payload.result !== "string") throw new Error("claude headless output missing result text"); const text = payload.result.trim(); for (let i = 0; i < text.length; i += 1) { const ch = text[i]; if (ch !== "{" && ch !== "[") continue; const suffix = text.slice(i).trim(); try { JSON.parse(suffix); process.stdout.write(suffix); process.exit(0); } catch {} } throw new Error(`claude headless result did not contain a JSON suffix: ${JSON.stringify(text.slice(0, 200))}`)'
 
       - id: fix
         if: ${{ len(steps.triage.result.findings) > 0 }}

@@ -3,23 +3,10 @@ import { join } from "node:path"
 
 import { normalizeError } from "../util/error"
 import { examplesDoc, schemaDoc, syntaxDoc } from "./docs"
+import { type CommandResult, failure, success } from "./result"
 import { skillDoc } from "./skill"
 import { branchTemplate, commitTemplate, implementTemplate, planTemplate, uncommittedTemplate } from "./templates"
 import { writeIfMissing } from "./write"
-
-type CommandResult = {
-  exitCode: number
-  stderrLines: string[]
-  stdoutLines: string[]
-}
-
-function success(stdoutLines: string[] = [], stderrLines: string[] = []): CommandResult {
-  return { exitCode: 0, stderrLines, stdoutLines }
-}
-
-function failure(stderrLines: string[] = [], exitCode = 1, stdoutLines: string[] = []): CommandResult {
-  return { exitCode, stderrLines, stdoutLines }
-}
 
 async function writeInitialWorkspace(cwd: string): Promise<string[]> {
   const riggDir = join(cwd, ".rigg")

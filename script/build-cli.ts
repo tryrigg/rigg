@@ -1,13 +1,90 @@
 #!/usr/bin/env bun
 
+import { createHash } from "node:crypto"
 import { existsSync } from "node:fs"
-import { mkdir } from "node:fs/promises"
+import { mkdir, readFile, rm } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
 
 const repoRoot = resolve(import.meta.dir, "..")
 const packageRoot = join(repoRoot, "packages", "rigg")
+const drizzleDir = join(packageRoot, "drizzle")
+const distDir = join(packageRoot, "dist")
 const entrypoint = join(packageRoot, "src", "cli", "bootstrap.ts")
-const outfile = join(packageRoot, "dist", "rigg")
+const outfile = join(distDir, "rigg")
+
+type DrizzleJournal = {
+  entries: {
+    breakpoints: boolean
+    idx: number
+    tag: string
+    when: number
+  }[]
+}
+
+type BundledMigration = {
+  bps: boolean
+  folderMillis: number
+  hash: string
+  sql: string[]
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null
+}
+
+function readVersion(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined
+}
+
+function parsePackageJson(value: unknown): { version?: string } {
+  const json = record(value)
+  if (json === null) {
+    throw new Error(`failed to parse package metadata: expected object in ${join(packageRoot, "package.json")}`)
+  }
+
+  return { version: readVersion(json.version) }
+}
+
+function parseJournalEntry(value: unknown, path: string): DrizzleJournal["entries"][number] {
+  const entry = record(value)
+  if (entry === null) {
+    throw new Error(`failed to parse migration journal entry in ${path}: expected object`)
+  }
+
+  if (typeof entry.breakpoints !== "boolean") {
+    throw new Error(`failed to parse migration journal entry in ${path}: "breakpoints" must be boolean`)
+  }
+  if (typeof entry.idx !== "number") {
+    throw new Error(`failed to parse migration journal entry in ${path}: "idx" must be number`)
+  }
+  if (typeof entry.tag !== "string") {
+    throw new Error(`failed to parse migration journal entry in ${path}: "tag" must be string`)
+  }
+  if (typeof entry.when !== "number") {
+    throw new Error(`failed to parse migration journal entry in ${path}: "when" must be number`)
+  }
+
+  return {
+    breakpoints: entry.breakpoints,
+    idx: entry.idx,
+    tag: entry.tag,
+    when: entry.when,
+  }
+}
+
+function parseJournal(value: unknown, path: string): DrizzleJournal {
+  const json = record(value)
+  if (json === null) {
+    throw new Error(`failed to parse migration journal: expected object in ${path}`)
+  }
+  if (!Array.isArray(json.entries)) {
+    throw new Error(`failed to parse migration journal: "entries" must be an array in ${path}`)
+  }
+
+  return {
+    entries: json.entries.map((entry) => parseJournalEntry(entry, path)),
+  }
+}
 
 function normalizeVersion(value: string | undefined): string | undefined {
   const trimmed = value?.trim()
@@ -65,7 +142,7 @@ function resolveGitVersion(): string | undefined {
 }
 
 async function resolveBuildVersion(): Promise<string> {
-  const packageMetadata = (await Bun.file(join(packageRoot, "package.json")).json()) as { version?: string }
+  const packageMetadata = parsePackageJson(await Bun.file(join(packageRoot, "package.json")).json())
   return (
     normalizeVersion(process.env.RIGG_VERSION) ??
     (() => {
@@ -77,8 +154,29 @@ async function resolveBuildVersion(): Promise<string> {
   )
 }
 
-const version = await resolveBuildVersion()
+async function loadBundledMigrations(): Promise<BundledMigration[]> {
+  const path = join(drizzleDir, "meta", "_journal.json")
+  const journal = parseJournal(JSON.parse(await readFile(path, "utf8")) as unknown, path)
 
+  return await Promise.all(
+    [...journal.entries]
+      .sort((left, right) => left.idx - right.idx)
+      .map(async (entry) => {
+        const sql = await readFile(join(drizzleDir, `${entry.tag}.sql`), "utf8")
+        return {
+          bps: entry.breakpoints,
+          folderMillis: entry.when,
+          hash: createHash("sha256").update(sql).digest("hex"),
+          sql: sql.split("--> statement-breakpoint"),
+        }
+      }),
+  )
+}
+
+const version = await resolveBuildVersion()
+const bundledMigrations = await loadBundledMigrations()
+
+await rm(distDir, { force: true, recursive: true })
 await mkdir(dirname(outfile), { recursive: true })
 
 const result = await Bun.build({
@@ -88,6 +186,7 @@ const result = await Bun.build({
   },
   define: {
     RIGG_BUILD_VERSION: JSON.stringify(version),
+    RIGG_BUNDLED_MIGRATIONS: JSON.stringify(bundledMigrations),
   },
   env: "disable",
   autoloadDotenv: false,
@@ -101,4 +200,4 @@ if (!result.success) {
   throw new Error(message || "bun build failed")
 }
 
-console.log(`built rigg ${version} -> ${outfile}`)
+console.log(`built rigg ${version} -> ${outfile} (${bundledMigrations.length} bundled migrations)`)

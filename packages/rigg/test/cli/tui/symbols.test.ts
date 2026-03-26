@@ -9,6 +9,7 @@ describe("statusSymbol", () => {
     expect(statusSymbol("running").color).toBe("cyan")
     expect(statusSymbol("succeeded").color).toBe("green")
     expect(statusSymbol("failed").color).toBe("red")
+    expect(statusSymbol("aborted").color).toBe("yellow")
     expect(statusSymbol("skipped").color).toBe("dim")
     expect(statusSymbol("interrupted").color).toBe("cyan")
     expect(statusSymbol("waiting_for_interaction").color).toBe("yellow")
@@ -21,6 +22,7 @@ describe("statusSymbol", () => {
       "running",
       "succeeded",
       "failed",
+      "aborted",
       "skipped",
       "interrupted",
       "waiting_for_interaction",
@@ -65,6 +67,8 @@ describe("formatDuration", () => {
     expect(formatDuration(1000)).toBe("1.0s")
     expect(formatDuration(1500)).toBe("1.5s")
     expect(formatDuration(12300)).toBe("12.3s")
-    expect(formatDuration(60000)).toBe("60.0s")
+    expect(formatDuration(60000)).toBe("1m 00s")
+    expect(formatDuration(64000)).toBe("1m 04s")
+    expect(formatDuration(4_320_000)).toBe("1h 12m")
   })
 })

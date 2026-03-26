@@ -1,6 +1,10 @@
 import { parseCommand, renderHelp } from "./args"
+import * as history from "./history"
 import * as init from "./init"
+import * as list from "./list"
+import * as logs from "./logs"
 import * as run from "./run"
+import * as show from "./show"
 import * as upgrade from "./upgrade"
 import * as validate from "./validate"
 import { assertUnreachable } from "../util/assert"
@@ -37,6 +41,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       writeLines(result.stderrLines, process.stderr)
       return result.exitCode
     }
+    case "list": {
+      const result = await list.runCommand(cwd)
+      writeLines(result.stdoutLines, process.stdout)
+      writeLines(result.stderrLines, process.stderr)
+      return result.exitCode
+    }
     case "upgrade": {
       const result = await upgrade.runCommand(
         { target: command.target },
@@ -48,6 +58,24 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     }
     case "validate": {
       const result = await validate.runCommand(cwd, command.json)
+      writeLines(result.stdoutLines, process.stdout)
+      writeLines(result.stderrLines, process.stderr)
+      return result.exitCode
+    }
+    case "history": {
+      const result = await history.runCommand(cwd, command)
+      writeLines(result.stdoutLines, process.stdout)
+      writeLines(result.stderrLines, process.stderr)
+      return result.exitCode
+    }
+    case "show": {
+      const result = await show.runCommand(cwd, command.runId, command.json)
+      writeLines(result.stdoutLines, process.stdout)
+      writeLines(result.stderrLines, process.stderr)
+      return result.exitCode
+    }
+    case "logs": {
+      const result = await logs.runCommand(cwd, command)
       writeLines(result.stdoutLines, process.stdout)
       writeLines(result.stderrLines, process.stderr)
       return result.exitCode

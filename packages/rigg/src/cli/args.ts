@@ -1,9 +1,15 @@
+import type { RunStatus } from "../session/schema"
+
 export type ParsedCommand =
   | { kind: "invalid"; message: string }
   | { kind: "help" }
   | { kind: "version" }
   | { kind: "init" }
+  | { kind: "list" }
   | { json: boolean; kind: "validate" }
+  | { json: boolean; kind: "show"; runId?: string }
+  | { first?: string; json: boolean; kind: "logs"; run?: string; second?: string; step?: string }
+  | { json: boolean; kind: "history"; limit: number; offset: number; status?: RunStatus; workflowId?: string }
   | { autoContinue: boolean; inputs: string[]; kind: "run"; workflowId?: string }
 
 export function parseCommand(argv: string[]): ParsedCommand {
@@ -20,12 +26,182 @@ export function parseCommand(argv: string[]): ParsedCommand {
       return { kind: "version" }
     case "init":
       return { kind: "init" }
+    case "list":
+      return { kind: "list" }
     case "validate":
       return { kind: "validate", json: rest.includes("--json") }
+    case "history":
+      return parseHistoryCommand(rest)
+    case "show":
+      return parseShowCommand(rest)
+    case "logs":
+      return parseLogsCommand(rest)
     case "run":
       return parseRunCommand(rest)
     default:
       return { kind: "help" }
+  }
+}
+
+function parseIntegerOption(name: string, value: string | undefined): ParsedCommand | number {
+  if (value === undefined) {
+    return { kind: "invalid", message: `\`${name}\` requires a value.` }
+  }
+
+  if (!/^\d+$/.test(value)) {
+    return { kind: "invalid", message: `\`${name}\` requires a non-negative integer.` }
+  }
+
+  return Number(value)
+}
+
+function parseRequiredOption(name: string, label: string, value: string | undefined): ParsedCommand | string {
+  if (value === undefined || value.startsWith("--")) {
+    return { kind: "invalid", message: `\`${name}\` requires a ${label}.` }
+  }
+
+  return value
+}
+
+function parseHistoryCommand(args: string[]): ParsedCommand {
+  let workflowId: string | undefined
+  let status: RunStatus | undefined
+  let limit = 10
+  let offset = 0
+  let json = false
+
+  for (let index = 0; index < args.length; index += 1) {
+    const value = args[index]
+    if (value === undefined) {
+      continue
+    }
+    if (value === "--json") {
+      json = true
+      continue
+    }
+    if (value === "--status") {
+      const next = args[index + 1]
+      if (next !== "running" && next !== "succeeded" && next !== "failed" && next !== "aborted") {
+        return {
+          kind: "invalid",
+          message: "`rigg history --status` requires one of: running, succeeded, failed, aborted.",
+        }
+      }
+      status = next
+      index += 1
+      continue
+    }
+    if (value === "--limit") {
+      const parsed = parseIntegerOption("rigg history --limit", args[index + 1])
+      if (typeof parsed !== "number") {
+        return parsed
+      }
+      limit = parsed
+      index += 1
+      continue
+    }
+    if (value === "--offset") {
+      const parsed = parseIntegerOption("rigg history --offset", args[index + 1])
+      if (typeof parsed !== "number") {
+        return parsed
+      }
+      offset = parsed
+      index += 1
+      continue
+    }
+    if (value.startsWith("--")) {
+      return { kind: "invalid", message: `Unknown history option: ${value}` }
+    }
+    if (workflowId === undefined) {
+      workflowId = value
+      continue
+    }
+    return { kind: "invalid", message: `Unexpected history argument: ${value}` }
+  }
+
+  return {
+    json,
+    kind: "history",
+    limit,
+    offset,
+    ...(status === undefined ? {} : { status }),
+    ...(workflowId === undefined ? {} : { workflowId }),
+  }
+}
+
+function parseShowCommand(args: string[]): ParsedCommand {
+  let runId: string | undefined
+  let json = false
+
+  for (const value of args) {
+    if (value === "--json") {
+      json = true
+      continue
+    }
+    if (value?.startsWith("--")) {
+      return { kind: "invalid", message: `Unknown show option: ${value}` }
+    }
+    if (runId === undefined && value !== undefined) {
+      runId = value
+      continue
+    }
+    if (value !== undefined) {
+      return { kind: "invalid", message: `Unexpected show argument: ${value}` }
+    }
+  }
+
+  return { json, kind: "show", ...(runId === undefined ? {} : { runId }) }
+}
+
+function parseLogsCommand(args: string[]): ParsedCommand {
+  const positionals: string[] = []
+  let json = false
+  let run: string | undefined
+  let step: string | undefined
+
+  for (let index = 0; index < args.length; index += 1) {
+    const value = args[index]
+    if (value === undefined) {
+      continue
+    }
+    if (value === "--json") {
+      json = true
+      continue
+    }
+    if (value === "--run") {
+      const parsed = parseRequiredOption("rigg logs --run", "run id", args[index + 1])
+      if (typeof parsed !== "string") {
+        return parsed
+      }
+      run = parsed
+      index += 1
+      continue
+    }
+    if (value === "--step") {
+      const parsed = parseRequiredOption("rigg logs --step", "step id", args[index + 1])
+      if (typeof parsed !== "string") {
+        return parsed
+      }
+      step = parsed
+      index += 1
+      continue
+    }
+    if (value.startsWith("--")) {
+      return { kind: "invalid", message: `Unknown logs option: ${value}` }
+    }
+    positionals.push(value)
+    if (positionals.length > 2) {
+      return { kind: "invalid", message: `Unexpected logs argument: ${value}` }
+    }
+  }
+
+  return {
+    json,
+    kind: "logs",
+    ...(positionals[0] === undefined ? {} : { first: positionals[0] }),
+    ...(run === undefined ? {} : { run }),
+    ...(positionals[1] === undefined ? {} : { second: positionals[1] }),
+    ...(step === undefined ? {} : { step }),
   }
 }
 
@@ -71,8 +247,12 @@ export function renderHelp(): string[] {
     "",
     "Commands:",
     "  init",
+    "  list",
     "  upgrade [target]",
     "  validate [--json]",
+    "  history [workflow_id] [--status <status>] [--limit <n>] [--offset <n>] [--json]",
+    "  show <run_id> [--json]",
+    "  logs [run_id] [step] [--run <id>] [--step <name>] [--json]",
     "  run <workflow_id> [--input key=value] [--auto-continue]",
     "",
     "Options:",

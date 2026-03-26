@@ -2,22 +2,7 @@ import { loadProject, listWorkflowIds } from "../project"
 import { normalizeError } from "../util/error"
 import { stringifyJson } from "../util/json"
 import { renderErrors } from "./out"
-
-type CommandResult = {
-  exitCode: number
-  stderrLines: string[]
-  stdoutLines: string[]
-}
-
-function success(stdoutLines: string[] = [], stderrLines: string[] = []): CommandResult {
-  return { exitCode: 0, stderrLines, stdoutLines }
-}
-
-function failure(stderrLines: string[] = [], exitCode = 1, stdoutLines: string[] = []): CommandResult {
-  return { exitCode, stderrLines, stdoutLines }
-}
-
-const PROJECT_NOT_FOUND_MESSAGE = "Could not find a .rigg directory from the current working directory."
+import { type CommandResult, failure, PROJECT_NOT_FOUND_MESSAGE, success } from "./result"
 
 export async function runCommand(cwd: string, json = false): Promise<CommandResult> {
   try {

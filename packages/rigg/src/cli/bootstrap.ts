@@ -84,6 +84,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       const result = await run.runCommand(cwd, command.workflowId, {
         autoContinue: command.autoContinue,
         inputs: command.inputs,
+        mode: command.mode,
       })
       writeLines(result.stdoutLines, process.stdout)
       writeLines(result.stderrLines, process.stderr)

@@ -16,23 +16,22 @@ import {
 } from "./cursor"
 import { displayValue, expandedValue, normalizeChunk, normalizeSegments, segmentDisplay, type Segment } from "./paste"
 
-export type InputKey = Pick<
-  Key,
-  | "backspace"
-  | "ctrl"
-  | "delete"
-  | "downArrow"
-  | "end"
-  | "eventType"
-  | "home"
-  | "leftArrow"
-  | "meta"
-  | "return"
-  | "rightArrow"
-  | "shift"
-  | "tab"
-  | "upArrow"
->
+export type InputKey = {
+  backspace?: Key["backspace"]
+  ctrl?: Key["ctrl"]
+  delete?: Key["delete"]
+  downArrow?: Key["downArrow"]
+  end?: Key["end"]
+  eventType?: Key["eventType"]
+  home?: Key["home"]
+  leftArrow?: Key["leftArrow"]
+  meta?: Key["meta"]
+  return?: Key["return"]
+  rightArrow?: Key["rightArrow"]
+  shift?: Key["shift"]
+  tab?: Key["tab"]
+  upArrow?: Key["upArrow"]
+}
 
 type EditAction =
   | { kind: "noop" }
@@ -51,7 +50,7 @@ type SegmentsAction =
     }
 
 function matchesCtrlCharacterShortcut(input: string, key: InputKey, shortcut: string): boolean {
-  return key.ctrl && input.toLowerCase() === shortcut
+  return Boolean(key.ctrl) && input.toLowerCase() === shortcut
 }
 
 function isDeleteWordLeftShortcut(input: string, key: InputKey): boolean {

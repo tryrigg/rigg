@@ -77,6 +77,7 @@ Run a workflow:
 
 ```bash
 rigg run <workflow_id> --input key=value
+rigg run <workflow_id> --headless --output-format json
 ```
 
 `--input key=value` parses JSON when possible, so values like `true`, `42`, `["a"]`, and `{"x":1}` work as expected.
@@ -113,7 +114,12 @@ Supported step types:
 ## Notes
 
 - Workflows are discovered from the nearest `.rigg/` directory.
-- `rigg run` opens a stateful terminal UI on TTYs with a run header, active pane, interaction pane, and barrier pane.
+- `rigg run` opens a stateful terminal UI by default when `stdin` and `stderr` are attached to a TTY.
+- `rigg run --auto-continue` only works in that interactive TTY UI. Barriers advance automatically there, but approvals and workflow input prompts still pause normally.
+- `rigg run --headless` skips the TTY requirement, auto-continues step barriers, and is intended for scripts and CI.
+- Headless text mode prints the final workflow result to `stdout`. Add `--verbose` to also stream step output and lifecycle markers as the run executes.
+- `rigg run --headless --output-format json` emits one final summary object. `--output-format stream-json` emits newline-delimited JSON events plus a final summary record.
+- Headless runs must receive all required workflow inputs via `--input` or workflow defaults before execution starts.
 - Barrier steps can be advanced with `continue` or stopped with `abort`.
 - Provider interactions are answered in place from the terminal UI; `Ctrl-C` interrupts the active step.
 - When the local history database is available, runs are recorded for `rigg list`, `rigg history`, `rigg show`, and `rigg logs`.

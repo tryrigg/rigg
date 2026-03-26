@@ -126,15 +126,18 @@ rigg logs --json
 Execute a workflow by ID.
 
 ```bash
-rigg run <workflow_id> [--input key=value] [--auto-continue]
+rigg run <workflow_id> [--input key=value] [--auto-continue] [--headless] [--output-format <text|json|stream-json>] [--verbose]
 ```
 
-| Flag                | Description                                                                                              |
-| ------------------- | -------------------------------------------------------------------------------------------------------- |
-| `--input key=value` | Set input parameter (repeatable). Values are JSON-parsed when possible.                                  |
-| `--auto-continue`   | Skip step barriers automatically, while still pausing for approvals, questions, and other input prompts. |
+| Flag                                        | Description                                                                                                   |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `--input key=value`                         | Set input parameter (repeatable). Values are JSON-parsed when possible.                                       |
+| `--auto-continue`                           | Skip step barriers automatically in the interactive TTY UI, while still pausing for approvals and questions.  |
+| `--headless`                                | Run without the TTY UI. Step barriers auto-continue and output is written to stdout/stderr.                   |
+| `--output-format <text\|json\|stream-json>` | Choose headless output format. Requires `--headless`. Default: `text`.                                        |
+| `--verbose`                                 | In headless `text` mode, stream step output and lifecycle markers as the run executes. Requires `--headless`. |
 
-Requires an interactive terminal. `rigg run` opens a stateful terminal UI with:
+By default, `rigg run` requires an interactive terminal. It opens a stateful terminal UI with:
 
 - a run header
 - a live running view for the active step output and codex activity
@@ -142,6 +145,24 @@ Requires an interactive terminal. `rigg run` opens a stateful terminal UI with:
 - a final view that shows the last completed step result
 
 With `--auto-continue`, step barriers advance automatically and the UI emits a muted `auto-continue: Next: ...` line for each released barrier. Approvals and user input still pause normally.
+
+If `stdin` or `stderr` is not attached to a TTY, the default interactive mode fails fast with a message telling you to re-run in an interactive terminal or switch to `--headless`.
+
+### Headless mode
+
+Use `--headless` for scripts, CI, or other non-interactive environments.
+
+- `--headless` removes the TTY requirement.
+- Step barriers auto-continue automatically.
+- Required workflow inputs must be supplied via `--input` or workflow defaults before the run starts.
+- Headless runs cannot pause for interactive approvals or free-form questions. If a workflow requests an approval, rigg selects a non-approve decision when one exists; otherwise the run fails.
+
+Headless output formats:
+
+- `text`: print the final workflow result to `stdout` and final errors to `stderr`.
+- `text --verbose`: also stream step stdout/stderr and lifecycle markers while the run is executing.
+- `json`: emit one final summary object with run metadata, final result or error, and per-step status.
+- `stream-json`: emit one JSON event per line as the run executes, followed by a final `summary` record.
 
 Use `Ctrl-C` to interrupt the active step.
 
@@ -154,3 +175,14 @@ Provider prerequisites:
 - Codex steps require a local Codex CLI session.
 - Claude steps require a local Claude Code CLI session. Run `claude login` before use.
 - Cursor steps require a local Cursor installation with ACP available.
+
+Examples:
+
+```bash
+rigg run hello --input name=Rigg
+rigg run hello --auto-continue
+rigg run hello --headless
+rigg run hello --headless --verbose
+rigg run hello --headless --output-format json
+rigg run hello --headless --output-format stream-json
+```

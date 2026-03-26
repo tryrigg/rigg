@@ -36,6 +36,8 @@ rigg list                              # list workflows in the current project
 rigg validate                          # check YAML syntax
 rigg run hello --input name=Rigg       # run a workflow
 rigg run hello --auto-continue         # skip step barriers in the TTY UI
+rigg run hello --headless              # run without the TTY UI
+rigg run hello --headless --output-format json
 ```
 
 `--input key=value` auto-parses JSON — `true`, `42`, `["a"]`, `{"x":1}` all work.
@@ -48,10 +50,12 @@ rigg show <run_id>
 rigg logs [run_id] [step]
 ```
 
-## Output
+## Running workflows
 
-`rigg run` requires an interactive terminal. It opens a stateful terminal UI that switches between a live running view, a waiting view for barriers and interactions, and a final result view. During `codex` and `claude` steps, the running view shows live agent activity such as assistant text and tool progress. Use `continue` or `abort` at barriers, and use `Ctrl-C` to interrupt the active step.
+`rigg run` opens an interactive terminal UI by default. That mode requires both `stdin` and `stderr` to be attached to a TTY. The UI switches between a live running view, a waiting view for barriers and interactions, and a final result view. During `codex` and `claude` steps, the running view shows live agent activity such as assistant text and tool progress. Use `continue` or `abort` at barriers, and use `Ctrl-C` to interrupt the active step.
 
 With `--auto-continue`, step barriers advance automatically while approvals, questions, and other input prompts still pause normally.
+
+Use `--headless` in scripts, CI, or other non-interactive environments. Headless runs skip the TTY requirement, auto-continue step barriers, and write output directly to stdout/stderr. `--output-format json` emits one final summary object, and `--output-format stream-json` emits one JSON event per line plus a final summary record. In headless mode, required inputs must already be available via `--input` or workflow defaults.
 
 When the local history database is available, completed runs are recorded so `rigg list`, `rigg history`, `rigg show`, and `rigg logs` can inspect them later.

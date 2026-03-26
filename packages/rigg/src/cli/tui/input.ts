@@ -1,6 +1,12 @@
 import type { Key } from "ink"
 
-type ShortcutKey = Pick<Key, "ctrl" | "meta" | "super" | "hyper" | "eventType">
+type ShortcutKey = {
+  ctrl?: Key["ctrl"]
+  eventType?: Key["eventType"]
+  hyper?: Key["hyper"]
+  meta?: Key["meta"]
+  super?: Key["super"]
+}
 
 export function allowsShortcut(key: ShortcutKey): boolean {
   if (key.ctrl || key.meta || key.super || key.hyper) {

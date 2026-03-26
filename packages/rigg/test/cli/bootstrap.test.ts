@@ -46,7 +46,9 @@ describe("cli/bootstrap", () => {
     const result = await runCli(["--help"])
 
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("run <workflow_id> [--input key=value] [--auto-continue]")
+    expect(result.stdout).toContain(
+      "run <workflow_id> [--input key=value] [--auto-continue] [--headless] [--output-format <text|json|stream-json>] [--verbose]",
+    )
   })
 
   test("version subcommand no longer prints the version", async () => {

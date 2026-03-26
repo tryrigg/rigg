@@ -1,5 +1,19 @@
 import type { RunStatus } from "../session/schema"
 
+export const RUN_OUTPUT_FORMATS = ["text", "json", "stream-json"] as const
+const RUN_OUTPUT_FORMAT_SET = new Set<string>(RUN_OUTPUT_FORMATS)
+const RUN_OUTPUT_FORMAT_LABEL = RUN_OUTPUT_FORMATS.join(", ")
+const RUN_OUTPUT_FORMAT_USAGE = RUN_OUTPUT_FORMATS.join("|")
+
+export type RunOutputFormat = (typeof RUN_OUTPUT_FORMATS)[number]
+export type RunMode =
+  | { kind: "interactive" }
+  | { kind: "headless_text"; verbose: boolean }
+  | { kind: "headless_json" }
+  | { kind: "headless_stream_json" }
+
+const RUN_HELP = `  run <workflow_id> [--input key=value] [--auto-continue] [--headless] [--output-format <${RUN_OUTPUT_FORMAT_USAGE}>] [--verbose]`
+
 export type ParsedCommand =
   | { kind: "invalid"; message: string }
   | { kind: "help" }
@@ -10,7 +24,21 @@ export type ParsedCommand =
   | { json: boolean; kind: "show"; runId?: string }
   | { first?: string; json: boolean; kind: "logs"; run?: string; second?: string; step?: string }
   | { json: boolean; kind: "history"; limit: number; offset: number; status?: RunStatus; workflowId?: string }
-  | { autoContinue: boolean; inputs: string[]; kind: "run"; workflowId?: string }
+  | { autoContinue: boolean; inputs: string[]; kind: "run"; mode: RunMode; workflowId?: string }
+
+type InvalidCommand = Extract<ParsedCommand, { kind: "invalid" }>
+type RawRunCommand = {
+  autoContinue: boolean
+  headless: boolean
+  inputs: string[]
+  outputFormat: RunOutputFormat
+  verbose: boolean
+  workflowId?: string
+}
+
+function invalid(message: string): InvalidCommand {
+  return { kind: "invalid", message }
+}
 
 export function parseCommand(argv: string[]): ParsedCommand {
   const [commandName, ...rest] = argv
@@ -57,10 +85,14 @@ function parseIntegerOption(name: string, value: string | undefined): ParsedComm
 
 function parseRequiredOption(name: string, label: string, value: string | undefined): ParsedCommand | string {
   if (value === undefined || value.startsWith("--")) {
-    return { kind: "invalid", message: `\`${name}\` requires a ${label}.` }
+    return invalid(`\`${name}\` requires a ${label}.`)
   }
 
   return value
+}
+
+function isRunOutputFormat(value: string): value is RunOutputFormat {
+  return RUN_OUTPUT_FORMAT_SET.has(value)
 }
 
 function parseHistoryCommand(args: string[]): ParsedCommand {
@@ -206,8 +238,27 @@ function parseLogsCommand(args: string[]): ParsedCommand {
 }
 
 function parseRunCommand(args: string[]): ParsedCommand {
+  const raw = scanRunCommand(args)
+  if ("message" in raw) {
+    return raw
+  }
+
+  const mode = normalizeRunMode(raw)
+  if (mode.kind === "invalid") {
+    return mode
+  }
+
+  return raw.workflowId === undefined
+    ? { autoContinue: raw.autoContinue, inputs: raw.inputs, kind: "run", mode }
+    : { autoContinue: raw.autoContinue, inputs: raw.inputs, kind: "run", mode, workflowId: raw.workflowId }
+}
+
+function scanRunCommand(args: string[]): RawRunCommand | InvalidCommand {
   let autoContinue = false
+  let headless = false
   const inputs: string[] = []
+  let outputFormat: RunOutputFormat = "text"
+  let verbose = false
   let workflowId: string | undefined
 
   for (let index = 0; index < args.length; index += 1) {
@@ -228,17 +279,63 @@ function parseRunCommand(args: string[]): ParsedCommand {
       autoContinue = true
       continue
     }
+    if (value === "--headless") {
+      headless = true
+      continue
+    }
+    if (value === "--output-format") {
+      const next = args[index + 1]
+      if (next === undefined || next.startsWith("--")) {
+        return invalid(`\`rigg run --output-format\` requires one of: ${RUN_OUTPUT_FORMAT_LABEL}.`)
+      }
+      if (!isRunOutputFormat(next)) {
+        return invalid(`\`rigg run --output-format\` must be one of: ${RUN_OUTPUT_FORMAT_LABEL}.`)
+      }
+      outputFormat = next
+      index += 1
+      continue
+    }
+    if (value === "--verbose") {
+      verbose = true
+      continue
+    }
     if (value.startsWith("--")) {
-      return { kind: "invalid", message: `Unknown run option: ${value}` }
+      return invalid(`Unknown run option: ${value}`)
     }
     if (workflowId === undefined) {
       workflowId = value
+      continue
     }
+    return invalid(`Unexpected run argument: ${value}`)
   }
 
-  return workflowId === undefined
-    ? { autoContinue, inputs, kind: "run" }
-    : { autoContinue, inputs, kind: "run", workflowId }
+  return { autoContinue, headless, inputs, outputFormat, verbose, ...(workflowId === undefined ? {} : { workflowId }) }
+}
+
+function normalizeRunMode(raw: RawRunCommand): RunMode | InvalidCommand {
+  if (!raw.headless) {
+    if (raw.outputFormat !== "text") {
+      return invalid("`--output-format` requires `--headless`.")
+    }
+    if (raw.verbose) {
+      return invalid("`--verbose` requires `--headless`.")
+    }
+    return { kind: "interactive" }
+  }
+
+  if (raw.outputFormat === "text") {
+    return { kind: "headless_text", verbose: raw.verbose }
+  }
+
+  if (raw.verbose) {
+    return invalid("`--verbose` is only supported with `--output-format text`.")
+  }
+
+  if (raw.outputFormat === "json") {
+    return { kind: "headless_json" }
+  }
+
+  return { kind: "headless_stream_json" }
 }
 
 export function renderHelp(): string[] {
@@ -253,7 +350,7 @@ export function renderHelp(): string[] {
     "  history [workflow_id] [--status <status>] [--limit <n>] [--offset <n>] [--json]",
     "  show <run_id> [--json]",
     "  logs [run_id] [step] [--run <id>] [--step <name>] [--json]",
-    "  run <workflow_id> [--input key=value] [--auto-continue]",
+    RUN_HELP,
     "",
     "Options:",
     "  -h, --help",

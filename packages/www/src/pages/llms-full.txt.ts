@@ -42,7 +42,7 @@ As more engineering work moves into local AI agents, teams need a way to turn th
 
 Rigg lets you capture those workflows as \`.rigg/*.yaml\`, run them locally with tools like Codex and Claude, and keep them in Git alongside the code they operate on. That makes agent workflows easier to review, share, standardize, and evolve as a team, instead of living as private prompt habits.
 
-The goal is to help teams use local coding agents in a safer and more repeatable way: common workflows are versioned, execution is visible, and every run is recorded under \`.rigg/runs/\`.
+The goal is to help teams use local coding agents in a safer and more repeatable way: common workflows are versioned, execution is visible, and local run history is available through commands like \`rigg history\`, \`rigg show\`, and \`rigg logs\` when the history database is available.
 
 ${sections.join("\n\n")}
 

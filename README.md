@@ -61,6 +61,12 @@ Initialize a project:
 rigg init
 ```
 
+List workflows:
+
+```bash
+rigg list
+```
+
 Validate workflows:
 
 ```bash
@@ -74,6 +80,14 @@ rigg run <workflow_id> --input key=value
 ```
 
 `--input key=value` parses JSON when possible, so values like `true`, `42`, `["a"]`, and `{"x":1}` work as expected.
+
+Inspect local run history:
+
+```bash
+rigg history
+rigg show <run_id>
+rigg logs [run_id] [step]
+```
 
 ## Workflow example
 
@@ -102,7 +116,7 @@ Supported step types:
 - `rigg run` opens a stateful terminal UI on TTYs with a run header, active pane, interaction pane, and barrier pane.
 - Barrier steps can be advanced with `continue` or stopped with `abort`.
 - Provider interactions are answered in place from the terminal UI; `Ctrl-C` interrupts the active step.
-- Run state is in-memory only; Rigg does not persist run history.
+- When the local history database is available, runs are recorded for `rigg list`, `rigg history`, `rigg show`, and `rigg logs`.
 
 ## Docs
 

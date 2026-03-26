@@ -21,6 +21,16 @@ Generated examples include:
 - `review-branch.yaml`
 - `review-commit.yaml`
 
+## rigg list
+
+List workflows discovered from the nearest `.rigg/` directory.
+
+```bash
+rigg list
+```
+
+When local run history is available, `rigg list` also shows the last recorded run status for each workflow.
+
 ## rigg upgrade
 
 Upgrade an installed Rigg release binary to the latest or a specific version.
@@ -44,6 +54,71 @@ Validate all `.rigg/*.yaml` workflow files. Reports syntax errors, unknown field
 
 ```bash
 rigg validate
+```
+
+## rigg history
+
+Show recorded runs for the current workspace.
+
+```bash
+rigg history [workflow_id] [--status <status>] [--limit <n>] [--offset <n>] [--json]
+```
+
+| Flag                | Description                                                   |
+| ------------------- | ------------------------------------------------------------- |
+| `--status <status>` | Filter by `running`, `succeeded`, `failed`, or `aborted`.     |
+| `--limit <n>`       | Limit the number of rows returned. Default: `10`.             |
+| `--offset <n>`      | Skip the first `n` matching rows. Default: `0`.               |
+| `--json`            | Emit machine-readable JSON instead of the default text table. |
+
+Examples:
+
+```bash
+rigg history
+rigg history plan --status failed
+rigg history --limit 20 --offset 20
+rigg history --json
+```
+
+## rigg show
+
+Show a single recorded run by run ID or unique short ID prefix.
+
+```bash
+rigg show <run_id> [--json]
+```
+
+Examples:
+
+```bash
+rigg show d3f8a1c
+rigg show d3f8a1c --json
+```
+
+## rigg logs
+
+Show recorded output for a run or a single step.
+
+```bash
+rigg logs [run_id] [step] [--run <id>] [--step <name>] [--json]
+```
+
+If you omit `run_id`, `rigg logs` defaults to the latest recorded run. Step selectors can use a step ID or a node path such as `/0`.
+
+| Flag            | Description                                                  |
+| --------------- | ------------------------------------------------------------ |
+| `--run <id>`    | Select the run explicitly, using a full run ID or short ID.  |
+| `--step <name>` | Select a step explicitly by step ID or node path.            |
+| `--json`        | Emit machine-readable JSON instead of the default text view. |
+
+Examples:
+
+```bash
+rigg logs
+rigg logs d3f8a1c
+rigg logs d3f8a1c code-review
+rigg logs --run d3f8a1c --step /0
+rigg logs --json
 ```
 
 ## rigg run
@@ -71,6 +146,8 @@ With `--auto-continue`, step barriers advance automatically and the UI emits a m
 Use `Ctrl-C` to interrupt the active step.
 
 Workflows are discovered from the nearest `.rigg/` directory.
+
+Successful runs are recorded in local run history when the history database is available. Use `rigg history`, `rigg show`, and `rigg logs` to inspect past runs.
 
 Provider prerequisites:
 

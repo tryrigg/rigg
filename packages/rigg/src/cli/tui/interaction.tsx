@@ -8,7 +8,7 @@ import type {
   UserInputQuestion,
 } from "../../session/interaction"
 import type { PendingInteraction } from "../../session/schema"
-import { compactJson, tryParseJson } from "../../util/json"
+import { compactJson, safeParseJson } from "../../util/json"
 import { matchesShortcut } from "./input"
 import { PromptTextInput } from "./prompt"
 import { chars } from "./theme"
@@ -392,9 +392,9 @@ function ElicitationPanel({
   )
 
   const handleJsonSubmit = (value: string) => {
-    const parsed = tryParseJson(value)
-    if (parsed !== undefined) {
-      onResolve({ action: "accept", content: parsed, kind: "elicitation" })
+    const parsed = safeParseJson(value)
+    if (parsed.kind === "ok") {
+      onResolve({ action: "accept", content: parsed.value, kind: "elicitation" })
     }
   }
 

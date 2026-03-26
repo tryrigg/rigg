@@ -624,11 +624,11 @@ function createQuestion(
   fallbackQuestion: string,
   required: boolean,
 ): { question: UserInputRequest["questions"][number]; schema: Record<string, unknown> } | null {
-  if (value === null || typeof value !== "object") {
+  const schema = record(value)
+  if (schema === null) {
     return null
   }
 
-  const schema = value as Record<string, unknown>
   const title = typeof schema["title"] === "string" && schema["title"].length > 0 ? schema["title"] : id
   const question =
     typeof schema["description"] === "string" && schema["description"].length > 0
@@ -657,10 +657,10 @@ function parseQuestionOptions(schema: Record<string, unknown>): Array<{ descript
   if (oneOf !== null) {
     const options = oneOf
       .map((item) => {
-        if (item === null || typeof item !== "object") {
+        const option = record(item)
+        if (option === null) {
           return null
         }
-        const option = item as Record<string, unknown>
         const label = typeof option["title"] === "string" ? option["title"] : scalarLabel(option["const"])
         if (label === null) {
           return null
@@ -721,10 +721,10 @@ function coerceAnswer(schema: Record<string, unknown> | undefined, answers: stri
   if (oneOf !== null) {
     const matches = oneOf
       .map((item) => {
-        if (item === null || typeof item !== "object") {
+        const option = record(item)
+        if (option === null) {
           return null
         }
-        const option = item as Record<string, unknown>
         const label = typeof option["title"] === "string" ? option["title"] : scalarLabel(option["const"])
         if (label === null || !answers.includes(label) || !("const" in option)) {
           return null
@@ -763,36 +763,31 @@ function coerceAnswer(schema: Record<string, unknown> | undefined, answers: stri
 }
 
 function extractTextDelta(event: unknown): string | null {
-  if (event === null || typeof event !== "object") {
+  const value = record(event)
+  if (value === null) {
     return null
   }
 
-  const value = event as Record<string, unknown>
   if (value["type"] !== "content_block_delta") {
     return null
   }
-  const delta = value["delta"]
-  if (delta === null || typeof delta !== "object") {
+  const delta = record(value["delta"])
+  if (delta === null) {
     return null
   }
-  const next = delta as Record<string, unknown>
-  return next["type"] === "text_delta" && typeof next["text"] === "string" ? next["text"] : null
+  return delta["type"] === "text_delta" && typeof delta["text"] === "string" ? delta["text"] : null
 }
 
 function extractAssistantText(message: Extract<SDKMessage, { type: "assistant" }>): string {
-  const content = message.message.content as Array<Record<string, unknown>>
-  return content
-    .flatMap((item: Record<string, unknown>) =>
-      item["type"] === "text" && typeof item["text"] === "string" ? [item["text"]] : [],
-    )
+  return recordArray(message.message.content)
+    .flatMap((item) => (item["type"] === "text" && typeof item["text"] === "string" ? [item["text"]] : []))
     .join("")
 }
 
 function extractAssistantTools(
   message: Extract<SDKMessage, { type: "assistant" }>,
 ): Array<{ detail?: string | undefined; id: string; name: string }> {
-  const content = message.message.content as Array<Record<string, unknown>>
-  return content.flatMap((item: Record<string, unknown>) => {
+  return recordArray(message.message.content).flatMap((item) => {
     if (item["type"] !== "tool_use") {
       return []
     }
@@ -812,8 +807,9 @@ function extractAssistantTools(
 }
 
 function summarizeToolInput(tool: string, input: unknown): string {
-  if (input !== null && typeof input === "object") {
-    const command = (input as Record<string, unknown>)["command"]
+  const payload = record(input)
+  if (payload !== null) {
+    const command = payload["command"]
     if (typeof command === "string") {
       return command
     }
@@ -924,11 +920,25 @@ function firstString(values: unknown[]): string | null {
   return values.find((value): value is string => typeof value === "string" && value.length > 0) ?? null
 }
 
-function recordValue(value: unknown, key: string): unknown {
-  if (value === null || typeof value !== "object") {
+function record(value: unknown): Record<string, unknown> | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return null
   }
-  return (value as Record<string, unknown>)[key]
+  return Object.fromEntries(Object.entries(value))
+}
+
+function recordArray(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value.flatMap((item) => {
+    const next = record(item)
+    return next === null ? [] : [next]
+  })
+}
+
+function recordValue(value: unknown, key: string): unknown {
+  return record(value)?.[key] ?? null
 }
 
 function currentTurnId(active: ActiveTurn | null, turnId: string): string {
@@ -954,15 +964,20 @@ function assertApprovalDecision(request: ApprovalRequest, decision: string): voi
   throw new Error(`interaction handler returned invalid approval decision: ${decision}`)
 }
 
+function isPermissionResult(value: unknown): value is PermissionResult {
+  const result = record(value)
+  return result?.["behavior"] === "allow" || result?.["behavior"] === "ask" || result?.["behavior"] === "deny"
+}
+
 function approvalResponse(request: ApprovalRequest, decision: string): PermissionResult {
   const match = request.decisions.find((candidate) => candidate.value === decision)
   const response = match?.response
-  if (response !== null && typeof response === "object") {
-    return response as PermissionResult
+  if (isPermissionResult(response)) {
+    return response
   }
 
-  return {
-    behavior: decision === "allow" ? "allow" : "deny",
-    message: decision === "allow" ? undefined : "Denied by operator.",
-  } as PermissionResult
+  if (decision === "allow") {
+    return { behavior: "allow" }
+  }
+  return { behavior: "deny", message: "Denied by operator." }
 }

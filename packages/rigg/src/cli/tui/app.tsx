@@ -32,8 +32,10 @@ export function App({
   store: Store
   workflow: WorkflowDocument
 }) {
-  const { state } = useSyncExternalStore(store.subscribe, store.getSnapshot)
-  const { snapshot, liveOutputs, completedOutputs } = state
+  const storeState = useSyncExternalStore(store.subscribe, store.getSnapshot).state
+  const snapshot = storeState.snapshot
+  const liveOutputs = storeState.liveOutputs
+  const completedOutputs = storeState.completedOutputs
   const elapsed = formatElapsed(snapshot?.started_at ?? null, snapshot?.finished_at ?? null)
   const isFinished = snapshot !== null && snapshot.status !== "running"
   const entries = useMemo(() => buildTree(workflow, snapshot, project), [workflow, snapshot, project])

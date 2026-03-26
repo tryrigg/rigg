@@ -143,8 +143,8 @@ export async function executeWorkflow(options: {
     )
 
     const finishedAt = timestampNow()
-    const { reason, status } = summarizeRunCompletion(execution)
-    finishRun(runState, status, reason, finishedAt)
+    const summary = summarizeRunCompletion(execution)
+    finishRun(runState, summary.status, summary.reason, finishedAt)
     environment.emitEvent({ kind: "run_finished", snapshot: runState })
     return runState
   } catch (error) {

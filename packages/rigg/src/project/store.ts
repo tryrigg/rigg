@@ -11,9 +11,16 @@ import { workspaceTable } from "./workspace.sql"
 function canonical(path: string): string {
   try {
     return realpathSync.native(path)
-  } catch {
-    return resolve(path)
+  } catch (error) {
+    if (shouldResolvePath(error)) {
+      return resolve(path)
+    }
+    throw error
   }
+}
+
+function shouldResolvePath(error: unknown): boolean {
+  return error instanceof Error && "code" in error && (error.code === "ENOENT" || error.code === "ENOTDIR")
 }
 
 export type WorkspaceRef = {

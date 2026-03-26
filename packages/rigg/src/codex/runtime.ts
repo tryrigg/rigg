@@ -846,27 +846,26 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
       throw new Error("codex app-server referenced an unknown turn")
     }
 
-    const { execution } = executionLookup
     const notification = parseDelta(params)
     if (notification.text === null || notification.text.length === 0) {
       return
     }
 
-    appendDelta(execution.assistantTranscript, {
+    appendDelta(executionLookup.execution.assistantTranscript, {
       itemId: notification.itemId,
       text: notification.text,
     })
     await captureEvent(
-      execution.capture,
+      executionLookup.execution.capture,
       {
         itemId: notification.itemId,
         kind: "message_delta",
         provider: "codex",
         text: notification.text,
-        threadId: execution.threadId,
-        turnId: execution.turnId,
+        threadId: executionLookup.execution.threadId,
+        turnId: executionLookup.execution.turnId,
       },
-      execution.onEvent,
+      executionLookup.execution.onEvent,
     )
   }
 
@@ -879,24 +878,23 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
       throw new Error("codex app-server referenced an unknown turn")
     }
 
-    const { execution } = executionLookup
-    const { item } = parseItem(params)
+    const item = parseItem(params).item
 
     if (method === "item/completed") {
       const assistantMessage = parseAssistantMessage(item)
       if (assistantMessage !== null) {
-        const text = completeMessage(execution.assistantTranscript, assistantMessage)
+        const text = completeMessage(executionLookup.execution.assistantTranscript, assistantMessage)
         await captureEvent(
-          execution.capture,
+          executionLookup.execution.capture,
           {
             itemId: assistantMessage.itemId,
             kind: "message_completed",
             provider: "codex",
             text,
-            threadId: execution.threadId,
-            turnId: execution.turnId,
+            threadId: executionLookup.execution.threadId,
+            turnId: executionLookup.execution.turnId,
           },
-          execution.onEvent,
+          executionLookup.execution.onEvent,
         )
         return
       }
@@ -904,18 +902,18 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
 
     const reviewText = parseReviewItem(item)
     if (reviewText !== null) {
-      execution.reviewText = reviewText
+      executionLookup.execution.reviewText = reviewText
       return
     }
 
     const toolEvent = parseToolEvent(item, {
       itemId: typeof item["id"] === "string" ? item["id"] : null,
       kind: method === "item/started" ? "tool_started" : "tool_completed",
-      threadId: execution.threadId,
-      turnId: execution.turnId,
+      threadId: executionLookup.execution.threadId,
+      turnId: executionLookup.execution.turnId,
     })
     if (toolEvent !== undefined) {
-      await captureEvent(execution.capture, toolEvent, execution.onEvent)
+      await captureEvent(executionLookup.execution.capture, toolEvent, executionLookup.execution.onEvent)
     }
   }
 
@@ -976,12 +974,11 @@ export async function createCodexRuntimeSession(options: CodexRuntimeOptions): P
       throw new Error("codex app-server referenced an unknown turn")
     }
 
-    const { execution } = executionLookup
     if (!isRuntimeRequestMethod(method)) {
       throw new Error(`unsupported codex app-server server request: ${method}`)
     }
 
-    await requestHandlers[method](execution, { id, params, requestId })
+    await requestHandlers[method](executionLookup.execution, { id, params, requestId })
   }
 
   async function handleNotification(method: string, params: unknown): Promise<void> {

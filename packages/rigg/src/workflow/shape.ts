@@ -24,13 +24,13 @@ export const ResultShapeKind = {
   String: "string",
 } as const
 
-export const AnyJsonShape: ResultShape = { kind: "any_json" }
-export const NullShape: ResultShape = { kind: "null" }
-export const NoneShape: ResultShape = { kind: "none" }
-export const StringShape: ResultShape = { kind: "string" }
-export const IntegerShape: ResultShape = { kind: "integer" }
-export const NumberShape: ResultShape = { kind: "number" }
-export const BooleanShape: ResultShape = { kind: "boolean" }
+export const AnyJsonShape = { kind: "any_json" } satisfies ResultShape
+export const NullShape = { kind: "null" } satisfies ResultShape
+export const NoneShape = { kind: "none" } satisfies ResultShape
+export const StringShape = { kind: "string" } satisfies ResultShape
+export const IntegerShape = { kind: "integer" } satisfies ResultShape
+export const NumberShape = { kind: "number" } satisfies ResultShape
+export const BooleanShape = { kind: "boolean" } satisfies ResultShape
 
 export function shapeFromJson(value: unknown): ResultShape {
   if (value === null) {

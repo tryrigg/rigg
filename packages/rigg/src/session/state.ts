@@ -45,20 +45,21 @@ export function upsertNode(state: MutableRunState, snapshot: MutableNodeSnapshot
   const existingIndex = state.nodes.findIndex((node) => node.node_path === snapshot.node_path)
   if (existingIndex >= 0) {
     state.nodes[existingIndex] = snapshot
-  } else {
-    let lo = 0
-    let hi = state.nodes.length
-    while (lo < hi) {
-      const mid = (lo + hi) >>> 1
-      const current = state.nodes[mid]
-      if (current !== undefined && comparePath(current.node_path, snapshot.node_path) < 0) {
-        lo = mid + 1
-      } else {
-        hi = mid
-      }
-    }
-    state.nodes.splice(lo, 0, snapshot)
+    return
   }
+
+  let lo = 0
+  let hi = state.nodes.length
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1
+    const current = state.nodes[mid]
+    if (current !== undefined && comparePath(current.node_path, snapshot.node_path) < 0) {
+      lo = mid + 1
+    } else {
+      hi = mid
+    }
+  }
+  state.nodes.splice(lo, 0, snapshot)
 }
 
 export function nextAttempt(state: MutableRunState, nodePath: NodePath): number {

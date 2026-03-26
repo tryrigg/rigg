@@ -92,8 +92,6 @@ export function prepareStep(
     return { frontier: [], kind: "skipped", step }
   }
 
-  const { context, env } = preparedContext
-
   switch (step.type) {
     case "shell":
     case "claude":
@@ -101,27 +99,27 @@ export function prepareStep(
     case "cursor":
     case "write_file":
       return {
-        env,
-        frontier: [createFrontierNode(step, nodePath, scope.frameId, context, cwd)],
+        env: preparedContext.env,
+        frontier: [createFrontierNode(step, nodePath, scope.frameId, preparedContext.context, cwd)],
         kind: "action",
         step,
       }
     case "group":
       return {
-        env,
+        env: preparedContext.env,
         frontier: [],
         kind: "group",
         step,
       }
     case "loop":
       return {
-        env,
+        env: preparedContext.env,
         frontier: [],
         kind: "loop",
         step,
       }
     case "workflow": {
-      const inputs = renderWorkflowInputs(step.with.inputs ?? {}, context)
+      const inputs = renderWorkflowInputs(step.with.inputs ?? {}, preparedContext.context)
       const workflow = findCallTarget({
         activeWorkflowIds: scope.activeWorkflowIds,
         nodePath,
@@ -140,12 +138,12 @@ export function prepareStep(
                 activeWorkflowIds: [...scope.activeWorkflowIds, workflow.id],
                 frameId: callFrame(scope.frameId, nodePath),
               },
-              createRenderContext(callEnv(env, workflow, normalizedInputs), normalizedInputs, {}, {}),
+              createRenderContext(callEnv(preparedContext.env, workflow, normalizedInputs), normalizedInputs, {}, {}),
               cwd,
               project,
             )
       return {
-        env,
+        env: preparedContext.env,
         frontier,
         inputs,
         kind: "workflow",
@@ -155,10 +153,10 @@ export function prepareStep(
     }
     case "branch":
       return {
-        env,
+        env: preparedContext.env,
         frontier: [],
         kind: "branch",
-        selection: selectBranchCase(step, context) ?? null,
+        selection: selectBranchCase(step, preparedContext.context) ?? null,
         step,
       }
     case "parallel": {
@@ -169,13 +167,13 @@ export function prepareStep(
           activeWorkflowIds: scope.activeWorkflowIds,
           frameId: scope.frameId,
         },
-        context,
+        preparedContext.context,
         cwd,
         project,
       )
       return {
         branchReleasedFrontierNodePaths: frontierPlans.map((plan) => plan.nodes.map((node) => node.node_path)),
-        env,
+        env: preparedContext.env,
         frontier: frontierPlans.flatMap((plan) => plan.nodes),
         kind: "parallel",
         step,

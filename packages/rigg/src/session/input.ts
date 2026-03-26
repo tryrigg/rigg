@@ -1,6 +1,6 @@
 import { defaults, checkValue, type InputDefinition } from "../workflow/input"
 import type { WorkflowDocument } from "../workflow/schema"
-import { tryParseJson } from "../util/json"
+import { safeParseJson } from "../util/json"
 
 export type InvocationInputNormalizationResult =
   | { kind: "valid"; inputs: Record<string, unknown> }
@@ -20,8 +20,11 @@ function coerceValue(schema: InputDefinition, rawValue: unknown): unknown {
     return rawValue
   }
 
-  const parsedValue = tryParseJson(rawValue)
-  return parsedValue === undefined || parsedValue === null ? rawValue : parsedValue
+  const parsed = safeParseJson(rawValue)
+  if (parsed.kind === "invalid" || parsed.value === null) {
+    return rawValue
+  }
+  return parsed.value
 }
 
 export function parseEntries(values: string[]): ParseInvocationInputEntriesResult {

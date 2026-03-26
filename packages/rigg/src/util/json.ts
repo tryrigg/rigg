@@ -1,42 +1,29 @@
-import { normalizeError } from "./error"
-
 export type JsonPrimitive = boolean | null | number | string
 export type JsonObject = { [key: string]: JsonValue }
 export type JsonValue = JsonPrimitive | JsonValue[] | JsonObject
+export type SafeParseJsonResult = { kind: "ok"; value: unknown } | { kind: "invalid" }
 
 export function parseJson(text: string): unknown {
-  try {
-    return JSON.parse(text)
-  } catch (error) {
-    throw normalizeError(error)
-  }
+  return JSON.parse(text)
 }
 
 export function stringifyJson(value: unknown): string {
-  try {
-    return JSON.stringify(value, null, 2)
-  } catch (error) {
-    throw normalizeError(error)
-  }
+  return JSON.stringify(value, null, 2)
 }
 
 export function compactJson(value: unknown): string {
-  try {
-    return JSON.stringify(value)
-  } catch (error) {
-    throw normalizeError(error)
-  }
+  return JSON.stringify(value)
 }
 
 export function isJsonObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-export function tryParseJson(text: string): unknown {
+export function safeParseJson(text: string): SafeParseJsonResult {
   try {
-    return parseJson(text)
+    return { kind: "ok", value: JSON.parse(text) }
   } catch {
-    return undefined
+    return { kind: "invalid" }
   }
 }
 

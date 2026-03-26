@@ -107,6 +107,34 @@ function assistantTextAndTool(sessionId = "session_1", uuid = "msg_1"): SDKMessa
   } as unknown as SDKMessage
 }
 
+function assistantMixedContent(sessionId = "session_1", uuid = "msg_mixed"): SDKMessage {
+  return {
+    type: "assistant",
+    message: {
+      content: [
+        "skip-me",
+        { type: "text", text: "Plan:" },
+        { type: "text" },
+        null,
+        {
+          type: "tool_use",
+          id: "tool_1",
+          name: "Bash",
+          input: { command: "npm test" },
+        },
+        {
+          type: "tool_use",
+          id: 7,
+          name: "BrokenTool",
+        },
+      ],
+    },
+    parent_tool_use_id: null,
+    session_id: sessionId,
+    uuid,
+  } as unknown as SDKMessage
+}
+
 function toolSummary(sessionId = "session_1"): SDKMessage {
   return {
     type: "tool_use_summary",
@@ -471,6 +499,40 @@ describe("claude/runtime", () => {
     })
   })
 
+  test("ignores malformed assistant content entries while preserving valid text and tools", async () => {
+    await withSession(async ({ root, events, run }) => {
+      const { sdk } = createFakeClaudeSdk({
+        messages: [systemInit(), assistantMixedContent(), toolSummary(), resultSuccess("done")],
+      })
+      const runtime = await createClaudeRuntimeSession({
+        cwd: root,
+        env: process.env,
+        sdk,
+      })
+
+      try {
+        await runtime.run(run)
+        expect(events).toContainEqual({
+          kind: "message_completed",
+          messageId: "msg_mixed",
+          provider: "claude",
+          sessionId: "session_1",
+          text: "Plan:",
+        })
+        expect(events).toContainEqual({
+          detail: "npm test",
+          kind: "tool_started",
+          provider: "claude",
+          sessionId: "session_1",
+          tool: "Bash",
+        })
+        expect(events.filter((event) => event.kind === "tool_started")).toHaveLength(1)
+      } finally {
+        await runtime.close()
+      }
+    })
+  })
+
   test("translates tool lifecycle events", async () => {
     await withSession(async ({ root, events, run }) => {
       const { sdk } = createFakeClaudeSdk({
@@ -740,6 +802,108 @@ describe("claude/runtime", () => {
               id: "branch",
             },
           ],
+        })
+      } finally {
+        await runtime.close()
+      }
+    })
+  })
+
+  test("ignores malformed schema properties and preserves labeled option values", async () => {
+    await withSession(async ({ root, run }) => {
+      const requests: InteractionRequest[] = []
+      let content: unknown = null
+      const { sdk } = createFakeClaudeSdk({
+        onQuery: async (options) => {
+          const result = await options?.onElicitation?.(
+            {
+              message: "Choose values",
+              mode: "form",
+              requestedSchema: {
+                properties: {
+                  branch: {
+                    description: "Which branch should we target?",
+                    oneOf: [
+                      { const: "main", title: "Main branch" },
+                      { const: "develop", title: "Develop branch" },
+                    ],
+                    title: "Branch",
+                    type: "string",
+                  },
+                  retries: {
+                    enum: [1, 3],
+                    title: "Retries",
+                    type: "integer",
+                  },
+                  invalid: "skip-me",
+                },
+                required: ["branch"],
+              },
+              serverName: "test-server",
+            },
+            { signal: new AbortController().signal },
+          )
+          content = result?.content ?? null
+          return [systemInit(), resultSuccess("done")]
+        },
+      })
+      const runtime = await createClaudeRuntimeSession({
+        cwd: root,
+        env: process.env,
+        sdk,
+      })
+
+      try {
+        await runtime.run({
+          ...run,
+          interactionHandler: (request) => {
+            requests.push(request)
+            if (request.kind !== "user_input") {
+              throw new Error("unexpected request")
+            }
+            return {
+              answers: {
+                branch: {
+                  answers: ["Main branch"],
+                },
+                retries: {
+                  answers: ["3"],
+                },
+              },
+              kind: "user_input",
+            }
+          },
+        })
+
+        expect(requests[0]).toMatchObject({
+          kind: "user_input",
+          questions: [
+            {
+              allowEmpty: false,
+              header: "Branch",
+              id: "branch",
+              options: [
+                { description: "", label: "Main branch" },
+                { description: "", label: "Develop branch" },
+              ],
+            },
+            {
+              allowEmpty: true,
+              header: "Retries",
+              id: "retries",
+              options: [
+                { description: "", label: "1" },
+                { description: "", label: "3" },
+              ],
+            },
+          ],
+        })
+        if (content === null) {
+          throw new Error("expected elicitation content")
+        }
+        expect(content).toEqual({
+          branch: "main",
+          retries: 3,
         })
       } finally {
         await runtime.close()

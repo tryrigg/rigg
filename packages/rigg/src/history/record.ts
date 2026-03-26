@@ -99,6 +99,52 @@ function scheduleFlush(state: MutableRecorderState): void {
   }, 50)
 }
 
+function drainQueue(state: MutableRecorderState): RunEvent[] {
+  return state.queue.splice(0, state.queue.length)
+}
+
+function updateRunId(state: MutableRecorderState, events: RunEvent[]): void {
+  for (const event of events) {
+    if (event.kind === "run_started") {
+      state.runId = event.snapshot.run_id
+    }
+  }
+}
+
+function buildPendingBatch(state: MutableRecorderState, events: RunEvent[]) {
+  const pending = createBatch()
+  for (const event of events) {
+    if (
+      pushEvent(state.batch, pending, {
+        event,
+        projectId: state.projectId,
+        workspaceId: state.workspaceId,
+        recordingStatus: currentRecordingStatus(state),
+        runId: state.runId,
+      })
+    ) {
+      state.partial = true
+    }
+  }
+  return pending
+}
+
+function persistPendingBatch(state: MutableRecorderState, pending: ReturnType<typeof createBatch>): void {
+  const steps = [...pending.steps.values()]
+  if (state.runId === null || (pending.run === null && steps.length === 0 && pending.events.length === 0)) {
+    return
+  }
+
+  state.seq = writeBatch(state.db, {
+    events: pending.events,
+    run: pending.run,
+    runId: state.runId,
+    seq: state.seq,
+    steps,
+  })
+  state.hasPersistedData = true
+}
+
 function flushQueue(state: MutableRecorderState): void {
   if (state.flushing || state.disabled) {
     return
@@ -108,40 +154,11 @@ function flushQueue(state: MutableRecorderState): void {
   }
 
   state.flushing = true
+  const events = drainQueue(state)
+  updateRunId(state, events)
+
   try {
-    const batch = state.queue.splice(0, state.queue.length)
-    for (const event of batch) {
-      if (event.kind === "run_started") {
-        state.runId = event.snapshot.run_id
-      }
-    }
-
-    const pending = createBatch()
-    for (const event of batch) {
-      if (
-        pushEvent(state.batch, pending, {
-          event,
-          projectId: state.projectId,
-          workspaceId: state.workspaceId,
-          recordingStatus: currentRecordingStatus(state),
-          runId: state.runId,
-        })
-      ) {
-        state.partial = true
-      }
-    }
-
-    const steps = [...pending.steps.values()]
-    if (state.runId !== null && (pending.run !== null || steps.length > 0 || pending.events.length > 0)) {
-      state.seq = writeBatch(state.db, {
-        events: pending.events,
-        run: pending.run,
-        runId: state.runId,
-        seq: state.seq,
-        steps,
-      })
-      state.hasPersistedData = true
-    }
+    persistPendingBatch(state, buildPendingBatch(state, events))
   } catch (error) {
     markDbFailure(state, normalizeError(error).message)
   } finally {
@@ -171,8 +188,8 @@ async function closeRecorder(state: MutableRecorderState): Promise<RecorderResul
   flushQueue(state)
 
   if (!state.disabled && state.runId !== null) {
+    const finalEvents = flushLogs(state.batch)
     try {
-      const finalEvents = flushLogs(state.batch)
       if (finalEvents.length > 0) {
         state.seq = writeBatch(state.db, {
           events: finalEvents,

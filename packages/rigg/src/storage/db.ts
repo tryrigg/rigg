@@ -77,7 +77,7 @@ function openClient(path: string) {
 function createDb(path: string) {
   const client = openClient(path)
   applyPragmas(client)
-  const db: Db = drizzle(client, { schema })
+  const db = drizzle(client, { schema })
   return db
 }
 

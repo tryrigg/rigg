@@ -1,0 +1,123 @@
+id: refactor
+steps:
+  - id: refactor
+    type: codex
+    with:
+      kind: turn
+      model: gpt-5.4
+      effort: high
+      prompt: |
+        Read `private/typescript-implementation-guide.md` and identify areas that can be refactored
+        for improved code quality, readability, and maintainability. Perform the refactoring.
+        Do not add comments, docstrings, or documentation unless explicitly required.
+
+  - id: review_fix_loop_1
+    type: loop
+    max: 5
+    until: ${{ len(steps.review_1.result.findings) == 0 }}
+    steps:
+      - id: review_1
+        type: codex
+        with:
+          kind: review
+          target:
+            type: uncommitted
+
+      - id: triage_and_fix_1
+        if: ${{ len(steps.review_1.result.findings) > 0 }}
+        type: group
+        steps:
+          - id: triage_1
+            type: claude
+            with:
+              model: claude-opus-4-6
+              effort: medium
+              prompt: |
+                Triage the following code review findings.
+                Identify which are genuine issues worth fixing vs false positives or nitpicks.
+                List only the findings that should be fixed, with their original details.
+
+                Findings:
+                ${{ toJSON(steps.review_1.result.findings) }}
+
+          - id: fix_1
+            type: codex
+            with:
+              kind: turn
+              model: gpt-5.4
+              effort: medium
+              prompt: |
+                Fix the following triaged code review findings:
+                ${{ steps.triage_1.result }}
+
+                Do not add comments, docstrings, or documentation.
+
+  - id: commit_1
+    type: shell
+    with:
+      command: |
+        git add -A
+        if ! git diff --cached --quiet; then
+          git commit -m "refactor"
+        fi
+      stdout:
+        mode: none
+
+  - id: simplify
+    type: claude
+    with:
+      model: claude-opus-4-6
+      effort: high
+      prompt: /simplify
+
+  - id: review_fix_loop_2
+    type: loop
+    max: 5
+    until: ${{ len(steps.review_2.result.findings) == 0 }}
+    steps:
+      - id: review_2
+        type: codex
+        with:
+          kind: review
+          target:
+            type: uncommitted
+
+      - id: triage_and_fix_2
+        if: ${{ len(steps.review_2.result.findings) > 0 }}
+        type: group
+        steps:
+          - id: triage_2
+            type: claude
+            with:
+              model: claude-opus-4-6
+              effort: medium
+              prompt: |
+                Triage the following code review findings.
+                Identify which are genuine issues worth fixing vs false positives or nitpicks.
+                List only the findings that should be fixed, with their original details.
+
+                Findings:
+                ${{ toJSON(steps.review_2.result.findings) }}
+
+          - id: fix_2
+            type: codex
+            with:
+              kind: turn
+              model: gpt-5.4
+              effort: medium
+              prompt: |
+                Fix the following triaged code review findings:
+                ${{ steps.triage_2.result }}
+
+                Do not add comments, docstrings, or documentation.
+
+  - id: commit_2
+    type: shell
+    with:
+      command: |
+        git add -A
+        if ! git diff --cached --quiet; then
+          git commit -m "refactor: simplify and clean up"
+        fi
+      stdout:
+        mode: none

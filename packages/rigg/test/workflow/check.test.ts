@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test"
 
+import type { WorkflowProject } from "../../src/project"
+import { decode } from "../../src/workflow/decode"
 import { checkWorkspace } from "../../src/workflow/check"
+import { parseYaml } from "../../src/workflow/parse"
 import type { WorkflowDocument } from "../../src/workflow/schema"
 import { workflowProject } from "../fixture/builders"
 
@@ -24,6 +27,35 @@ function expectSingleProjectError(project: ReturnType<typeof workflowProject>) {
   const [error] = checkWorkspace(project)
   expect(error).toBeDefined()
   return error
+}
+
+function projectFromText(text: string, filePath = "/workspace/.rigg/workflow.yaml"): WorkflowProject {
+  const parsed = parseYaml(text, filePath)
+  expect(parsed.kind).toBe("parsed")
+  if (parsed.kind !== "parsed") {
+    throw new Error("expected parsed yaml")
+  }
+
+  const decoded = decode(parsed.document, filePath, parsed.source)
+  expect(decoded.kind).toBe("decoded")
+  if (decoded.kind !== "decoded") {
+    throw new Error("expected decoded workflow")
+  }
+
+  return {
+    files: [
+      {
+        filePath,
+        relativePath: "workflow.yaml",
+        source: parsed.source,
+        workflow: decoded.workflow,
+      },
+    ],
+    workspace: {
+      riggDir: "/workspace/.rigg",
+      rootDir: "/workspace",
+    },
+  }
 }
 
 describe("workflow/check", () => {
@@ -782,5 +814,111 @@ describe("workflow/check", () => {
         ]),
       ),
     ).toEqual([])
+  })
+
+  test("accepts workflow retry and loop without until", () => {
+    const project = workflowProject([
+      {
+        workflow: {
+          id: "child",
+          steps: [shellStep("echo child", "child_step")],
+        },
+      },
+      {
+        workflow: {
+          id: "parent",
+          steps: [
+            {
+              id: "call_child",
+              retry: { delay: "1s", max: 3 },
+              type: "workflow",
+              with: {
+                workflow: "child",
+              },
+            },
+            {
+              id: "loop",
+              max: 2,
+              steps: [shellStep("echo loop", "work")],
+              type: "loop",
+            },
+          ],
+        },
+      },
+    ])
+
+    expect(checkWorkspace(project)).toEqual([])
+  })
+
+  test("rejects retry on non-retryable control steps at decode time", () => {
+    const parsed = parseYaml(
+      `
+id: invalid-retry
+steps:
+  - id: group
+    type: group
+    retry:
+      max: 2
+    steps:
+      - id: inner
+        type: shell
+        with:
+          command: echo inner
+`,
+      "/workspace/.rigg/invalid-retry.yaml",
+    )
+
+    expect(parsed.kind).toBe("parsed")
+    if (parsed.kind !== "parsed") {
+      throw new Error("expected parsed yaml")
+    }
+
+    const decoded = decode(parsed.document, "/workspace/.rigg/invalid-retry.yaml", parsed.source)
+    expect(decoded.kind).toBe("invalid_workflow")
+    if (decoded.kind === "invalid_workflow") {
+      expect(decoded.error.message).toContain("Workflow schema validation failed.")
+      expect(decoded.error.message).toContain("steps.0")
+    }
+  })
+
+  test("reports located diagnostics for invalid retry config and reserved loop exports", () => {
+    const [reserved, delay, backoff] = checkWorkspace(
+      projectFromText(`
+id: retry-errors
+steps:
+  - id: loop
+    type: loop
+    max: 2
+    steps:
+      - id: work
+        type: shell
+        with:
+          command: echo hi
+    exports:
+      reason: \${{ "bad" }}
+  - id: retry
+    type: shell
+    retry:
+      max: 3
+      delay: soon
+      backoff: 0.5
+    with:
+      command: echo hi
+`),
+    )
+
+    expect(reserved).toMatchObject({
+      code: "invalid_workflow",
+      line: expect.any(Number),
+      snippet: expect.any(String),
+    })
+    expect(reserved?.message).toBe("`loop.exports.reason` is reserved for the loop completion reason")
+    expect(delay).toMatchObject({
+      code: "invalid_workflow",
+      line: expect.any(Number),
+      snippet: expect.any(String),
+    })
+    expect(delay?.message).toBe("`retry.delay` must be a duration like `500ms`, `1s`, `2m`, or `1h`")
+    expect(backoff?.hints).toEqual(["Use `1` for a fixed delay or a larger multiplier for exponential backoff."])
   })
 })

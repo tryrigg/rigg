@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { initRunState, nextAttempt, finishRun, upsertNode } from "../../src/session/state"
+import { clearStaleChildNodes, finishRun, initRunState, nextAttempt, upsertNode } from "../../src/session/state"
 import type { NodeSnapshot } from "../../src/session/schema"
 import { runSnapshot } from "../fixture/builders"
 
@@ -80,5 +80,79 @@ describe("session/state", () => {
     upsertNode(state, nodeSnapshot({ attempt: 3 }))
 
     expect(nextAttempt(state, "/0")).toBe(4)
+  })
+
+  test("clears retried workflow descendants regardless of child attempts", () => {
+    const state = initRunState("run-1", "workflow", "2026-03-14T00:00:00.000Z")
+
+    upsertNode(
+      state,
+      nodeSnapshot({
+        attempt: 2,
+        node_path: "/0",
+        started_at: "2026-03-14T00:02:00.000Z",
+        status: "failed",
+      }),
+    )
+    upsertNode(
+      state,
+      nodeSnapshot({
+        attempt: 2,
+        node_path: "/0/0",
+        started_at: "2026-03-14T00:02:01.000Z",
+        status: "failed",
+      }),
+    )
+    upsertNode(
+      state,
+      nodeSnapshot({
+        attempt: 3,
+        node_path: "/0/0/0",
+        started_at: "2026-03-14T00:02:02.000Z",
+        status: "failed",
+      }),
+    )
+    upsertNode(
+      state,
+      nodeSnapshot({
+        attempt: 4,
+        node_path: "/0/1",
+        started_at: "2026-03-14T00:01:30.000Z",
+        status: "failed",
+      }),
+    )
+    upsertNode(
+      state,
+      nodeSnapshot({ attempt: 1, node_path: "/1", started_at: "2026-03-14T00:00:30.000Z", status: "succeeded" }),
+    )
+
+    clearStaleChildNodes(state, "/0", new Set(["/0/0", "/0/0/0"]))
+
+    expect(state.nodes).toEqual([
+      nodeSnapshot({
+        attempt: 2,
+        node_path: "/0",
+        started_at: "2026-03-14T00:02:00.000Z",
+        status: "failed",
+      }),
+      nodeSnapshot({
+        attempt: 2,
+        node_path: "/0/0",
+        started_at: "2026-03-14T00:02:01.000Z",
+        status: "failed",
+      }),
+      nodeSnapshot({
+        attempt: 3,
+        node_path: "/0/0/0",
+        started_at: "2026-03-14T00:02:02.000Z",
+        status: "failed",
+      }),
+      nodeSnapshot({
+        attempt: 1,
+        node_path: "/1",
+        started_at: "2026-03-14T00:00:30.000Z",
+        status: "succeeded",
+      }),
+    ])
   })
 })

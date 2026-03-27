@@ -204,6 +204,69 @@ describe("cli/state", () => {
     })
   })
 
+  test("applyEvent tracks retrying state until the next attempt starts", () => {
+    const state = createState()
+    const snapshot = runSnapshot()
+    applyEvent(state, { kind: "run_started", snapshot })
+    const initialRetrying = state.retryingByNodePath
+    applyEvent(state, {
+      attempt: 1,
+      delay_ms: 1000,
+      kind: "node_retrying",
+      max_attempts: 3,
+      next_attempt: 2,
+      node_path: "/0",
+      previous_attempts: [
+        {
+          attempt: 1,
+          exit_code: 1,
+          message: "boom",
+          stderr: "boom",
+        },
+      ],
+      user_id: "retry",
+    })
+
+    expect(state.retryingByNodePath).not.toBe(initialRetrying)
+    expect(state.retryingByNodePath["/0"]).toEqual({
+      attempt: 1,
+      delayMs: 1000,
+      maxAttempts: 3,
+      previousAttempts: [
+        {
+          attempt: 1,
+          exit_code: 1,
+          message: "boom",
+          stderr: "boom",
+        },
+      ],
+      userId: "retry",
+    })
+
+    applyEvent(state, {
+      kind: "node_started",
+      node: {
+        attempt: 2,
+        duration_ms: null,
+        exit_code: null,
+        finished_at: null,
+        node_kind: "shell",
+        node_path: "/0",
+        result: null,
+        started_at: "2026-03-15T10:00:01.000Z",
+        status: "running",
+        stderr: null,
+        stdout: null,
+        user_id: "retry",
+        waiting_for: null,
+      },
+      snapshot,
+    })
+
+    expect(state.retryingByNodePath).toEqual({})
+    expect(state.retryingByNodePath["/0"]).toBeUndefined()
+  })
+
   test("applyEvent renders cursor provider events in live output", () => {
     const state = createState()
     const snapshot = runSnapshot()

@@ -57,38 +57,56 @@ steps:
       stdout:
         mode: json
 
-  - id: fix_loop
+  - id: remediation
     if: ${{ !steps.verify.result.pass }}
-    type: loop
-    max: 5
-    until: ${{ steps.recheck.result.pass }}
+    type: group
     steps:
-      - id: fix
-        type: cursor
-        with:
-          mode: agent
-          model: composer-2-fast
-          prompt: |
-            The implementation has errors. Fix them.
+      - id: fix_loop
+        type: loop
+        max: 5
+        until: ${{ steps.recheck.result.pass }}
+        steps:
+          - id: fix
+            type: cursor
+            with:
+              mode: agent
+              model: composer-2-fast
+              prompt: |
+                The implementation has errors. Fix them.
 
-            Run these commands in order, read the output, and fix all errors:
-            1. `bun run format`
-            2. `bun test`
-            3. `bun run check`
+                Run these commands in order, read the output, and fix all errors:
+                1. `bun run format`
+                2. `bun test`
+                3. `bun run check`
 
-            Keep fixing until all three pass. Do not add unnecessary comments or documentation.
+                Keep fixing until all three pass. Do not add unnecessary comments or documentation.
 
-      - id: recheck
+          - id: recheck
+            type: shell
+            with:
+              command: |
+                bun run format > /dev/null 2>&1; FMT=$?
+                bun test > /dev/null 2>&1; TEST=$?
+                bun run check > /dev/null 2>&1; CHK=$?
+                if [ $FMT -ne 0 ] || [ $TEST -ne 0 ] || [ $CHK -ne 0 ]; then
+                  printf '{"pass":false,"format":%d,"test":%d,"check":%d}\n' "$FMT" "$TEST" "$CHK"
+                else
+                  printf '{"pass":true,"format":0,"test":0,"check":0}\n'
+                fi
+              stdout:
+                mode: json
+        exports:
+          pass: ${{ steps.recheck.result.pass }}
+          format: ${{ steps.recheck.result.format }}
+          test: ${{ steps.recheck.result.test }}
+          check: ${{ steps.recheck.result.check }}
+
+      - id: fail_fix_loop
+        if: ${{ steps.fix_loop.result.reason == "max_reached" && !steps.fix_loop.result.pass }}
         type: shell
         with:
           command: |
-            bun run format > /dev/null 2>&1; FMT=$?
-            bun test > /dev/null 2>&1; TEST=$?
-            bun run check > /dev/null 2>&1; CHK=$?
-            if [ $FMT -ne 0 ] || [ $TEST -ne 0 ] || [ $CHK -ne 0 ]; then
-              printf '{"pass":false,"format":%d,"test":%d,"check":%d}\n' "$FMT" "$TEST" "$CHK"
-            else
-              printf '{"pass":true,"format":0,"test":0,"check":0}\n'
-            fi
+            echo "fix loop exhausted after 5 attempts; bun run format=${{ steps.fix_loop.result.format }}, bun test=${{ steps.fix_loop.result.test }}, bun run check=${{ steps.fix_loop.result.check }}" >&2
+            exit 1
           stdout:
-            mode: json
+            mode: none

@@ -26,6 +26,9 @@ steps:
 
       - id: fix
         if: ${{ len(steps.review.result.findings) > 0 }}
+        retry:
+          max: 3
+          delay: 1s
         type: codex
         with:
           kind: turn
@@ -165,6 +168,8 @@ Use review findings as the loop condition:
 ```yaml
 until: ${{ len(steps.review.result.findings) == 0 }}
 ```
+
+When `until` is omitted, the loop still succeeds and returns `reason: max_reached`.
 
 ### Branch passthrough
 

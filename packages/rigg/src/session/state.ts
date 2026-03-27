@@ -67,6 +67,11 @@ export function nextAttempt(state: MutableRunState, nodePath: NodePath): number 
   return snapshot === undefined ? 1 : snapshot.attempt + 1
 }
 
+export function clearStaleChildNodes(state: MutableRunState, nodePath: NodePath, seen: ReadonlySet<NodePath>): void {
+  const prefix = `${nodePath}/`
+  state.nodes = state.nodes.filter((node) => !node.node_path.startsWith(prefix) || seen.has(node.node_path))
+}
+
 export function setBarrier(state: MutableRunState, barrier: StepBarrier | null): void {
   state.active_barrier = barrier
   recalcPhase(state)

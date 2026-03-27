@@ -571,6 +571,28 @@ export function pushEvent(
       }
       return false
     }
+    case "node_retrying":
+      addEvents(
+        batch,
+        queueEvent(state, {
+          attempt: event.attempt,
+          kind: "event",
+          nodePath: event.node_path,
+          payload: {
+            data: jsonValue({
+              delay_ms: event.delay_ms,
+              kind: event.kind,
+              max_attempts: event.max_attempts,
+              next_attempt: event.next_attempt,
+              previous_attempts: event.previous_attempts,
+            }),
+            text: `node retrying: ${event.user_id ?? event.node_path} attempt ${event.next_attempt}/${event.max_attempts}`,
+            user_id: event.user_id,
+          },
+          stream: null,
+        }),
+      )
+      return false
     case "provider_event":
       switch (event.event.kind) {
         case "message_delta":

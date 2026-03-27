@@ -24,6 +24,8 @@ export function snapEvent(event: RunEvent): RunEvent {
       }
     case "step_output":
       return event
+    case "node_retrying":
+      return cloneValue(event)
     case "provider_event":
       return {
         ...event,

@@ -1,8 +1,12 @@
 import { childPath, rootPath } from "../../workflow/id"
-import { StepKind, type WorkflowDocument, type WorkflowStep } from "../../workflow/schema"
+import { StepKind, isRetryableStep, type WorkflowDocument, type WorkflowStep } from "../../workflow/schema"
 import { workflowById, type WorkflowProject } from "../../project"
 import type { NodeStatus, RunSnapshot, NodeSnapshot } from "../../session/schema"
+import { formatLoopReason } from "../out"
+import type { RetryingState } from "../state"
 import { formatDuration } from "./symbols"
+
+type TreeStatus = NodeStatus | "not_started" | "retrying"
 
 export const ACTION_KINDS = new Set<string>([
   StepKind.Shell,
@@ -28,7 +32,8 @@ export type TreeEntry = {
   entryType: "step" | "label"
   depth: number
   prefix: string
-  status: NodeStatus | "not_started"
+  retrying?: RetryingState | undefined
+  status: TreeStatus
   label: string
   suffix: string
   nodePath: string
@@ -94,8 +99,19 @@ function branchCaseStatus(nodeMap: NodeMap, casePath: string): NodeStatus | "not
   return aggregateDisplayStatus(descendantStatuses(nodeMap, casePath))
 }
 
-function isActiveStepStatus(status: NodeStatus | "not_started"): boolean {
-  return status !== "not_started" && ACTIVE_STEP_STATUSES.has(status)
+function displayStatus(
+  nodeMap: NodeMap,
+  nodePath: string,
+  retryingByNodePath: Record<string, RetryingState>,
+): TreeStatus {
+  if (retryingByNodePath[nodePath] !== undefined) {
+    return "retrying"
+  }
+  return nodeStatus(nodeMap, nodePath)
+}
+
+function isActiveStepStatus(status: TreeStatus): boolean {
+  return status === "retrying" || (status !== "not_started" && ACTIVE_STEP_STATUSES.has(status))
 }
 
 function isTerminalSnapshot(snapshot: RunSnapshot | null): boolean {
@@ -118,6 +134,43 @@ function durationSuffix(nodeMap: NodeMap, nodePath: string): string {
   return formatDuration(node.duration_ms)
 }
 
+function joinSuffix(...parts: Array<string | undefined>): string {
+  return parts.filter((part) => part !== undefined && part.length > 0).join(" · ")
+}
+
+function joinDetail(...parts: Array<string | undefined>): string | undefined {
+  const detail = joinSuffix(...parts)
+  return detail.length > 0 ? detail : undefined
+}
+
+function retryMax(retry: number | { max: number }): number {
+  return typeof retry === "number" ? retry : retry.max
+}
+
+function retrySuffix(
+  step: WorkflowStep,
+  nodeMap: NodeMap,
+  nodePath: string,
+  retryingByNodePath: Record<string, RetryingState>,
+): string {
+  if (!isRetryableStep(step) || step.retry === undefined) {
+    return ""
+  }
+
+  const retrying = retryingByNodePath[nodePath]
+  const max = retryMax(step.retry)
+  if (retrying !== undefined) {
+    return `attempt ${retrying.attempt + 1}/${max}`
+  }
+
+  const attempt = nodeMap.get(nodePath)?.attempt
+  if (attempt === undefined) {
+    return `attempt 1/${max}`
+  }
+
+  return `attempt ${attempt}/${max}`
+}
+
 export function extractDetail(step: WorkflowStep): string | undefined {
   switch (step.type) {
     case "shell": {
@@ -126,47 +179,19 @@ export function extractDetail(step: WorkflowStep): string | undefined {
       const trimmed = first.length > 60 ? first.slice(0, 57) + "..." : first
       return `$ ${trimmed}`
     }
-    case "codex": {
-      if (step.with.kind === "review") {
-        let detail = "review"
-        if (step.with.model) {
-          detail += ` · ${step.with.model}`
-        }
-        return detail
-      }
-      let detail = "turn"
-      if (step.with.collaboration_mode === "plan") {
-        detail += " · plan"
-      }
-      if (step.with.model) {
-        detail += ` · ${step.with.model}`
-      }
-      if (step.with.effort) {
-        detail += ` · ${step.with.effort}`
-      }
-      return detail
-    }
-    case "claude": {
-      let detail = "claude"
-      if (step.with.model) {
-        detail += ` · ${step.with.model}`
-      }
-      if (step.with.permission_mode) {
-        detail += ` · ${step.with.permission_mode}`
-      }
-      if (step.with.effort) {
-        detail += ` · ${step.with.effort}`
-      }
-      return detail
-    }
-    case "cursor": {
-      const mode = step.with.mode ?? "agent"
-      let detail = mode
-      if (step.with.model) {
-        detail += ` · ${step.with.model}`
-      }
-      return detail
-    }
+    case "codex":
+      return step.with.kind === "review"
+        ? joinDetail("review", step.with.model)
+        : joinDetail(
+            "turn",
+            step.with.collaboration_mode === "plan" ? "plan" : undefined,
+            step.with.model,
+            step.with.effort,
+          )
+    case "claude":
+      return joinDetail("claude", step.with.model, step.with.permission_mode, step.with.effort)
+    case "cursor":
+      return joinDetail(step.with.mode ?? "agent", step.with.model)
     case "write_file":
       return `→ ${step.with.path}`
     default:
@@ -185,6 +210,7 @@ function loopMaxIterations(nodeMap: NodeMap, nodePath: string, fallback: number)
 function walkSteps(
   steps: WorkflowStep[],
   nodeMap: NodeMap,
+  retryingByNodePath: Record<string, RetryingState>,
   parentPath: string | null,
   depth: number,
   prefix: string,
@@ -197,23 +223,29 @@ function walkSteps(
       continue
     }
     const nodePath = parentPath === null ? rootPath(i) : childPath(parentPath, i)
-    walkStep(step, nodeMap, nodePath, depth, prefix, entries, project)
+    walkStep(step, nodeMap, retryingByNodePath, nodePath, depth, prefix, entries, project)
   }
 }
 
 function walkStep(
   step: WorkflowStep,
   nodeMap: NodeMap,
+  retryingByNodePath: Record<string, RetryingState>,
   nodePath: string,
   depth: number,
   prefix: string,
   entries: TreeEntry[],
   project?: WorkflowProject,
 ): void {
-  const status = nodeStatus(nodeMap, nodePath)
+  const status = displayStatus(nodeMap, nodePath, retryingByNodePath)
   const label = step.id ?? step.type
-  const suffix = durationSuffix(nodeMap, nodePath)
+  const suffix = joinSuffix(
+    retrySuffix(step, nodeMap, nodePath, retryingByNodePath),
+    formatLoopReason(nodeMap.get(nodePath)?.result),
+    durationSuffix(nodeMap, nodePath),
+  )
   const isActive = isActiveStepStatus(status)
+  const retrying = retryingByNodePath[nodePath]
 
   switch (step.type) {
     case "shell":
@@ -233,6 +265,7 @@ function walkStep(
         isActive,
         isNext: false,
         detail: extractDetail(step),
+        retrying,
       })
       return
     case "group": {
@@ -249,8 +282,9 @@ function walkStep(
         isActive,
         isNext: false,
         meta,
+        retrying,
       })
-      walkSteps(step.steps, nodeMap, nodePath, depth + 1, prefix + "│  ", entries, project)
+      walkSteps(step.steps, nodeMap, retryingByNodePath, nodePath, depth + 1, prefix + "│  ", entries, project)
       return
     }
     case "loop": {
@@ -269,6 +303,7 @@ function walkStep(
         isActive,
         isNext: false,
         meta,
+        retrying,
       })
       if (iterCount > 0) {
         entries.push({
@@ -284,7 +319,7 @@ function walkStep(
           isNext: false,
         })
       }
-      walkSteps(step.steps, nodeMap, nodePath, depth + 1, prefix + "│  ", entries, project)
+      walkSteps(step.steps, nodeMap, retryingByNodePath, nodePath, depth + 1, prefix + "│  ", entries, project)
       return
     }
     case "workflow": {
@@ -303,9 +338,10 @@ function walkStep(
         isNext: false,
         detail: `→ ${step.with.workflow}`,
         meta: `${step.with.workflow} · ${childStepCount} steps`,
+        retrying,
       })
       if (workflow !== undefined) {
-        walkSteps(workflow.steps, nodeMap, nodePath, depth + 1, prefix + "│  ", entries, project)
+        walkSteps(workflow.steps, nodeMap, retryingByNodePath, nodePath, depth + 1, prefix + "│  ", entries, project)
       }
       return
     }
@@ -321,6 +357,7 @@ function walkStep(
         nodeKind: "branch",
         isActive,
         isNext: false,
+        retrying,
       })
       for (let ci = 0; ci < step.cases.length; ci++) {
         const branchCase = step.cases[ci]
@@ -341,7 +378,16 @@ function walkStep(
           isActive: false,
           isNext: false,
         })
-        walkSteps(branchCase.steps, nodeMap, casePath, depth + 2, prefix + "│     ", entries, project)
+        walkSteps(
+          branchCase.steps,
+          nodeMap,
+          retryingByNodePath,
+          casePath,
+          depth + 2,
+          prefix + "│     ",
+          entries,
+          project,
+        )
       }
       return
     case "parallel": {
@@ -358,6 +404,7 @@ function walkStep(
         isActive,
         isNext: false,
         meta,
+        retrying,
       })
       for (let bi = 0; bi < step.branches.length; bi++) {
         const branch = step.branches[bi]
@@ -379,7 +426,7 @@ function walkStep(
             isNext: false,
           })
         }
-        walkSteps(branch.steps, nodeMap, branchPath, depth + 1, prefix + "│  ", entries, project)
+        walkSteps(branch.steps, nodeMap, retryingByNodePath, branchPath, depth + 1, prefix + "│  ", entries, project)
       }
       return
     }
@@ -406,10 +453,11 @@ export function buildTree(
   workflow: WorkflowDocument,
   snapshot: RunSnapshot | null,
   project?: WorkflowProject,
+  retryingByNodePath: Record<string, RetryingState> = {},
 ): TreeEntry[] {
   const entries: TreeEntry[] = []
   const nodeMap = buildNodeMap(snapshot)
-  walkSteps(workflow.steps, nodeMap, null, 0, "", entries, project)
+  walkSteps(workflow.steps, nodeMap, retryingByNodePath, null, 0, "", entries, project)
   annotateNext(entries, snapshot)
   return entries
 }

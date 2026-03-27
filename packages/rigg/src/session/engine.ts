@@ -1,5 +1,6 @@
 import { renderTemplate } from "../workflow/expr"
 import { onAbort } from "../util/abort"
+import { parseDuration } from "../util/duration"
 import {
   callFrame,
   loopScope,
@@ -18,7 +19,9 @@ import type {
   BranchNode,
   GroupNode,
   LoopNode,
+  NormalizedRetryConfig,
   ParallelNode,
+  RetryableStep,
   WorkflowDocument,
   WorkflowNode,
   WorkflowStep,
@@ -32,9 +35,10 @@ import {
   type ExecutionDisposition,
   type StepExecutionOutcome,
 } from "./step/control"
-import { evalError, isInterrupt, loopExhausted, normalizeExecError, runError, interrupt } from "./error"
+import { evalError, isInterrupt, normalizeExecError, runError, interrupt } from "./error"
 import {
   createNodeSnapshot,
+  currentNodeSnapshot,
   finishNode,
   markCaseSkipped,
   recordSkippedStep,
@@ -45,11 +49,11 @@ import {
   summarizeCompletedNode,
 } from "./node"
 import { prepareStep, renderEnvironment, type PreparedStep } from "./prep"
-import type { RunControlHandler, RunEvent } from "./event"
+import type { PreviousAttempt, RunControlHandler, RunEvent } from "./event"
 import { snapEvent } from "./snap"
 import type { BarrierReason, CompletedNodeSummary, RunReason, RunSnapshot } from "./schema"
 import type { RenderContext, StepBinding } from "./render"
-import { initRunState, finishRun } from "./state"
+import { clearStaleChildNodes, finishRun, initRunState } from "./state"
 import { elapsedMs, timestampNow } from "../util/time"
 import { callEnv, parseCallInputs, resolveCallTarget } from "./call"
 import { evaluateExpression } from "./prep"
@@ -68,6 +72,9 @@ type ExecutionEnvironment = {
   cwd: string
   emitEvent: (event: RunEvent) => void
   project?: WorkflowProject | undefined
+  retryState: Map<NodePath, { attempt: number; max: number; previous_attempts: PreviousAttempt[] }>
+  workflowAttemptBase: Map<NodePath, Map<NodePath, number>>
+  workflowChildren: Map<NodePath, Set<NodePath>>
   runActionStep: ActionStepRunner
   runState: RunSnapshot
 }
@@ -111,6 +118,9 @@ export async function executeWorkflow(options: {
     cwd: options.projectRoot,
     emitEvent: (event) => options.onEvent?.(snapEvent(event)),
     project: options.project,
+    retryState: new Map(),
+    workflowAttemptBase: new Map(),
+    workflowChildren: new Map(),
     runActionStep: resolvedRunActionStep,
     runState,
   }
@@ -296,21 +306,25 @@ async function executePreparedStep(
       }
     }
     case "action":
-      return executeAction(environment, scope, prepared.step, prepared.step, nodePath, prepared.env)
+      return executeRetryable(environment, scope, prepared.step, nodePath, () =>
+        executeAction(environment, scope, prepared.step, prepared.step, nodePath, prepared.env),
+      )
     case "group":
       return executeGroup(environment, scope, prepared.step, nodePath, prepared.env)
     case "loop":
       return executeLoop(environment, scope, prepared.step, nodePath, prepared.env)
     case "workflow":
-      return executeWorkflowStep(
-        environment,
-        scope,
-        prepared.step,
-        nodePath,
-        prepared.frontier.map((node) => node.node_path),
-        prepared.env,
-        prepared.workflow,
-        prepared.inputs,
+      return executeRetryable(environment, scope, prepared.step, nodePath, () =>
+        executeWorkflowStep(
+          environment,
+          scope,
+          prepared.step,
+          nodePath,
+          prepared.frontier.map((node) => node.node_path),
+          prepared.env,
+          prepared.workflow,
+          prepared.inputs,
+        ),
       )
     case "branch":
       return executeBranch(environment, scope, prepared.step, nodePath, prepared.env, prepared.selection)
@@ -324,6 +338,87 @@ async function executePreparedStep(
         prepared.branchReleasedFrontierNodePaths,
       )
   }
+}
+
+async function executeRetryable(
+  environment: ExecutionEnvironment,
+  scope: ExecutionScope,
+  step: RetryableStep,
+  nodePath: NodePath,
+  run: () => Promise<StepExecutionOutcome>,
+): Promise<StepExecutionOutcome> {
+  if (step.retry === undefined) {
+    return await run()
+  }
+  const retry = normalizeRetry(step.retry)
+  const baseDelayMs = "delay" in retry && retry.delay !== undefined ? parseRetryDelay(retry.delay) : 0
+  const backoff = "backoff" in retry ? (retry.backoff ?? 1) : 1
+  resetRetryState(environment, nodePath)
+
+  for (let index = 0; index < retry.max; index += 1) {
+    let result: StepExecutionOutcome
+    try {
+      result = await run()
+    } catch (error) {
+      if (isInterrupt(error)) {
+        throw error
+      }
+      const cause = normalizeExecError(error)
+      if (cause.runReason === "aborted") {
+        resetRetryState(environment, nodePath)
+        throw cause
+      }
+      clearRetryWorkflowChildren(environment, step, nodePath, error)
+      if (index === retry.max - 1) {
+        throw cause
+      }
+      result = {
+        bindingStatus: "failed",
+        completed: summarizeCompletedNode(retryNode(environment.runState, nodePath, error)),
+        disposition: "failed",
+        reason: cause.runReason,
+        result: null,
+      }
+    }
+    clearRetryWorkflowChildren(environment, step, nodePath)
+    if (result.reason === "aborted") {
+      resetRetryState(environment, nodePath)
+      return result
+    }
+    if (result.disposition !== "failed") {
+      resetRetryState(environment, nodePath)
+      return result
+    }
+
+    if (index === retry.max - 1) {
+      resetRetryState(environment, nodePath)
+      return result
+    }
+
+    const state = updateRetryState(environment, nodePath, retry.max)
+    const delayMs = Math.round(baseDelayMs * backoff ** index)
+    environment.emitEvent({
+      attempt: state.attempt,
+      delay_ms: delayMs,
+      kind: "node_retrying",
+      max_attempts: retry.max,
+      next_attempt: state.attempt + 1,
+      node_path: nodePath,
+      previous_attempts: [...state.previous_attempts],
+      user_id: step.id ?? null,
+    })
+    try {
+      await sleep(delayMs, scope.signal)
+    } catch (error) {
+      if (isInterrupt(error)) {
+        resetRetryState(environment, nodePath)
+        return interruptedRetry(environment, step, nodePath, error)
+      }
+      throw error
+    }
+  }
+
+  throw new Error(`retry execution fell through for ${nodePath}`)
 }
 
 async function executeAction(
@@ -459,6 +554,11 @@ async function executeLoop(
   env: Record<string, string | undefined>,
 ): Promise<StepExecutionOutcome> {
   let lastBindings: Record<string, StepBinding> = {}
+  let lastRun: Record<string, unknown> = {
+    iteration: 0,
+    max_iterations: step.max,
+    node_path: nodePath,
+  }
   const loopScopeId = loopScope(scope.frameId, nodePath)
   let iterationBarrierContext = {
     completed: scope.barrierContext.completed,
@@ -477,6 +577,7 @@ async function executeLoop(
         max_iterations: step.max,
         node_path: nodePath,
       }
+      lastRun = iterationRun
 
       const iterationResult = await executeBlock(
         environment,
@@ -512,24 +613,48 @@ async function executeLoop(
         )
       }
 
-      const condition = evaluateExpression(step.until, {
-        env,
-        inputs: scope.inputs,
-        run: iterationRun,
-        steps: { ...scope.steps, ...lastBindings },
-      })
-      if (Boolean(condition)) {
-        const exports = evaluateExports(step.exports, {
+      if (step.until !== undefined) {
+        const condition = evaluateExpression(step.until, {
           env,
           inputs: scope.inputs,
           run: iterationRun,
           steps: { ...scope.steps, ...lastBindings },
         })
-        return finalizeControlStep(environment, step, nodePath, lifecycle, "completed", undefined, exports)
+        if (Boolean(condition)) {
+          const exports = evaluateExports(step.exports, {
+            env,
+            inputs: scope.inputs,
+            run: iterationRun,
+            steps: { ...scope.steps, ...lastBindings },
+          })
+          return finalizeControlStep(
+            environment,
+            step,
+            nodePath,
+            lifecycle,
+            "completed",
+            undefined,
+            loopResult("until_satisfied", exports),
+          )
+        }
       }
     }
 
-    throw loopExhausted(step.id ?? nodePath, step.max)
+    const exports = evaluateExports(step.exports, {
+      env,
+      inputs: scope.inputs,
+      run: lastRun,
+      steps: { ...scope.steps, ...lastBindings },
+    })
+    return finalizeControlStep(
+      environment,
+      step,
+      nodePath,
+      lifecycle,
+      "completed",
+      undefined,
+      loopResult("max_reached", exports),
+    )
   })
 }
 
@@ -545,6 +670,7 @@ async function executeWorkflowStep(
 ): Promise<StepExecutionOutcome> {
   return await executeControlNode(environment, step, nodePath, async (lifecycle) => {
     const invocation = resolveWorkflowInvocation(environment, scope, step, nodePath, env, workflow, inputs)
+    startWorkflowAttempt(environment, nodePath)
     const childExecution = await executeBlock(
       environment,
       {
@@ -559,7 +685,9 @@ async function executeWorkflowStep(
       },
       invocation.workflow.steps,
       nodePath,
-    )
+    ).finally(() => {
+      finishWorkflowAttempt(environment, nodePath)
+    })
 
     return finalizeControlStep(
       environment,
@@ -808,6 +936,168 @@ function evaluateExports(exportsMap: Record<string, string> | undefined, context
   return output
 }
 
+function loopResult(reason: "max_reached" | "until_satisfied", exports: unknown): Record<string, unknown> {
+  return {
+    reason,
+    ...(exports !== null && typeof exports === "object" ? exports : {}),
+  }
+}
+
+function retryState(
+  environment: ExecutionEnvironment,
+  nodePath: NodePath,
+  max: number,
+): { attempt: number; max: number; previous_attempts: PreviousAttempt[] } {
+  const found = environment.retryState.get(nodePath)
+  if (found !== undefined) {
+    return found
+  }
+
+  const state = {
+    attempt: 0,
+    max,
+    previous_attempts: [],
+  }
+  environment.retryState.set(nodePath, state)
+  return state
+}
+
+function resetRetryState(environment: ExecutionEnvironment, nodePath: NodePath): void {
+  environment.retryState.delete(nodePath)
+}
+
+function updateRetryState(
+  environment: ExecutionEnvironment,
+  nodePath: NodePath,
+  max: number,
+): { attempt: number; max: number; previous_attempts: PreviousAttempt[] } {
+  const state = retryState(environment, nodePath, max)
+  state.attempt += 1
+  state.previous_attempts.push(retryAttempt(environment.runState, nodePath, state.attempt))
+  return state
+}
+
+function retryAttempt(runState: RunSnapshot, nodePath: NodePath, attempt: number): PreviousAttempt {
+  const node = retryNode(runState, nodePath)
+  const message =
+    node.stderr ?? (node.exit_code === null ? `attempt ${attempt} failed` : `step exited with code ${node.exit_code}`)
+
+  return {
+    attempt,
+    exit_code: node.exit_code ?? null,
+    message,
+    stderr: node.stderr ?? null,
+  }
+}
+
+function retryNode(runState: RunSnapshot, nodePath: NodePath, error?: unknown) {
+  const node = currentNodeSnapshot(runState, nodePath)
+  if (node !== undefined) {
+    return node
+  }
+
+  if (error !== undefined) {
+    throw normalizeExecError(error)
+  }
+  throw new Error(`missing retry snapshot for ${nodePath}`)
+}
+
+function interruptedRetry(
+  environment: ExecutionEnvironment,
+  step: RetryableStep,
+  nodePath: NodePath,
+  error: unknown,
+): StepExecutionOutcome {
+  const prev = retryNode(environment.runState, nodePath, error)
+  const finishedAt = timestampNow()
+  const startedAt = prev.started_at
+  if (startedAt === null || startedAt === undefined) {
+    throw new Error(`retry snapshot missing start time for ${nodePath}`)
+  }
+  const snapshot = createNodeSnapshot(step.id, nodePath, step.type, "interrupted", {
+    attempt: prev.attempt,
+    startedAt,
+  })
+  snapshot.duration_ms = elapsedMs(startedAt, finishedAt)
+  snapshot.finished_at = finishedAt
+  snapshot.stderr = isInterrupt(error) ? error.message : normalizeExecError(error).message
+  finishNode(environment.runState, snapshot, environment.emitEvent)
+  return {
+    bindingStatus: null,
+    completed: summarizeCompletedNode(snapshot),
+    disposition: "interrupted",
+    reason: undefined,
+    result: null,
+  }
+}
+
+function clearRetryWorkflowChildren(
+  environment: ExecutionEnvironment,
+  step: RetryableStep,
+  nodePath: NodePath,
+  error?: unknown,
+): void {
+  if (step.type !== "workflow") {
+    return
+  }
+  retryNode(environment.runState, nodePath, error)
+  clearStaleChildNodes(environment.runState, nodePath, environment.workflowChildren.get(nodePath) ?? new Set())
+}
+
+function startWorkflowAttempt(environment: ExecutionEnvironment, nodePath: NodePath): void {
+  environment.workflowAttemptBase.set(nodePath, workflowDescendants(environment.runState, nodePath))
+}
+
+function finishWorkflowAttempt(environment: ExecutionEnvironment, nodePath: NodePath): void {
+  const base = environment.workflowAttemptBase.get(nodePath)
+  if (base === undefined) {
+    return
+  }
+  environment.workflowAttemptBase.delete(nodePath)
+  environment.workflowChildren.set(nodePath, workflowChanges(environment.runState, nodePath, base))
+}
+
+function workflowDescendants(runState: RunSnapshot, nodePath: NodePath): Map<NodePath, number> {
+  const prefix = `${nodePath}/`
+  const out = new Map<NodePath, number>()
+  for (const node of runState.nodes) {
+    if (!node.node_path.startsWith(prefix)) {
+      continue
+    }
+    out.set(node.node_path, node.attempt)
+  }
+  return out
+}
+
+function workflowChanges(runState: RunSnapshot, nodePath: NodePath, base: Map<NodePath, number>): Set<NodePath> {
+  const prefix = `${nodePath}/`
+  const seen = new Set<NodePath>()
+  for (const node of runState.nodes) {
+    if (!node.node_path.startsWith(prefix)) {
+      continue
+    }
+    if (base.get(node.node_path) === node.attempt) {
+      continue
+    }
+    seen.add(node.node_path)
+  }
+  return seen
+}
+
+function parseRetryDelay(delay: string): number {
+  const parsed = parseDuration(delay)
+  if (parsed === null) {
+    throw runError(`invalid retry delay \`${delay}\``, {
+      runReason: "validation_error",
+    })
+  }
+  return parsed
+}
+
+function normalizeRetry(retry: Exclude<RetryableStep["retry"], undefined>): NormalizedRetryConfig {
+  return typeof retry === "number" ? { max: retry } : retry
+}
+
 function resolveWorkflowInvocation(
   environment: ExecutionEnvironment,
   scope: ExecutionScope,
@@ -858,6 +1148,24 @@ function nextBarrierContext(completed: CompletedNodeSummary): BarrierContext {
     completed,
     reason: "step_completed",
   }
+}
+
+async function sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  throwIfAborted(signal)
+  if (ms <= 0) {
+    return
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      dispose()
+      resolve()
+    }, ms)
+    const dispose = onAbort(signal, () => {
+      clearTimeout(timer)
+      reject(interrupt("step interrupted", { cause: signal?.reason }))
+    })
+  })
 }
 
 function createAbortController(signal: AbortSignal | undefined): {

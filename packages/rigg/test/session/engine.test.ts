@@ -5,9 +5,10 @@ import { tmpdir } from "node:os"
 
 import type { WorkflowDocument } from "../../src/workflow/schema"
 import { createNonInteractive } from "../../src/cli/session"
-import { interrupt } from "../../src/session/error"
+import { interrupt, runError } from "../../src/session/error"
 import type { RunEvent } from "../../src/session/event"
 import { executeWorkflow } from "../../src/session/engine"
+import type { RunSnapshot } from "../../src/session/schema"
 import { installFakeCodex } from "../fixture/fake-codex"
 import { workflowProject } from "../fixture/builders"
 
@@ -402,6 +403,231 @@ describe("session/engine", () => {
       })
 
       expect(barriers).toEqual([["child_first"], ["child_second"]])
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("clears stale nested workflow descendants before retrying", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-workflow-retry-"))
+
+    try {
+      const project = workflowProject([
+        {
+          workflow: {
+            id: "child",
+            steps: [
+              {
+                id: "first",
+                type: "shell",
+                with: {
+                  command: "first",
+                },
+              },
+              {
+                id: "second",
+                type: "shell",
+                with: {
+                  command: "second",
+                },
+              },
+            ],
+          },
+        },
+        {
+          workflow: {
+            id: "parent",
+            steps: [
+              {
+                id: "call_child",
+                retry: { max: 2 },
+                type: "workflow",
+                with: {
+                  workflow: "child",
+                },
+              },
+            ],
+          },
+        },
+      ])
+
+      const workflow = project.files.find((file) => file.workflow.id === "parent")?.workflow
+      expect(workflow).toBeDefined()
+
+      let firstCalls = 0
+      let secondCalls = 0
+      const snapshot = await runWorkflow({
+        internals: {
+          runActionStep: async (step) => {
+            if (step.id === "first") {
+              firstCalls += 1
+              const failed = firstCalls === 2
+              return {
+                exitCode: failed ? 7 : 0,
+                providerEvents: [],
+                result: failed ? null : (step.id ?? "ok"),
+                stderr: failed ? "first failed on retry" : "",
+                stdout: failed ? "" : "ok",
+                termination: "completed",
+              }
+            }
+            if (step.id === "second") {
+              secondCalls += 1
+              return {
+                exitCode: 9,
+                providerEvents: [],
+                result: null,
+                stderr: "second failed",
+                stdout: "",
+                termination: "completed",
+              }
+            }
+
+            return {
+              exitCode: 0,
+              providerEvents: [],
+              result: step.id ?? "ok",
+              stderr: "",
+              stdout: "ok",
+              termination: "completed",
+            }
+          },
+        },
+        invocationInputs: {},
+        parentEnv: process.env,
+        project,
+        projectRoot: root,
+        workflow: workflow!,
+      })
+
+      expect(firstCalls).toBe(2)
+      expect(secondCalls).toBe(1)
+      expect(snapshot.status).toBe("failed")
+      expect(snapshot.nodes.find((node) => node.user_id === "call_child")).toMatchObject({
+        attempt: 2,
+        node_path: "/0",
+        status: "failed",
+      })
+      expect(snapshot.nodes.find((node) => node.user_id === "first")).toMatchObject({
+        attempt: 2,
+        node_path: "/0/0",
+        status: "failed",
+      })
+      expect(snapshot.nodes.find((node) => node.user_id === "second")).toBeUndefined()
+      expect(snapshot.nodes.find((node) => node.node_path === "/0/1")).toBeUndefined()
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("keeps skipped nested workflow descendants after a successful retry", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-workflow-retry-skipped-"))
+
+    try {
+      const project = workflowProject([
+        {
+          workflow: {
+            id: "grandchild",
+            steps: [
+              {
+                id: "grandchild_inner",
+                type: "shell",
+                with: {
+                  command: "grandchild-inner",
+                },
+              },
+            ],
+          },
+        },
+        {
+          workflow: {
+            id: "child",
+            steps: [
+              {
+                id: "child_first",
+                type: "shell",
+                with: {
+                  command: "child-first",
+                },
+              },
+              {
+                id: "skip_nested",
+                if: "${{ false }}",
+                type: "workflow",
+                with: {
+                  workflow: "grandchild",
+                },
+              },
+              {
+                id: "child_last",
+                type: "shell",
+                with: {
+                  command: "child-last",
+                },
+              },
+            ],
+          },
+        },
+        {
+          workflow: {
+            id: "parent",
+            steps: [
+              {
+                id: "call_child",
+                retry: { max: 2 },
+                type: "workflow",
+                with: {
+                  workflow: "child",
+                },
+              },
+            ],
+          },
+        },
+      ])
+
+      let childLastCalls = 0
+      const snapshot = await runWorkflow({
+        internals: {
+          runActionStep: async (step) => {
+            if (step.id === "child_last") {
+              childLastCalls += 1
+              const failed = childLastCalls === 1
+              return {
+                exitCode: failed ? 1 : 0,
+                providerEvents: [],
+                result: failed ? null : "ok",
+                stderr: failed ? "child-last failed" : "",
+                stdout: failed ? "" : "ok",
+                termination: "completed",
+              }
+            }
+
+            return {
+              exitCode: 0,
+              providerEvents: [],
+              result: step.id ?? "ok",
+              stderr: "",
+              stdout: "ok",
+              termination: "completed",
+            }
+          },
+        },
+        invocationInputs: {},
+        parentEnv: process.env,
+        project,
+        projectRoot: root,
+        workflow: project.files.find((file) => file.workflow.id === "parent")!.workflow,
+      })
+
+      expect(snapshot.status).toBe("succeeded")
+      expect(snapshot.nodes.find((node) => node.user_id === "skip_nested")).toMatchObject({
+        attempt: 2,
+        status: "skipped",
+      })
+      expect(snapshot.nodes.find((node) => node.user_id === "grandchild_inner")).toMatchObject({
+        attempt: 2,
+        status: "skipped",
+      })
     } finally {
       await rm(root, { force: true, recursive: true })
     }
@@ -1080,6 +1306,7 @@ describe("session/engine", () => {
         iteration: 1,
         max_iterations: 3,
         node_path: "/0",
+        reason: "until_satisfied",
       })
     } finally {
       await rm(root, { force: true, recursive: true })
@@ -1132,6 +1359,541 @@ describe("session/engine", () => {
         current_iteration: 2,
         max_iterations: 3,
       })
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("completes loops with max_reached when until is omitted", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-loop-max-reached-"))
+
+    try {
+      const snapshot = await runWorkflow({
+        internals: {
+          runActionStep: async () => ({
+            exitCode: 0,
+            providerEvents: [],
+            result: "ok",
+            stderr: "",
+            stdout: "ok",
+            termination: "completed",
+          }),
+        },
+        invocationInputs: {},
+        parentEnv: process.env,
+        projectRoot: root,
+        workflow: {
+          id: "loop-max-reached",
+          steps: [
+            {
+              id: "loop",
+              max: 2,
+              steps: [
+                {
+                  id: "work",
+                  type: "shell",
+                  with: {
+                    command: "inside-loop",
+                    stdout: { mode: "text" },
+                  },
+                },
+              ],
+              type: "loop",
+            },
+          ],
+        },
+      })
+
+      expect(snapshot.status).toBe("succeeded")
+      expect(snapshot.nodes.find((node) => node.user_id === "loop")?.result).toEqual({
+        reason: "max_reached",
+      })
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("retries failed action steps and emits retry events", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-retry-action-"))
+    const events: RunEvent[] = []
+    let attempts = 0
+
+    try {
+      const snapshot = await runWorkflow({
+        internals: {
+          runActionStep: async () => {
+            attempts += 1
+            if (attempts === 1) {
+              return {
+                exitCode: 1,
+                providerEvents: [],
+                result: null,
+                stderr: "boom",
+                stdout: "",
+                termination: "completed",
+              }
+            }
+
+            return {
+              exitCode: 0,
+              providerEvents: [],
+              result: "ok",
+              stderr: "",
+              stdout: "ok",
+              termination: "completed",
+            }
+          },
+        },
+        invocationInputs: {},
+        onEvent: (event) => {
+          events.push(event)
+        },
+        parentEnv: process.env,
+        projectRoot: root,
+        workflow: {
+          id: "retry-action",
+          steps: [
+            {
+              id: "retry",
+              retry: { delay: "1s", max: 3 },
+              type: "shell",
+              with: {
+                command: "retry",
+                stdout: { mode: "text" },
+              },
+            },
+          ],
+        },
+      })
+
+      expect(snapshot.status).toBe("succeeded")
+      expect(snapshot.nodes.find((node) => node.user_id === "retry")).toMatchObject({
+        attempt: 2,
+        result: "ok",
+        status: "succeeded",
+      })
+      expect(events.find((event) => event.kind === "node_retrying")).toEqual({
+        attempt: 1,
+        delay_ms: 1000,
+        kind: "node_retrying",
+        max_attempts: 3,
+        next_attempt: 2,
+        node_path: "/0",
+        previous_attempts: [
+          {
+            attempt: 1,
+            exit_code: 1,
+            message: "boom",
+            stderr: "boom",
+          },
+        ],
+        user_id: "retry",
+      })
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("retries thrown action step failures and emits retry events", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-retry-thrown-action-"))
+    const events: RunEvent[] = []
+    let attempts = 0
+
+    try {
+      const snapshot = await runWorkflow({
+        internals: {
+          runActionStep: async () => {
+            attempts += 1
+            if (attempts === 1) {
+              throw runError("provider setup failed", { runReason: "step_failed" })
+            }
+
+            return {
+              exitCode: 0,
+              providerEvents: [],
+              result: "ok",
+              stderr: "",
+              stdout: "ok",
+              termination: "completed",
+            }
+          },
+        },
+        invocationInputs: {},
+        onEvent: (event) => {
+          events.push(event)
+        },
+        parentEnv: process.env,
+        projectRoot: root,
+        workflow: {
+          id: "retry-thrown-action",
+          steps: [
+            {
+              id: "retry",
+              retry: { delay: "1s", max: 3 },
+              type: "shell",
+              with: {
+                command: "retry",
+                stdout: { mode: "text" },
+              },
+            },
+          ],
+        },
+      })
+
+      expect(snapshot.status).toBe("succeeded")
+      expect(snapshot.nodes.find((node) => node.user_id === "retry")).toMatchObject({
+        attempt: 2,
+        result: "ok",
+        status: "succeeded",
+      })
+      expect(events.find((event) => event.kind === "node_retrying")).toEqual({
+        attempt: 1,
+        delay_ms: 1000,
+        kind: "node_retrying",
+        max_attempts: 3,
+        next_attempt: 2,
+        node_path: "/0",
+        previous_attempts: [
+          {
+            attempt: 1,
+            exit_code: null,
+            message: "provider setup failed",
+            stderr: "provider setup failed",
+          },
+        ],
+        user_id: "retry",
+      })
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("marks a retrying step interrupted when the run aborts during backoff", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-retry-backoff-abort-"))
+    const controller = new AbortController()
+    let attempts = 0
+
+    try {
+      const snapshot = await runWorkflow({
+        internals: {
+          runActionStep: async () => {
+            attempts += 1
+            return {
+              exitCode: 1,
+              providerEvents: [],
+              result: null,
+              stderr: "boom",
+              stdout: "",
+              termination: "completed",
+            }
+          },
+        },
+        invocationInputs: {},
+        onEvent: (event) => {
+          if (event.kind === "node_retrying") {
+            controller.abort(interrupt("workflow interrupted by operator"))
+          }
+        },
+        parentEnv: process.env,
+        projectRoot: root,
+        signal: controller.signal,
+        workflow: {
+          id: "retry-backoff-abort",
+          steps: [
+            {
+              id: "retry",
+              retry: { delay: "1s", max: 3 },
+              type: "shell",
+              with: {
+                command: "retry",
+                stdout: { mode: "text" },
+              },
+            },
+          ],
+        },
+      })
+
+      expect(attempts).toBe(1)
+      expect(snapshot.status).toBe("aborted")
+      expect(snapshot.reason).toBe("aborted")
+      expect(snapshot.nodes.find((node) => node.user_id === "retry")).toMatchObject({
+        attempt: 1,
+        status: "interrupted",
+        stderr: "step interrupted",
+      })
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("emits retry event attempts relative to the current retry cycle inside loops", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-loop-retry-attempts-"))
+    const events: RunEvent[] = []
+    let count = 0
+
+    try {
+      const snapshot = await runWorkflow({
+        internals: {
+          runActionStep: async () => {
+            count += 1
+            const failed = count === 1 || count === 3
+            return {
+              exitCode: failed ? 1 : 0,
+              providerEvents: [],
+              result: failed ? null : "ok",
+              stderr: failed ? `boom-${count}` : "",
+              stdout: failed ? "" : "ok",
+              termination: "completed",
+            }
+          },
+        },
+        invocationInputs: {},
+        onEvent: (event) => {
+          events.push(event)
+        },
+        parentEnv: process.env,
+        projectRoot: root,
+        workflow: {
+          id: "loop-retry-attempts",
+          steps: [
+            {
+              id: "loop",
+              max: 2,
+              steps: [
+                {
+                  id: "retry",
+                  retry: { delay: "1s", max: 3 },
+                  type: "shell",
+                  with: {
+                    command: "retry",
+                    stdout: { mode: "text" },
+                  },
+                },
+              ],
+              type: "loop",
+            },
+          ],
+        },
+      })
+
+      expect(snapshot.status).toBe("succeeded")
+      expect(events.filter((event) => event.kind === "node_retrying")).toEqual([
+        {
+          attempt: 1,
+          delay_ms: 1000,
+          kind: "node_retrying",
+          max_attempts: 3,
+          next_attempt: 2,
+          node_path: "/0/0",
+          previous_attempts: [
+            {
+              attempt: 1,
+              exit_code: 1,
+              message: "boom-1",
+              stderr: "boom-1",
+            },
+          ],
+          user_id: "retry",
+        },
+        {
+          attempt: 1,
+          delay_ms: 1000,
+          kind: "node_retrying",
+          max_attempts: 3,
+          next_attempt: 2,
+          node_path: "/0/0",
+          previous_attempts: [
+            {
+              attempt: 1,
+              exit_code: 1,
+              message: "boom-3",
+              stderr: "boom-3",
+            },
+          ],
+          user_id: "retry",
+        },
+      ])
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("retries failed workflow steps", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-retry-workflow-"))
+    let attempts = 0
+
+    try {
+      const project = workflowProject([
+        {
+          workflow: {
+            id: "child",
+            steps: [
+              {
+                id: "inner",
+                type: "shell",
+                with: {
+                  command: "inner",
+                  stdout: { mode: "text" },
+                },
+              },
+            ],
+          },
+        },
+        {
+          workflow: {
+            id: "parent",
+            steps: [
+              {
+                id: "call_child",
+                retry: { max: 2 },
+                type: "workflow",
+                with: {
+                  workflow: "child",
+                },
+              },
+            ],
+          },
+        },
+      ])
+
+      const snapshot = await runWorkflow({
+        internals: {
+          runActionStep: async () => {
+            attempts += 1
+            return {
+              exitCode: attempts === 1 ? 1 : 0,
+              providerEvents: [],
+              result: attempts === 1 ? null : "ok",
+              stderr: attempts === 1 ? "child failed" : "",
+              stdout: attempts === 1 ? "" : "ok",
+              termination: "completed",
+            }
+          },
+        },
+        invocationInputs: {},
+        parentEnv: process.env,
+        project: project,
+        projectRoot: root,
+        workflow: project.files.find((file) => file.workflow.id === "parent")!.workflow,
+      })
+
+      expect(snapshot.status).toBe("succeeded")
+      expect(snapshot.nodes.find((node) => node.user_id === "call_child")).toMatchObject({
+        attempt: 2,
+        status: "succeeded",
+      })
+      expect(snapshot.nodes.find((node) => node.user_id === "inner")).toMatchObject({
+        attempt: 2,
+        status: "succeeded",
+      })
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("does not retry workflow steps aborted from a child barrier", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-retry-workflow-abort-"))
+    const events: RunEvent[] = []
+    let finished: RunSnapshot | undefined
+    let attempts = 0
+
+    try {
+      const project = workflowProject([
+        {
+          workflow: {
+            id: "child",
+            steps: [
+              {
+                id: "inner",
+                type: "shell",
+                with: {
+                  command: "inner",
+                  stdout: { mode: "text" },
+                },
+              },
+              {
+                id: "after_inner",
+                type: "shell",
+                with: {
+                  command: "after-inner",
+                  stdout: { mode: "text" },
+                },
+              },
+            ],
+          },
+        },
+        {
+          workflow: {
+            id: "parent",
+            steps: [
+              {
+                id: "call_child",
+                retry: { max: 3 },
+                type: "workflow",
+                with: {
+                  workflow: "child",
+                },
+              },
+            ],
+          },
+        },
+      ])
+
+      await expect(
+        runWorkflow({
+          controlHandler: async (request) => {
+            if (request.kind !== "step_barrier") {
+              throw new Error(`unexpected control request ${request.kind}`)
+            }
+            if (request.barrier.next.some((node) => node.user_id === "after_inner")) {
+              return { action: "abort", kind: "step_barrier" }
+            }
+            return { action: "continue", kind: "step_barrier" }
+          },
+          internals: {
+            runActionStep: async () => {
+              attempts += 1
+              return {
+                exitCode: 0,
+                providerEvents: [],
+                result: "ok",
+                stderr: "",
+                stdout: "ok",
+                termination: "completed",
+              }
+            },
+          },
+          invocationInputs: {},
+          onEvent: (event) => {
+            events.push(event)
+            if (event.kind === "run_finished") {
+              finished = event.snapshot
+            }
+          },
+          parentEnv: process.env,
+          project: project,
+          projectRoot: root,
+          workflow: project.files.find((file) => file.workflow.id === "parent")!.workflow,
+        }),
+      ).rejects.toMatchObject({
+        message: "workflow aborted by operator",
+        runReason: "aborted",
+      })
+
+      expect(attempts).toBe(1)
+      expect(events.filter((event) => event.kind === "node_retrying")).toEqual([])
+      expect(finished?.status).toBe("aborted")
+      expect(finished?.reason).toBe("aborted")
+      expect(finished?.nodes.find((node) => node.user_id === "call_child")).toMatchObject({
+        attempt: 1,
+        status: "failed",
+        stderr: "workflow aborted by operator",
+      })
+      expect(finished?.nodes.find((node) => node.user_id === "inner")).toMatchObject({
+        attempt: 1,
+        status: "succeeded",
+      })
+      expect(finished?.nodes.find((node) => node.user_id === "after_inner")).toBeUndefined()
     } finally {
       await rm(root, { force: true, recursive: true })
     }

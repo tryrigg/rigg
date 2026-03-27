@@ -94,6 +94,25 @@ const WorkflowWithSchema = z
   })
   .strict()
 
+const RetryObjectSchema = z
+  .object({
+    backoff: z.number().positive().optional(),
+    delay: z.string().min(1).optional(),
+    max: z.number().int().positive(),
+  })
+  .strict()
+
+export const RetryConfigSchema = z.union([
+  z
+    .number()
+    .int()
+    .positive()
+    .transform((max) => ({ max })),
+  RetryObjectSchema,
+])
+export type RetryConfig = z.input<typeof RetryConfigSchema>
+export type NormalizedRetryConfig = z.output<typeof RetryConfigSchema>
+
 const BaseNodeSchema = z
   .object({
     env: EnvSchema.optional(),
@@ -104,28 +123,31 @@ const BaseNodeSchema = z
   .strict()
 
 type BaseNode = z.infer<typeof BaseNodeSchema>
+type RetryableBaseNode = BaseNode & {
+  retry?: RetryConfig | undefined
+}
 
-export type ShellNode = BaseNode & {
+export type ShellNode = RetryableBaseNode & {
   type: "shell"
   with: z.infer<typeof ShellWithSchema>
 }
 
-export type CodexNode = BaseNode & {
+export type CodexNode = RetryableBaseNode & {
   type: "codex"
   with: z.infer<typeof CodexTurnWithSchema> | z.infer<typeof CodexReviewWithSchema>
 }
 
-export type ClaudeNode = BaseNode & {
+export type ClaudeNode = RetryableBaseNode & {
   type: "claude"
   with: z.infer<typeof ClaudeWithSchema>
 }
 
-export type CursorNode = BaseNode & {
+export type CursorNode = RetryableBaseNode & {
   type: "cursor"
   with: z.infer<typeof CursorWithSchema>
 }
 
-export type WriteFileNode = BaseNode & {
+export type WriteFileNode = RetryableBaseNode & {
   type: "write_file"
   with: z.infer<typeof WriteFileWithSchema>
 }
@@ -141,7 +163,7 @@ export type LoopNode = BaseNode & {
   max: number
   steps: WorkflowStep[]
   type: "loop"
-  until: string
+  until?: string | undefined
 }
 
 export type BranchCase = {
@@ -169,7 +191,7 @@ export type ParallelNode = BaseNode & {
 
 export type WorkflowCallWith = z.infer<typeof WorkflowWithSchema>
 
-export type WorkflowNode = BaseNode & {
+export type WorkflowNode = RetryableBaseNode & {
   type: "workflow"
   with: WorkflowCallWith
 }
@@ -193,7 +215,9 @@ export type WorkflowDocument = {
   steps: WorkflowStep[]
 }
 
-const ControlBaseSchema = BaseNodeSchema.omit({ type: true })
+const RetryableNodeSchema = BaseNodeSchema.extend({
+  retry: RetryConfigSchema.optional(),
+}).strict()
 
 const BranchCaseSchema: z.ZodType<BranchCase> = z.lazy(() =>
   z
@@ -215,38 +239,38 @@ const ParallelBranchSchema: z.ZodType<ParallelBranch> = z.lazy(() =>
     .strict(),
 )
 
-const ShellNodeSchema: z.ZodType<ShellNode> = BaseNodeSchema.extend({
+const ShellNodeSchema: z.ZodType<ShellNode> = RetryableNodeSchema.extend({
   type: z.literal("shell"),
   with: ShellWithSchema,
 }).strict()
 
-const CodexNodeSchema: z.ZodType<CodexNode> = BaseNodeSchema.extend({
+const CodexNodeSchema: z.ZodType<CodexNode> = RetryableNodeSchema.extend({
   type: z.literal("codex"),
   with: CodexWithSchema,
 }).strict()
 
-const ClaudeNodeSchema: z.ZodType<ClaudeNode> = BaseNodeSchema.extend({
+const ClaudeNodeSchema: z.ZodType<ClaudeNode> = RetryableNodeSchema.extend({
   type: z.literal("claude"),
   with: ClaudeWithSchema,
 }).strict()
 
-const CursorNodeSchema: z.ZodType<CursorNode> = BaseNodeSchema.extend({
+const CursorNodeSchema: z.ZodType<CursorNode> = RetryableNodeSchema.extend({
   type: z.literal("cursor"),
   with: CursorWithSchema,
 }).strict()
 
-const WriteFileNodeSchema: z.ZodType<WriteFileNode> = BaseNodeSchema.extend({
+const WriteFileNodeSchema: z.ZodType<WriteFileNode> = RetryableNodeSchema.extend({
   type: z.literal("write_file"),
   with: WriteFileWithSchema,
 }).strict()
 
-const WorkflowNodeSchema: z.ZodType<WorkflowNode> = BaseNodeSchema.extend({
+const WorkflowNodeSchema: z.ZodType<WorkflowNode> = RetryableNodeSchema.extend({
   type: z.literal("workflow"),
   with: WorkflowWithSchema,
 }).strict()
 
 const GroupNodeSchema: z.ZodType<GroupNode> = z.lazy(() =>
-  ControlBaseSchema.extend({
+  BaseNodeSchema.extend({
     exports: ExportsSchema.optional(),
     steps: z.array(WorkflowStepSchema).min(1),
     type: z.literal("group"),
@@ -254,24 +278,24 @@ const GroupNodeSchema: z.ZodType<GroupNode> = z.lazy(() =>
 )
 
 const LoopNodeSchema: z.ZodType<LoopNode> = z.lazy(() =>
-  ControlBaseSchema.extend({
+  BaseNodeSchema.extend({
     exports: ExportsSchema.optional(),
     max: z.number().int().positive(),
     steps: z.array(WorkflowStepSchema).min(1),
     type: z.literal("loop"),
-    until: z.string().min(1),
+    until: z.string().min(1).optional(),
   }).strict(),
 )
 
 const BranchNodeSchema: z.ZodType<BranchNode> = z.lazy(() =>
-  ControlBaseSchema.extend({
+  BaseNodeSchema.extend({
     cases: z.array(BranchCaseSchema).min(1),
     type: z.literal("branch"),
   }).strict(),
 )
 
 const ParallelNodeSchema: z.ZodType<ParallelNode> = z.lazy(() =>
-  ControlBaseSchema.extend({
+  BaseNodeSchema.extend({
     branches: z.array(ParallelBranchSchema).min(1),
     exports: ExportsSchema.optional(),
     type: z.literal("parallel"),
@@ -303,3 +327,15 @@ export const WorkflowDocumentSchema: z.ZodType<WorkflowDocument> = z
   .strict()
 
 export type ActionNode = ClaudeNode | CodexNode | CursorNode | ShellNode | WriteFileNode
+export type RetryableStep = ActionNode | WorkflowNode
+
+export function isRetryableStep(step: WorkflowStep): step is RetryableStep {
+  return (
+    step.type === "shell" ||
+    step.type === "write_file" ||
+    step.type === "claude" ||
+    step.type === "codex" ||
+    step.type === "cursor" ||
+    step.type === "workflow"
+  )
+}

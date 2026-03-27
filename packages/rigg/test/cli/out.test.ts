@@ -24,6 +24,29 @@ describe("cli/out", () => {
     ])
   })
 
+  test("renders annotated diagnostics with line, snippet, and hints", () => {
+    expect(
+      renderErrors([
+        {
+          code: "invalid_workflow",
+          column: 7,
+          filePath: "/workspace/.rigg/review.yaml",
+          hints: ["Use `1` for a fixed delay or a larger multiplier for exponential backoff."],
+          line: 12,
+          message: "`retry.backoff` must be between 1 and 10",
+          snippet: "      backoff: 0.5",
+        },
+      ]),
+    ).toEqual([
+      "invalid_workflow: `retry.backoff` must be between 1 and 10",
+      "  --> /workspace/.rigg/review.yaml:12:7",
+      "   |",
+      "12 |       backoff: 0.5",
+      "   |       ^",
+      "   = hint: Use `1` for a fixed delay or a larger multiplier for exponential backoff.",
+    ])
+  })
+
   test("renders workflow summaries in id order", () => {
     expect(
       renderSummary(

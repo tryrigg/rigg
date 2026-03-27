@@ -19,12 +19,6 @@ export function runError(message: string, options: { cause?: unknown; runReason:
   return err
 }
 
-export function loopExhausted(node: string, max: number): RunError {
-  return runError(`loop node \`${node}\` exhausted after ${max} iterations without satisfying \`until\``, {
-    runReason: "step_failed",
-  })
-}
-
 export function runAborted(message = "workflow aborted by operator"): RunError {
   return runError(message, { runReason: "aborted" })
 }

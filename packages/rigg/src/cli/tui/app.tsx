@@ -36,9 +36,13 @@ export function App({
   const snapshot = storeState.snapshot
   const liveOutputs = storeState.liveOutputs
   const completedOutputs = storeState.completedOutputs
+  const retryingByNodePath = storeState.retryingByNodePath
   const elapsed = formatElapsed(snapshot?.started_at ?? null, snapshot?.finished_at ?? null)
   const isFinished = snapshot !== null && snapshot.status !== "running"
-  const entries = useMemo(() => buildTree(workflow, snapshot, project), [workflow, snapshot, project])
+  const entries = useMemo(
+    () => buildTree(workflow, snapshot, project, retryingByNodePath),
+    [workflow, snapshot, project, retryingByNodePath],
+  )
   const stepProgress = useMemo(
     () => formatProgress(summarize(workflow, snapshot, project)),
     [workflow, snapshot, project],

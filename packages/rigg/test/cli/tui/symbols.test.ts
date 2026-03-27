@@ -7,6 +7,7 @@ describe("statusSymbol", () => {
     expect(statusSymbol("not_started").color).toBe("dim")
     expect(statusSymbol("pending").color).toBe("dim")
     expect(statusSymbol("running").color).toBe("cyan")
+    expect(statusSymbol("retrying").color).toBe("cyan")
     expect(statusSymbol("succeeded").color).toBe("green")
     expect(statusSymbol("failed").color).toBe("red")
     expect(statusSymbol("aborted").color).toBe("yellow")
@@ -20,6 +21,7 @@ describe("statusSymbol", () => {
       "not_started",
       "pending",
       "running",
+      "retrying",
       "succeeded",
       "failed",
       "aborted",

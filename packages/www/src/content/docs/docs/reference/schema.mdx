@@ -16,12 +16,13 @@ sidebar:
 
 ## Common step fields
 
-| Field  | Type                        | Required | Description           |
-| ------ | --------------------------- | -------- | --------------------- |
-| `id`   | string                      | No       | Unique ID             |
-| `type` | string                      | Yes      | Step type             |
-| `if`   | expression                  | No       | Conditional execution |
-| `env`  | map&lt;string, template&gt; | No       | Step-level env vars   |
+| Field   | Type                        | Required | Description                    |
+| ------- | --------------------------- | -------- | ------------------------------ |
+| `id`    | string                      | No       | Unique ID                      |
+| `type`  | string                      | Yes      | Step type                      |
+| `if`    | expression                  | No       | Conditional execution          |
+| `env`   | map&lt;string, template&gt; | No       | Step-level env vars            |
+| `retry` | integer or object           | No       | Retry action or workflow steps |
 
 ## type: shell
 
@@ -114,6 +115,7 @@ Use a locally installed and authenticated Claude Code CLI (`claude login`).
 `with.workflow` must be a static string, not a template expression.
 String `with.inputs` values are rendered as templates. Non-string YAML literals such as booleans and numbers pass through unchanged.
 `steps.<workflow_step_id>.result` is `null` in v1.
+`workflow` steps may set `retry`.
 
 ## type: group
 
@@ -127,9 +129,12 @@ String `with.inputs` values are rendered as templates. Non-string YAML literals 
 | Field     | Type                        | Required |
 | --------- | --------------------------- | -------- |
 | `max`     | integer                     | Yes      |
-| `until`   | expression                  | Yes      |
+| `until`   | expression                  | No       |
 | `steps`   | array&lt;Step&gt;           | Yes      |
 | `exports` | map&lt;string, template&gt; | No       |
+
+Loop results are always objects with `reason: "until_satisfied" | "max_reached"` plus any exported fields.
+`loop.exports.reason` is reserved.
 
 ## type: branch
 
@@ -158,3 +163,4 @@ Each branch: `id` (required) + `steps`.
 6. Branch exports must have matching shapes across cases.
 7. `with` is required for all action types.
 8. Unknown YAML keys cause errors.
+9. `retry` is only valid on action and `workflow` steps.

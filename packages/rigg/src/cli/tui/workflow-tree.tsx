@@ -2,9 +2,8 @@ import { Box, Text } from "ink"
 import Spinner from "ink-spinner"
 import { useMemo } from "react"
 
-import type { NodeStatus } from "../../session/schema"
 import type { CompletedOutput, LiveLogEntry, LiveOutput, OutputPreview } from "../state"
-import { statusSymbol, kindColor } from "./symbols"
+import { kindColor, statusSymbol, type DisplayStatus } from "./symbols"
 import { chars, colors } from "./theme"
 import type { TreeEntry } from "./tree"
 
@@ -129,7 +128,7 @@ function computeHasNextSibling(entries: TreeEntry[]): boolean[] {
   return result
 }
 
-function connectorColor(status: NodeStatus | "not_started"): string | undefined {
+function connectorColor(status: DisplayStatus): string | undefined {
   switch (status) {
     case "succeeded":
       return colors.success
@@ -139,6 +138,7 @@ function connectorColor(status: NodeStatus | "not_started"): string | undefined 
     case "interrupted":
       return undefined
     case "running":
+    case "retrying":
       return colors.brand
     case "waiting_for_interaction":
       return colors.warning
@@ -153,7 +153,7 @@ type EntryColors = {
 }
 
 function computeEntryColors(entries: TreeEntry[]): EntryColors[] {
-  const statusAtDepth = new Map<number, NodeStatus | "not_started">()
+  const statusAtDepth = new Map<number, TreeEntry["status"]>()
   return entries.map((entry) => {
     if (entry.entryType === "step") {
       statusAtDepth.set(entry.depth, entry.status)
@@ -241,7 +241,7 @@ function InlineOutput({
   maxLiveLines,
 }: {
   nodePath: string
-  status: NodeStatus | "not_started"
+  status: DisplayStatus
   prefix: string
   rail: string
   railColors: (string | undefined)[]
@@ -255,6 +255,10 @@ function InlineOutput({
   const completedLines = useMemo(() => {
     return completedOutputToLines(completed)
   }, [completed])
+
+  if (status === "retrying") {
+    return null
+  }
 
   if (status === "running") {
     const lines = liveOutputToLines(liveOutputs[nodePath])
@@ -305,8 +309,9 @@ function StepRow({ entry, prefixRailColors }: { entry: TreeEntry; prefixRailColo
   const kindLabel = KIND_LABELS[entry.nodeKind]
   const showKind = kindLabel !== undefined && entry.nodeKind !== entry.label
   const isRunningStatus = entry.status === "running"
+  const isRetrying = entry.status === "retrying"
   const isWaiting = entry.status === "waiting_for_interaction"
-  const isActive = isRunningStatus || isWaiting
+  const isActive = isRunningStatus || isWaiting || isRetrying
   const isDimmed = entry.status === "succeeded" || entry.status === "not_started"
 
   return (
@@ -322,6 +327,10 @@ function StepRow({ entry, prefixRailColors }: { entry: TreeEntry; prefixRailColo
           </Text>
         ) : entry.isNext ? (
           <Text inverse color="yellow">
+            {entry.label}
+          </Text>
+        ) : isRetrying ? (
+          <Text bold color="cyan">
             {entry.label}
           </Text>
         ) : (
@@ -352,12 +361,51 @@ function StepRow({ entry, prefixRailColors }: { entry: TreeEntry; prefixRailColo
           <Spinner type="dots" />
         </Text>
       )}
+      {isRetrying && entry.isActive && (
+        <Text color="cyan">
+          {"  "}
+          <Spinner type="dots" /> retrying
+        </Text>
+      )}
       {isWaiting && entry.isActive && (
         <Text color="yellow">
           {"  "}
           <Spinner type="dots" /> waiting
         </Text>
       )}
+    </Box>
+  )
+}
+
+function RetryBlock({
+  entry,
+  rail,
+  railColors,
+}: {
+  entry: TreeEntry
+  rail: string
+  railColors: (string | undefined)[]
+}) {
+  if (entry.retrying === undefined || entry.retrying.previousAttempts.length === 0) {
+    return null
+  }
+
+  const pad = BASE + entry.prefix + rail
+
+  return (
+    <Box flexDirection="column">
+      <Text>
+        {renderColoredRails(pad, railColors)}
+        <Text dimColor>Previous attempts:</Text>
+      </Text>
+      {entry.retrying.previousAttempts.map((attempt) => (
+        <Text key={`${entry.nodePath}-${attempt.attempt}`} wrap="truncate-end">
+          {renderColoredRails(pad, railColors)}
+          <Text dimColor>
+            {chars.outputBorderDone} attempt {attempt.attempt}/{entry.retrying?.maxAttempts}: {attempt.message}
+          </Text>
+        </Text>
+      ))}
     </Box>
   )
 }
@@ -433,6 +481,7 @@ export function WorkflowTree({
                 {needsConnector && <Text>{renderColoredRails(connectorStr, connectorRailColors)}</Text>}
                 <StepRow entry={entry} prefixRailColors={ec.prefixRailColors} />
                 <DetailLine entry={entry} rail={rail} railColors={railColors} />
+                <RetryBlock entry={entry} rail={rail} railColors={railColors} />
                 <InlineOutput
                   nodePath={entry.nodePath}
                   status={entry.status}

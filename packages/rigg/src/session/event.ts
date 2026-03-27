@@ -6,6 +6,12 @@ import type { NodeSnapshot, PendingInteraction, RunSnapshot, StepBarrier } from 
 
 export type StreamKind = "stdout" | "stderr"
 export type ProviderEvent = ClaudeProviderEvent | CodexProviderEvent | CursorProviderEvent
+export type PreviousAttempt = {
+  attempt: number
+  exit_code: number | null
+  message: string
+  stderr: string | null
+}
 
 export type RunEvent =
   | {
@@ -34,6 +40,16 @@ export type RunEvent =
       kind: "step_output"
       node_path: string
       stream: StreamKind
+      user_id: string | null
+    }
+  | {
+      attempt: number
+      delay_ms: number
+      kind: "node_retrying"
+      max_attempts: number
+      next_attempt: number
+      node_path: string
+      previous_attempts: PreviousAttempt[]
       user_id: string | null
     }
   | {

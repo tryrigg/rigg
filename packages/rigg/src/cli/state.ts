@@ -1,4 +1,4 @@
-import type { RunEvent, StreamKind, ProviderEvent } from "../session/event"
+import type { PreviousAttempt, ProviderEvent, RunEvent, StreamKind } from "../session/event"
 import type { FrontierNode, RunSnapshot } from "../session/schema"
 
 export type ApprovalMode = "manual" | "auto_continue"
@@ -24,11 +24,20 @@ export type CompletedOutput = {
   preview: OutputPreview | null
 }
 
+export type RetryingState = {
+  attempt: number
+  delayMs: number
+  maxAttempts: number
+  previousAttempts: PreviousAttempt[]
+  userId: string | null
+}
+
 export type UiState = {
   barrierMode: ApprovalMode
   completedOutputs: Record<string, CompletedOutput>
   lastCompletedNodePath: string | null
   liveOutputs: Record<string, LiveOutput>
+  retryingByNodePath: Record<string, RetryingState>
   snapshot: RunSnapshot | null
 }
 
@@ -46,6 +55,7 @@ export function createState(barrierMode: ApprovalMode = "manual"): UiState {
     completedOutputs: {},
     lastCompletedNodePath: null,
     liveOutputs: {},
+    retryingByNodePath: {},
     snapshot: null,
   }
 }
@@ -77,14 +87,17 @@ export function applyEvent(state: UiState, event: RunEvent): void {
       state.liveOutputs = {}
       state.completedOutputs = {}
       state.lastCompletedNodePath = null
+      state.retryingByNodePath = {}
       state.snapshot = event.snapshot
       return
     case "node_started":
+      state.retryingByNodePath = clearRetrying(state.retryingByNodePath, event.node.node_path)
       state.snapshot = event.snapshot
       return
     case "node_completed": {
       state.snapshot = event.snapshot
       state.lastCompletedNodePath = event.node.node_path
+      state.retryingByNodePath = clearRetrying(state.retryingByNodePath, event.node.node_path)
       const live = state.liveOutputs[event.node.node_path]
       state.completedOutputs[event.node.node_path] = {
         entries: live?.entries ?? [],
@@ -94,6 +107,21 @@ export function applyEvent(state: UiState, event: RunEvent): void {
       return
     }
     case "node_skipped":
+      state.retryingByNodePath = clearRetrying(state.retryingByNodePath, event.node.node_path)
+      state.snapshot = event.snapshot
+      return
+    case "node_retrying":
+      state.retryingByNodePath = {
+        ...state.retryingByNodePath,
+        [event.node_path]: {
+          attempt: event.attempt,
+          delayMs: event.delay_ms,
+          maxAttempts: event.max_attempts,
+          previousAttempts: event.previous_attempts,
+          userId: event.user_id,
+        },
+      }
+      return
     case "barrier_resolved":
     case "interaction_requested":
     case "interaction_resolved":
@@ -114,6 +142,7 @@ export function applyEvent(state: UiState, event: RunEvent): void {
       return
     case "run_finished":
       state.snapshot = event.snapshot
+      state.retryingByNodePath = {}
       for (const [nodePath, live] of Object.entries(state.liveOutputs)) {
         const node = event.snapshot.nodes.find((item) => item.node_path === nodePath)
         state.completedOutputs[nodePath] = {
@@ -124,6 +153,19 @@ export function applyEvent(state: UiState, event: RunEvent): void {
       state.liveOutputs = {}
       return
   }
+}
+
+function clearRetrying(
+  retryingByNodePath: Record<string, RetryingState>,
+  nodePath: string,
+): Record<string, RetryingState> {
+  if (retryingByNodePath[nodePath] === undefined) {
+    return retryingByNodePath
+  }
+
+  const next = { ...retryingByNodePath }
+  delete next[nodePath]
+  return next
 }
 
 function truncate(raw: string): string | null {

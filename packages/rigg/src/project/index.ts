@@ -5,7 +5,7 @@ import { normalizeError, isMissingPathError } from "../util/error"
 import { checkWorkspace } from "../workflow/check"
 import { decode } from "../workflow/decode"
 import { createDiag, CompileDiagnosticCode, isDiag, type CompileDiagnostic } from "../workflow/diag"
-import { parseYaml } from "../workflow/parse"
+import { parseYaml, type YamlSource } from "../workflow/parse"
 import type { WorkflowDocument } from "../workflow/schema"
 
 export type WorkspacePaths = {
@@ -22,6 +22,7 @@ type WorkflowSourceFile = {
 type DecodedWorkflowFile = {
   filePath: string
   relativePath: string
+  source: YamlSource
   workflow: WorkflowDocument
 }
 
@@ -156,7 +157,7 @@ export async function scanProject(startDir: string): Promise<ScanProjectResult> 
         continue
       }
 
-      const decodedResult = decode(parsedResult.document, sourceFile.filePath)
+      const decodedResult = decode(parsedResult.document, sourceFile.filePath, parsedResult.source)
       if (decodedResult.kind === "invalid_workflow") {
         errors.push(decodedResult.error)
         continue
@@ -165,6 +166,7 @@ export async function scanProject(startDir: string): Promise<ScanProjectResult> 
       files.push({
         filePath: sourceFile.filePath,
         relativePath: sourceFile.relativePath,
+        source: parsedResult.source,
         workflow: decodedResult.workflow,
       })
     }

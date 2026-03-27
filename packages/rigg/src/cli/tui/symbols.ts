@@ -5,14 +5,17 @@ import { formatDurationText } from "../../history/render"
 import { colors, kindColors } from "./theme"
 
 export type StatusSymbol = { icon: string; color: string }
+export type DisplayStatus = NodeStatus | RunStatus | "not_started" | "retrying"
 
-export function statusSymbol(status: NodeStatus | RunStatus | "not_started"): StatusSymbol {
+export function statusSymbol(status: DisplayStatus): StatusSymbol {
   switch (status) {
     case "not_started":
     case "pending":
       return { icon: figures.circle, color: colors.muted }
     case "running":
       return { icon: figures.lozenge, color: colors.brand }
+    case "retrying":
+      return { icon: "⟳", color: colors.brand }
     case "succeeded":
       return { icon: figures.tick, color: colors.success }
     case "failed":

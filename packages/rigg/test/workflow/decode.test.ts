@@ -5,24 +5,34 @@ import { parseYaml } from "../../src/workflow/parse"
 
 describe("workflow/decode", () => {
   test("parses valid YAML documents", () => {
-    expect(
-      parseYaml(
-        `
+    const result = parseYaml(
+      `
 id: check
 steps:
   - type: shell
     with:
       command: echo hi
 `,
-        "/workspace/.rigg/check.yaml",
-      ),
-    ).toEqual({
+      "/workspace/.rigg/check.yaml",
+    )
+
+    expect(result).toMatchObject({
       document: {
         id: "check",
         steps: [{ type: "shell", with: { command: "echo hi" } }],
       },
       kind: "parsed",
     })
+    expect(result.kind).toBe("parsed")
+    if (result.kind === "parsed") {
+      expect(result.source.locs.get("steps.0.with.command")).toEqual(
+        expect.objectContaining({
+          column: expect.any(Number),
+          line: expect.any(Number),
+          snippet: expect.any(String),
+        }),
+      )
+    }
   })
 
   test("reports invalid YAML documents", () => {

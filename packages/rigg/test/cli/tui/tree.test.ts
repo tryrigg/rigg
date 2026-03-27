@@ -255,6 +255,98 @@ describe("buildTree", () => {
     expect(entries[1]?.label).toBe("iteration 2")
   })
 
+  test("shows loop completion reasons in the suffix", () => {
+    const wf = workflow([
+      {
+        id: "loop",
+        type: "loop",
+        max: 2,
+        steps: [{ id: "work", type: "shell", with: { command: "echo work" } }],
+      },
+    ])
+    const snapshot: RunSnapshot = runSnapshot({
+      nodes: [
+        {
+          attempt: 1,
+          duration_ms: 2000,
+          exit_code: null,
+          finished_at: "2026-03-15T10:00:02.000Z",
+          node_kind: "loop",
+          node_path: "/0",
+          result: { reason: "max_reached" },
+          started_at: "2026-03-15T10:00:00.000Z",
+          status: "succeeded",
+          stderr: null,
+          stdout: null,
+          user_id: "loop",
+          waiting_for: null,
+        },
+      ],
+    })
+
+    const entries = buildTree(wf, snapshot)
+    expect(entries[0]?.suffix).toBe("max reached · 2.0s")
+  })
+
+  test("shows retrying state and attempt suffixes", () => {
+    const wf = workflow([
+      {
+        id: "retry",
+        retry: { max: 3 },
+        type: "shell",
+        with: { command: "echo retry" },
+      },
+    ])
+
+    const entries = buildTree(
+      wf,
+      runSnapshot({
+        nodes: [
+          {
+            attempt: 1,
+            duration_ms: 1000,
+            exit_code: 1,
+            finished_at: "2026-03-15T10:00:01.000Z",
+            node_kind: "shell",
+            node_path: "/0",
+            result: null,
+            started_at: "2026-03-15T10:00:00.000Z",
+            status: "failed",
+            stderr: "boom",
+            stdout: null,
+            user_id: "retry",
+            waiting_for: null,
+          },
+        ],
+      }),
+      undefined,
+      {
+        "/0": {
+          attempt: 1,
+          delayMs: 1000,
+          maxAttempts: 3,
+          previousAttempts: [
+            {
+              attempt: 1,
+              exit_code: 1,
+              message: "boom",
+              stderr: "boom",
+            },
+          ],
+          userId: "retry",
+        },
+      },
+    )
+
+    expect(entries[0]).toMatchObject({
+      retrying: {
+        maxAttempts: 3,
+      },
+      status: "retrying",
+      suffix: "attempt 2/3 · 1.0s",
+    })
+  })
+
   test("builds branch entries with cases", () => {
     const wf = workflow([
       {

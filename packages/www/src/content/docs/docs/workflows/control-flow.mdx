@@ -26,6 +26,7 @@ Rules:
 - String `with.inputs` values are rendered as templates in the caller scope
 - Boolean and number YAML literals pass through unchanged
 - `steps.call_plan.result` is `null` in v1, so workflows stay independent and share data through files or git state
+- `workflow` steps may set `retry`
 
 ## group
 
@@ -62,7 +63,7 @@ Repeats until a condition is met or `max` iterations is reached.
 - id: fix_loop
   type: loop
   max: 5 # required
-  until: ${{ len(steps.review.result.findings) == 0 }} # required
+  until: ${{ len(steps.review.result.findings) == 0 }} # optional
   steps:
     - id: review
       type: codex
@@ -72,6 +73,9 @@ Repeats until a condition is met or `max` iterations is reached.
           type: uncommitted
     - id: fix
       if: ${{ len(steps.review.result.findings) > 0 }}
+      retry:
+        max: 3
+        delay: 1s
       type: codex
       with:
         kind: turn
@@ -81,6 +85,11 @@ Repeats until a condition is met or `max` iterations is reached.
   exports:
     clean: ${{ len(steps.review.result.findings) == 0 }}
 ```
+
+Loop results always include `reason`.
+
+- `until_satisfied` when `until` becomes truthy
+- `max_reached` when the loop uses all iterations
 
 ### Loop context variables
 

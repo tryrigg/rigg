@@ -62,6 +62,9 @@ steps:
 
       - id: fix
         if: \${{ len(steps.review.result.findings) > 0 }}
+        retry:
+          max: 3
+          delay: 1s
         type: codex
         with:
           kind: turn
@@ -98,6 +101,9 @@ steps:
 
       - id: fix
         if: \${{ len(steps.review.result.findings) > 0 }}
+        retry:
+          max: 3
+          delay: 1s
         type: codex
         with:
           kind: turn
@@ -134,6 +140,9 @@ steps:
 
       - id: fix
         if: \${{ len(steps.review.result.findings) > 0 }}
+        retry:
+          max: 3
+          delay: 1s
         type: codex
         with:
           kind: turn

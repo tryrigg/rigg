@@ -257,6 +257,43 @@ describe("history/batch", () => {
     expect(payloadText(batch.events[1]!)).toContain("tool started: grep")
   })
 
+  test("records retry events with attempt metadata", () => {
+    const batch = createBatch()
+    const state = makeState()
+
+    apply(batch, state, {
+      attempt: 1,
+      delay_ms: 1000,
+      kind: "node_retrying",
+      max_attempts: 3,
+      next_attempt: 2,
+      node_path: "/0",
+      previous_attempts: [
+        {
+          attempt: 1,
+          exit_code: 1,
+          message: "boom",
+          stderr: "boom",
+        },
+      ],
+      user_id: "retry",
+    })
+
+    expect(batch.events).toHaveLength(1)
+    expect(batch.events[0]).toMatchObject({
+      attempt: 1,
+      kind: "event",
+      nodePath: "/0",
+    })
+    expect(payloadText(batch.events[0]!)).toBe("node retrying: retry attempt 2/3")
+    expect(payloadData(batch.events[0]!)).toMatchObject({
+      delay_ms: 1000,
+      kind: "node_retrying",
+      max_attempts: 3,
+      next_attempt: 2,
+    })
+  })
+
   test("keeps anonymous Codex assistant messages distinct within one turn", () => {
     const batch = createBatch()
     const state = makeState()

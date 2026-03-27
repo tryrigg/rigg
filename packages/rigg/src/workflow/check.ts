@@ -9,6 +9,7 @@ import {
 } from "./expr"
 import { createDiag, CompileDiagnosticCode, type CompileDiagnostic } from "./diag"
 import type { InputDefinition } from "./input"
+import { findYamlLoc, type YamlPath, type YamlSource } from "./parse"
 import {
   AnyJsonShape,
   BooleanShape,
@@ -23,25 +24,27 @@ import {
   validateResultShapePath,
   type ResultShape,
 } from "./shape"
-import type {
-  ActionNode,
-  BranchCase,
-  BranchNode,
-  ClaudeNode,
-  CodexNode,
-  CursorNode,
-  GroupNode,
-  LoopNode,
-  ParallelNode,
-  WorkflowDocument,
-  WorkflowNode,
-  WorkflowStep,
+import {
+  isRetryableStep,
+  type ActionNode,
+  type BranchCase,
+  type BranchNode,
+  type ClaudeNode,
+  type CodexNode,
+  type CursorNode,
+  type GroupNode,
+  type LoopNode,
+  type ParallelNode,
+  type WorkflowDocument,
+  type WorkflowNode,
+  type WorkflowStep,
 } from "./schema"
 import { reviewOutput, checkDefs, checkValue } from "./input"
 import { checkIdent } from "./id"
 import { shapeFromSchema } from "./shape"
 import { workflowById, type WorkflowProject } from "../project"
 import { normalizeError } from "../util/error"
+import { parseDuration } from "../util/duration"
 
 type VisibleScope = CheckScope
 
@@ -54,6 +57,16 @@ type CheckScope = {
 type ValidationSummary = {
   availableStepShapes: Map<string, ResultShape>
   guaranteedResultShape?: ResultShape | undefined
+}
+
+type ValidationContext = {
+  activeWorkflowIds: string[]
+  errors: CompileDiagnostic[]
+  filePath: string
+  path: YamlPath
+  project: WorkflowProject
+  seenStepIds: Set<string>
+  source: YamlSource | undefined
 }
 
 export function checkWorkspace(project: WorkflowProject): CompileDiagnostic[] {
@@ -71,19 +84,32 @@ export function checkWorkspace(project: WorkflowProject): CompileDiagnostic[] {
     }
 
     seenWorkflowIds.add(file.workflow.id)
-    errors.push(...validateWorkflow(project, file.workflow, file.filePath))
+    errors.push(...validateWorkflow(project, file.workflow, file.filePath, file.source))
   }
 
   return errors
 }
 
-function validateWorkflow(project: WorkflowProject, workflow: WorkflowDocument, filePath: string): CompileDiagnostic[] {
+function validateWorkflow(
+  project: WorkflowProject,
+  workflow: WorkflowDocument,
+  filePath: string,
+  source?: YamlSource,
+): CompileDiagnostic[] {
   const errors: CompileDiagnostic[] = []
-  const seenStepIds = new Set<string>()
   const rootScope: VisibleScope = {
     availableStepShapes: new Map(),
     inputDefinitions: workflow.inputs ?? {},
     insideLoop: false,
+  }
+  const ctx: ValidationContext = {
+    activeWorkflowIds: [workflow.id],
+    errors,
+    filePath,
+    path: [],
+    project,
+    seenStepIds: new Set<string>(),
+    source,
   }
 
   for (const key of Object.keys(workflow.inputs ?? {})) {
@@ -103,38 +129,20 @@ function validateWorkflow(project: WorkflowProject, workflow: WorkflowDocument, 
     checkTpl(value, filePath, rootScope, errors)
   }
 
-  validateStepList(project, workflow.id, workflow.steps, filePath, seenStepIds, rootScope, errors, [workflow.id])
+  validateStepList(childContext(ctx, "steps"), workflow.steps, rootScope)
 
   return errors
 }
 
-function validateStepList(
-  project: WorkflowProject,
-  workflowId: string,
-  steps: WorkflowStep[],
-  filePath: string,
-  seenStepIds: Set<string>,
-  scope: VisibleScope,
-  errors: CompileDiagnostic[],
-  activeWorkflowIds: string[],
-): ValidationSummary {
+function validateStepList(ctx: ValidationContext, steps: WorkflowStep[], scope: VisibleScope): ValidationSummary {
   const availableStepShapes = new Map(scope.availableStepShapes)
 
-  for (const step of steps) {
-    const result = validateStep(
-      project,
-      workflowId,
-      step,
-      filePath,
-      seenStepIds,
-      {
-        availableStepShapes,
-        inputDefinitions: scope.inputDefinitions,
-        insideLoop: scope.insideLoop,
-      },
-      errors,
-      activeWorkflowIds,
-    )
+  for (const [index, step] of steps.entries()) {
+    const result = validateStep(childContext(ctx, index), step, {
+      availableStepShapes,
+      inputDefinitions: scope.inputDefinitions,
+      insideLoop: scope.insideLoop,
+    })
 
     if (step.id !== undefined) {
       availableStepShapes.set(step.id, result.guaranteedResultShape ?? result.resultShape)
@@ -147,31 +155,27 @@ function validateStepList(
 }
 
 function validateStep(
-  project: WorkflowProject,
-  workflowId: string,
+  ctx: ValidationContext,
   step: WorkflowStep,
-  filePath: string,
-  seenStepIds: Set<string>,
   scope: VisibleScope,
-  errors: CompileDiagnostic[],
-  activeWorkflowIds: string[],
 ): ValidationSummary & { guaranteedResultShape: ResultShape; resultShape: ResultShape } {
   if (step.id !== undefined) {
-    const identifierError = checkIdent(step.id, "step id", filePath)
+    const identifierError = checkIdent(step.id, "step id", ctx.filePath)
     if (identifierError !== undefined) {
-      errors.push(identifierError)
-    } else if (seenStepIds.has(step.id)) {
-      errors.push(
+      ctx.errors.push(identifierError)
+    } else if (ctx.seenStepIds.has(step.id)) {
+      ctx.errors.push(
         createDiag(CompileDiagnosticCode.InvalidWorkflow, `Duplicate step id \`${step.id}\`.`, {
-          filePath,
+          filePath: ctx.filePath,
         }),
       )
     } else {
-      seenStepIds.add(step.id)
+      ctx.seenStepIds.add(step.id)
     }
   }
 
-  validateStepExpressions(step, filePath, scope, errors)
+  validateStepExpressions(step, ctx.filePath, scope, ctx.errors)
+  validateRetry(ctx, step)
 
   const result = (() => {
     switch (step.type) {
@@ -180,17 +184,17 @@ function validateStep(
       case "claude":
       case "codex":
       case "cursor":
-        return validateActionStep(step, filePath, scope, errors)
+        return validateActionStep(step, ctx.filePath, scope, ctx.errors)
       case "workflow":
-        return validateWorkflowStep(project, workflowId, step, filePath, scope, errors, activeWorkflowIds)
+        return validateWorkflowStep(ctx, step, scope)
       case "group":
-        return validateGroupStep(project, workflowId, step, filePath, seenStepIds, scope, errors, activeWorkflowIds)
+        return validateGroupStep(ctx, step, scope)
       case "loop":
-        return validateLoopStep(project, workflowId, step, filePath, seenStepIds, scope, errors, activeWorkflowIds)
+        return validateLoopStep(ctx, step, scope)
       case "branch":
-        return validateBranchStep(project, workflowId, step, filePath, seenStepIds, scope, errors, activeWorkflowIds)
+        return validateBranchStep(ctx, step, scope)
       case "parallel":
-        return validateParallelStep(project, workflowId, step, filePath, seenStepIds, scope, errors, activeWorkflowIds)
+        return validateParallelStep(ctx, step, scope)
     }
   })()
 
@@ -234,21 +238,18 @@ function validateActionStep(
 }
 
 function validateWorkflowStep(
-  project: WorkflowProject,
-  workflowId: string,
+  ctx: ValidationContext,
   step: WorkflowNode,
-  filePath: string,
   scope: VisibleScope,
-  errors: CompileDiagnostic[],
-  activeWorkflowIds: string[],
 ): ValidationSummary & { guaranteedResultShape: ResultShape; resultShape: ResultShape } {
+  const workflowCtx = childContext(ctx, "with", "workflow")
   const referenceExpressions = extractExprs(step.with.workflow)
   if (referenceExpressions.length > 0) {
-    errors.push(
-      createDiag(
+    ctx.errors.push(
+      diagAt(
+        workflowCtx,
         CompileDiagnosticCode.InvalidWorkflow,
         "workflow reference must be a static string, not a template expression.",
-        { filePath },
       ),
     )
 
@@ -259,18 +260,18 @@ function validateWorkflowStep(
     }
   }
 
-  const targetWorkflow = workflowById(project, step.with.workflow)
+  const targetWorkflow = workflowById(ctx.project, step.with.workflow)
   if (targetWorkflow === undefined) {
-    errors.push(
-      createDiag(
+    ctx.errors.push(
+      diagAt(
+        workflowCtx,
         CompileDiagnosticCode.InvalidWorkflow,
         `Step \`${step.id ?? "<anonymous>"}\` references workflow \`${step.with.workflow}\` which does not exist. Available workflows: ${
-          project.files
+          ctx.project.files
             .map((file) => file.workflow.id)
             .sort()
             .join(", ") || "(none)"
         }.`,
-        { filePath },
       ),
     )
 
@@ -281,22 +282,19 @@ function validateWorkflowStep(
     }
   }
 
-  if (activeWorkflowIds.includes(targetWorkflow.id)) {
-    errors.push(
-      createDiag(
+  if (ctx.activeWorkflowIds.includes(targetWorkflow.id)) {
+    ctx.errors.push(
+      diagAt(
+        workflowCtx,
         CompileDiagnosticCode.InvalidWorkflow,
-        `Step \`${step.id ?? "<anonymous>"}\` creates a circular workflow reference: ${[
-          ...activeWorkflowIds,
-          targetWorkflow.id,
-        ].join(" -> ")}.`,
-        { filePath },
+        `Step \`${step.id ?? "<anonymous>"}\` creates a circular workflow reference: ${[...ctx.activeWorkflowIds, targetWorkflow.id].join(" -> ")}.`,
       ),
     )
   } else {
-    checkGraph(project, targetWorkflow, [...activeWorkflowIds, targetWorkflow.id], errors)
+    checkGraph(ctx.project, targetWorkflow, [...ctx.activeWorkflowIds, targetWorkflow.id], ctx.errors)
   }
 
-  checkInputs(step, targetWorkflow, filePath, scope, errors)
+  checkInputs(step, targetWorkflow, ctx.filePath, scope, ctx.errors)
 
   return {
     availableStepShapes: new Map(scope.availableStepShapes),
@@ -306,34 +304,15 @@ function validateWorkflowStep(
 }
 
 function validateGroupStep(
-  project: WorkflowProject,
-  workflowId: string,
+  ctx: ValidationContext,
   step: GroupNode,
-  filePath: string,
-  seenStepIds: Set<string>,
   scope: VisibleScope,
-  errors: CompileDiagnostic[],
-  activeWorkflowIds: string[],
 ): ValidationSummary & { guaranteedResultShape: ResultShape; resultShape: ResultShape } {
-  const inner = validateStepList(
-    project,
-    workflowId,
-    step.steps,
-    filePath,
-    seenStepIds,
-    scope,
-    errors,
-    activeWorkflowIds,
-  )
-  const resultShape = validateExports(
-    step.exports,
-    filePath,
-    {
-      ...scope,
-      availableStepShapes: inner.availableStepShapes,
-    },
-    errors,
-  )
+  const inner = validateStepList(childContext(ctx, "steps"), step.steps, scope)
+  const resultShape = validateExports(childContext(ctx, "exports"), step.exports, {
+    ...scope,
+    availableStepShapes: inner.availableStepShapes,
+  })
 
   return {
     availableStepShapes: inner.availableStepShapes,
@@ -343,49 +322,41 @@ function validateGroupStep(
 }
 
 function validateLoopStep(
-  project: WorkflowProject,
-  workflowId: string,
+  ctx: ValidationContext,
   step: LoopNode,
-  filePath: string,
-  seenStepIds: Set<string>,
   scope: VisibleScope,
-  errors: CompileDiagnostic[],
-  activeWorkflowIds: string[],
 ): ValidationSummary & { guaranteedResultShape: ResultShape; resultShape: ResultShape } {
   const loopScope = {
     ...scope,
     insideLoop: true,
   }
-  const inner = validateStepList(
-    project,
-    workflowId,
-    step.steps,
-    filePath,
-    seenStepIds,
-    loopScope,
-    errors,
-    activeWorkflowIds,
-  )
-  checkExprTpl(
-    step.until,
-    filePath,
-    {
-      ...loopScope,
-      availableStepShapes: inner.availableStepShapes,
-    },
-    errors,
-    "bool",
-  )
+  const inner = validateStepList(childContext(ctx, "steps"), step.steps, loopScope)
+  if (step.until !== undefined) {
+    checkExprTpl(
+      step.until,
+      ctx.filePath,
+      {
+        ...loopScope,
+        availableStepShapes: inner.availableStepShapes,
+      },
+      ctx.errors,
+      "bool",
+    )
+  }
 
-  const resultShape = validateExports(
+  const exportsShape = validateExports(
+    childContext(ctx, "exports"),
     step.exports,
-    filePath,
     {
       ...loopScope,
       availableStepShapes: inner.availableStepShapes,
     },
-    errors,
+    {
+      reserved: new Set(["reason"]),
+      reservedMessage: "`loop.exports.reason` is reserved for the loop completion reason",
+    },
   )
+  const resultShape = loopResultShape(exportsShape)
 
   return {
     availableStepShapes: inner.availableStepShapes,
@@ -395,14 +366,9 @@ function validateLoopStep(
 }
 
 function validateBranchStep(
-  project: WorkflowProject,
-  workflowId: string,
+  ctx: ValidationContext,
   step: BranchNode,
-  filePath: string,
-  seenStepIds: Set<string>,
   scope: VisibleScope,
-  errors: CompileDiagnostic[],
-  activeWorkflowIds: string[],
 ): ValidationSummary & { guaranteedResultShape: ResultShape; resultShape: ResultShape } {
   let seenElse = false
   const branchSummaries: Array<ValidationSummary & { exportShape: ResultShape }> = []
@@ -410,66 +376,57 @@ function validateBranchStep(
   for (const [index, caseNode] of step.cases.entries()) {
     const isElse = caseNode.else === true
     if (isElse && caseNode.if !== undefined) {
-      errors.push(
+      ctx.errors.push(
         createDiag(CompileDiagnosticCode.InvalidWorkflow, `\`cases[${index}]\` cannot set both \`else\` and \`if\``, {
-          filePath,
+          filePath: ctx.filePath,
         }),
       )
     }
     if (!isElse && caseNode.if === undefined) {
-      errors.push(
+      ctx.errors.push(
         createDiag(
           CompileDiagnosticCode.InvalidWorkflow,
           `\`cases[${index}]\` must define \`if\` unless it is an \`else\` case`,
-          { filePath },
+          { filePath: ctx.filePath },
         ),
       )
     }
     if (isElse && index !== step.cases.length - 1) {
-      errors.push(
+      ctx.errors.push(
         createDiag(CompileDiagnosticCode.InvalidWorkflow, "`else` case must be the last branch case", {
-          filePath,
+          filePath: ctx.filePath,
         }),
       )
     }
     if (isElse) {
       if (seenElse) {
-        errors.push(
+        ctx.errors.push(
           createDiag(CompileDiagnosticCode.InvalidWorkflow, "`branch` may define at most one `else` case", {
-            filePath,
+            filePath: ctx.filePath,
           }),
         )
       }
       seenElse = true
     }
 
-    const summary = validateBranchCase(
-      project,
-      workflowId,
-      caseNode,
-      filePath,
-      seenStepIds,
-      scope,
-      errors,
-      activeWorkflowIds,
-    )
+    const summary = validateBranchCase(childContext(ctx, "cases", index), caseNode, scope)
     branchSummaries.push(summary)
   }
 
   const anyExports = branchSummaries.some((summary) => summary.exportShape.kind !== "none")
   if (anyExports && !seenElse) {
-    errors.push(
+    ctx.errors.push(
       createDiag(CompileDiagnosticCode.InvalidWorkflow, "`branch` without `else` cannot declare case `exports`", {
-        filePath,
+        filePath: ctx.filePath,
       }),
     )
   }
   if (anyExports && branchSummaries.some((summary) => summary.exportShape.kind === "none")) {
-    errors.push(
+    ctx.errors.push(
       createDiag(
         CompileDiagnosticCode.InvalidWorkflow,
         "all `branch` cases must declare `exports` when any case exports a result",
-        { filePath },
+        { filePath: ctx.filePath },
       ),
     )
   }
@@ -483,11 +440,11 @@ function validateBranchStep(
       for (const shape of restShapes) {
         const merged = mergeShapes(branchResultShape, shape)
         if (!areResultShapesCompatible(branchResultShape, shape)) {
-          errors.push(
+          ctx.errors.push(
             createDiag(
               CompileDiagnosticCode.InvalidWorkflow,
               "all `branch` case exports must declare the same result shape",
-              { filePath },
+              { filePath: ctx.filePath },
             ),
           )
           branchResultShape = AnyJsonShape
@@ -506,45 +463,31 @@ function validateBranchStep(
 }
 
 function validateParallelStep(
-  project: WorkflowProject,
-  workflowId: string,
+  ctx: ValidationContext,
   step: ParallelNode,
-  filePath: string,
-  seenStepIds: Set<string>,
   scope: VisibleScope,
-  errors: CompileDiagnostic[],
-  activeWorkflowIds: string[],
 ): ValidationSummary & { guaranteedResultShape: ResultShape; resultShape: ResultShape } {
   const branchIds = new Set<string>()
   const branchSummaries: ValidationSummary[] = []
   const mergedStepShapes = new Map(scope.availableStepShapes)
 
   for (const [index, branch] of step.branches.entries()) {
-    const identifierError = checkIdent(branch.id, "parallel branch id", filePath)
+    const identifierError = checkIdent(branch.id, "parallel branch id", ctx.filePath)
     if (identifierError !== undefined) {
-      errors.push(identifierError)
+      ctx.errors.push(identifierError)
     } else if (branchIds.has(branch.id)) {
-      errors.push(
+      ctx.errors.push(
         createDiag(
           CompileDiagnosticCode.InvalidWorkflow,
           `\`branches[${index}]\` reuses local branch id \`${branch.id}\` within the same parallel node`,
-          { filePath },
+          { filePath: ctx.filePath },
         ),
       )
     } else {
       branchIds.add(branch.id)
     }
 
-    const summary = validateStepList(
-      project,
-      workflowId,
-      branch.steps,
-      filePath,
-      seenStepIds,
-      scope,
-      errors,
-      activeWorkflowIds,
-    )
+    const summary = validateStepList(childContext(ctx, "branches", index, "steps"), branch.steps, scope)
     for (const [stepId, shape] of summary.availableStepShapes.entries()) {
       if (!scope.availableStepShapes.has(stepId)) {
         mergedStepShapes.set(stepId, shape)
@@ -553,15 +496,10 @@ function validateParallelStep(
     branchSummaries.push(summary)
   }
 
-  const resultShape = validateExports(
-    step.exports,
-    filePath,
-    {
-      ...scope,
-      availableStepShapes: mergedStepShapes,
-    },
-    errors,
-  )
+  const resultShape = validateExports(childContext(ctx, "exports"), step.exports, {
+    ...scope,
+    availableStepShapes: mergedStepShapes,
+  })
 
   return {
     availableStepShapes: mergedStepShapes,
@@ -571,38 +509,19 @@ function validateParallelStep(
 }
 
 function validateBranchCase(
-  project: WorkflowProject,
-  workflowId: string,
+  ctx: ValidationContext,
   caseNode: BranchCase,
-  filePath: string,
-  seenStepIds: Set<string>,
   scope: VisibleScope,
-  errors: CompileDiagnostic[],
-  activeWorkflowIds: string[],
 ): ValidationSummary & { exportShape: ResultShape } {
   if (caseNode.if !== undefined) {
-    checkExprTpl(caseNode.if, filePath, scope, errors, "bool")
+    checkExprTpl(caseNode.if, ctx.filePath, scope, ctx.errors, "bool")
   }
 
-  const summary = validateStepList(
-    project,
-    workflowId,
-    caseNode.steps,
-    filePath,
-    seenStepIds,
-    scope,
-    errors,
-    activeWorkflowIds,
-  )
-  const exportShape = validateExports(
-    caseNode.exports,
-    filePath,
-    {
-      ...scope,
-      availableStepShapes: summary.availableStepShapes,
-    },
-    errors,
-  )
+  const summary = validateStepList(childContext(ctx, "steps"), caseNode.steps, scope)
+  const exportShape = validateExports(childContext(ctx, "exports"), caseNode.exports, {
+    ...scope,
+    availableStepShapes: summary.availableStepShapes,
+  })
 
   return { ...summary, exportShape }
 }
@@ -681,10 +600,13 @@ function validateStepExpressions(
 }
 
 function validateExports(
+  ctx: ValidationContext,
   exportsMap: Record<string, string> | undefined,
-  filePath: string,
   scope: VisibleScope,
-  errors: CompileDiagnostic[],
+  options: {
+    reserved?: Set<string>
+    reservedMessage?: string
+  } = {},
 ): ResultShape {
   if (exportsMap === undefined) {
     return { kind: "none" }
@@ -692,13 +614,66 @@ function validateExports(
 
   const fields: Record<string, ResultShape> = {}
   for (const [key, template] of Object.entries(exportsMap)) {
-    const identifierError = checkIdent(key, "export name", filePath)
+    const identifierError = checkIdent(key, "export name", ctx.filePath)
     if (identifierError !== undefined) {
-      errors.push(identifierError)
+      ctx.errors.push(identifierError)
     }
-    fields[key] = inferShape(template, filePath, scope, errors)
+    if (options.reserved?.has(key)) {
+      ctx.errors.push(
+        diagAt(
+          childContext(ctx, key),
+          CompileDiagnosticCode.InvalidWorkflow,
+          options.reservedMessage ?? `\`exports.${key}\` is reserved`,
+        ),
+      )
+      continue
+    }
+    fields[key] = inferShape(template, ctx.filePath, scope, ctx.errors)
   }
   return { kind: "object", fields }
+}
+
+function validateRetry(ctx: ValidationContext, step: WorkflowStep): void {
+  const retry = "retry" in step ? step.retry : undefined
+  if (retry === undefined) {
+    return
+  }
+
+  if (!isRetryableStep(step)) {
+    ctx.errors.push(
+      diagAt(
+        childContext(ctx, "retry"),
+        CompileDiagnosticCode.InvalidWorkflow,
+        "`retry` is only supported on action and workflow steps",
+      ),
+    )
+    return
+  }
+
+  const cfg = retryOptions(retry)
+
+  if (cfg.delay !== undefined && parseDuration(cfg.delay) === null) {
+    ctx.errors.push(
+      diagAt(
+        childContext(ctx, "retry", "delay"),
+        CompileDiagnosticCode.InvalidWorkflow,
+        "`retry.delay` must be a duration like `500ms`, `1s`, `2m`, or `1h`",
+      ),
+    )
+  }
+
+  if (cfg.backoff !== undefined && (cfg.backoff < 1 || cfg.backoff > 10)) {
+    ctx.errors.push(
+      diagAt(
+        childContext(ctx, "retry", "backoff"),
+        CompileDiagnosticCode.InvalidWorkflow,
+        "`retry.backoff` must be between 1 and 10",
+        cfg.backoff < 1
+          ? ["Use `1` for a fixed delay or a larger multiplier for exponential backoff."]
+          : ["Keep backoff at `10` or below to avoid runaway retry delays."],
+      ),
+    )
+  }
 }
 
 function checkGraph(
@@ -1161,6 +1136,52 @@ function walkCalls(steps: WorkflowStep[], visit: (step: WorkflowNode) => void): 
 
 function filePathFor(project: WorkflowProject, workflowId: string): string | undefined {
   return project.files.find((file) => file.workflow.id === workflowId)?.filePath
+}
+
+function diagAt(
+  ctx: ValidationContext,
+  code: (typeof CompileDiagnosticCode)[keyof typeof CompileDiagnosticCode],
+  message: string,
+  hints?: string[],
+): CompileDiagnostic {
+  const loc = findYamlLoc(ctx.source, ctx.path)
+  return createDiag(code, message, {
+    filePath: ctx.filePath,
+    ...(loc ?? {}),
+    ...(hints === undefined ? {} : { hints }),
+  })
+}
+
+function childContext(ctx: ValidationContext, ...path: Array<string | number>): ValidationContext {
+  return {
+    ...ctx,
+    path: [...ctx.path, ...path],
+  }
+}
+
+function loopResultShape(shape: ResultShape): ResultShape {
+  return {
+    kind: "object",
+    fields: {
+      ...(shape.kind === "object" ? shape.fields : {}),
+      reason: StringShape,
+    },
+  }
+}
+
+function retryOptions(retry: number | { backoff?: unknown; delay?: unknown; max: number }): {
+  backoff?: number | undefined
+  delay?: string | undefined
+  max: number
+} {
+  if (typeof retry === "number") {
+    return { max: retry }
+  }
+  return {
+    backoff: typeof retry.backoff === "number" ? retry.backoff : undefined,
+    delay: typeof retry.delay === "string" ? retry.delay : undefined,
+    max: retry.max,
+  }
 }
 
 function list(values: string[]): string {

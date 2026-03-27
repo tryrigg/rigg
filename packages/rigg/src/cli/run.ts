@@ -1,4 +1,5 @@
 import { createRecorder } from "../history/record"
+import { formatDurationText } from "../history/render"
 import { loadProject, workflowById, type WorkflowProject } from "../project"
 import { runWorkflow, type RunEvent } from "../session"
 import { interrupt } from "../session/error"
@@ -13,7 +14,7 @@ import { normalizeError } from "../util/error"
 import { compactJson, deepEqual, safeParseJson, stringifyOptional } from "../util/json"
 import { elapsedMs } from "../util/time"
 import type { RunMode } from "./args"
-import { renderErrors } from "./out"
+import { formatLoopReason, renderErrors } from "./out"
 import { type CommandResult, failure, PROJECT_NOT_FOUND_MESSAGE, success } from "./result"
 import { createHeadless, createInkSession, type RunSession } from "./session"
 
@@ -298,9 +299,11 @@ function formatVerboseEvent(event: RunEvent): string | null {
     case "node_started":
       return `step started: ${nodeLabel(event.node)} (${event.node.node_kind})`
     case "node_completed":
-      return `step completed: ${nodeLabel(event.node)} (${event.node.status})`
+      return `step completed: ${nodeLabel(event.node)} (${event.node.status})${suffixLoopReason(event.node.result)}`
     case "node_skipped":
       return `step skipped: ${nodeLabel(event.node)} (${event.reason})`
+    case "node_retrying":
+      return `node retrying: ${event.user_id ?? event.node_path} attempt ${event.next_attempt}/${event.max_attempts} in ${formatDurationText(event.delay_ms)}`
     case "barrier_reached":
       return `barrier reached: ${event.barrier.reason}`
     case "barrier_resolved":
@@ -315,6 +318,11 @@ function formatVerboseEvent(event: RunEvent): string | null {
     case "step_output":
       return null
   }
+}
+
+function suffixLoopReason(result: unknown): string {
+  const reason = formatLoopReason(result)
+  return reason.length > 0 ? ` · ${reason}` : ""
 }
 
 function createOutputWriter(options: OutputWriterOptions, io: OutputIo): OutputWriter {

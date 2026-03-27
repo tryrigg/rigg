@@ -14,6 +14,10 @@ export function workflowProject(
     files: files.map((file, index) => ({
       filePath: file.filePath ?? `/workspace/.rigg/workflow-${index + 1}.yaml`,
       relativePath: file.relativePath ?? `workflow-${index + 1}.yaml`,
+      source: {
+        locs: new Map(),
+        text: "",
+      },
       workflow: file.workflow,
     })),
     workspace: {

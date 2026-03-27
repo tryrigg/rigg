@@ -1,14 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import {
-  evalError,
-  isRunError,
-  loopExhausted,
-  normalizeExecError,
-  runError,
-  stepFailed,
-  timedOut,
-} from "../../src/session/error"
+import { evalError, isRunError, normalizeExecError, runError, stepFailed, timedOut } from "../../src/session/error"
 
 describe("session/error", () => {
   test("creates specialized execution errors", () => {
@@ -37,13 +29,6 @@ describe("session/error", () => {
     expect(normalizeExecError("boom", "validation_error")).toMatchObject({
       message: "boom",
       runReason: "validation_error",
-    })
-  })
-
-  test("exposes loop exhaustion errors", () => {
-    expect(loopExhausted("/0", 5)).toMatchObject({
-      message: "loop node `/0` exhausted after 5 iterations without satisfying `until`",
-      runReason: "step_failed",
     })
   })
 })

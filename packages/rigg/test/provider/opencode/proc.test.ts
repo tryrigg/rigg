@@ -346,6 +346,7 @@ describe("opencode/proc", () => {
       }) as unknown as typeof Bun.spawn
 
       const proc = startServer({
+        binaryPath: "/tmp/opencode",
         cwd: process.cwd(),
         env: {
           ...process.env,

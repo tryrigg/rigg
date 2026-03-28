@@ -1,6 +1,6 @@
 ---
 title: Steps
-description: Action step types — shell, codex, claude, cursor, and write_file.
+description: Action step types — shell, codex, claude, opencode, cursor, and write_file.
 sidebar:
   order: 2
 ---
@@ -120,6 +120,43 @@ Claude YAML stays `snake_case` and maps directly to Claude Agent SDK options in 
 Do not set `with.kind`, `with.mode`, or `with.action` on Claude steps.
 Claude steps require a locally installed and authenticated Claude Code CLI. Run `claude login` before use.
 
+## opencode
+
+Runs OpenCode through the local OpenCode CLI and returns the final plain-text assistant response.
+
+```yaml
+- id: analyze
+  type: opencode
+  with:
+    prompt: Analyze the architecture.
+
+- id: build
+  type: opencode
+  with:
+    prompt: Implement the requested change.
+    model: anthropic/claude-sonnet-4-20250514
+    agent: build
+    variant: high
+    permission_mode: auto_approve
+```
+
+Required field:
+
+- `with.prompt`
+
+Optional fields:
+
+- `with.model`
+- `with.agent`
+- `with.variant`
+- `with.permission_mode`
+
+OpenCode uses named agents and defaults `with.agent` to `build`.
+`with.model` must use `provider/model`.
+`with.permission_mode` supports `default` and `auto_approve`.
+Headless runs reject permission requests by default unless `with.permission_mode` is `auto_approve`.
+OpenCode steps require a local OpenCode CLI installation. Verify with `opencode --version`.
+
 ## cursor
 
 Runs Cursor Agent through ACP and returns the final plain-text assistant response.
@@ -152,4 +189,5 @@ Writes content to a file.
 - `codex` turns: `steps.draft.result`
 - `codex` review: `steps.review.result.findings`
 - `claude`: `steps.build.result`
+- `opencode`: `steps.build.result`
 - `cursor`: `steps.triage.result`

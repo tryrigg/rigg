@@ -1,6 +1,6 @@
 ---
 title: Examples
-description: Workflow patterns for common coding tasks using Codex, Claude, Cursor, and shell steps.
+description: Workflow patterns for common coding tasks using Codex, Claude, OpenCode, Cursor, and shell steps.
 sidebar:
   order: 1
 ---
@@ -105,7 +105,7 @@ steps:
 
 ## Parallel checks
 
-Runs multiple shell checks concurrently, then summarizes them with Claude.
+Runs multiple shell checks concurrently, then summarizes them with OpenCode.
 
 ```yaml
 id: parallel-checks
@@ -134,7 +134,7 @@ steps:
       lint: ${{ steps.run_lint.result }}
 
   - id: report
-    type: claude
+    type: opencode
     with:
       prompt: |
         Summarize:

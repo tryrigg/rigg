@@ -4,7 +4,7 @@ Rigg is a local-first workflow runner for agentic coding.
 
 As more engineering work moves into local AI agents, teams need a way to turn the good repetitive parts of their day-to-day workflow into something explicit and reusable: implementation planning, review loops, fix verification, codebase checks, and other multi-step flows that are usually done ad hoc in prompts and terminals.
 
-Rigg lets you capture those workflows as `.rigg/*.yaml`, run them locally with Codex, Claude Code, Cursor, and shell commands, and keep them in Git alongside the code they operate on. That makes agent workflows easier to review, share, standardize, and evolve as a team, instead of living as private prompt habits.
+Rigg lets you capture those workflows as `.rigg/*.yaml`, run them locally with Codex, Claude Code, Cursor, OpenCode, and shell commands, and keep them in Git alongside the code they operate on. That makes agent workflows easier to review, share, standardize, and evolve as a team, instead of living as private prompt habits.
 
 [![Rigg demo](https://github.com/user-attachments/assets/3e4ba894-33d9-4972-8f34-19c503d421f2)](https://tryrigg.com)
 
@@ -14,6 +14,7 @@ Rigg lets you capture those workflows as `.rigg/*.yaml`, run them locally with C
 - `codex` on `PATH` for `type: codex` steps
 - `codex-cli 0.114.0` or newer
 - `claude` on `PATH` for `type: claude` steps
+- `opencode` on `PATH` for `type: opencode` steps
 - `cursor` on `PATH` for `type: cursor` steps
 
 ## Install
@@ -108,7 +109,7 @@ steps:
 
 Supported step types:
 
-- Actions: `shell`, `codex`, `claude`, `cursor`, `write_file`
+- Actions: `shell`, `codex`, `claude`, `opencode`, `cursor`, `write_file`
 - Control flow: `group`, `loop`, `branch`, `parallel`
 
 ## Notes

@@ -36,11 +36,11 @@ export const GET: APIRoute = async () => {
 
   const content = `# Rigg
 
-> Rigg is an open-source, local-first workflow runner for agentic coding. It lets you wire Codex, Claude Code, and shell commands into repeatable YAML pipelines that run locally and version in Git.
+> Rigg is an open-source, local-first workflow runner for agentic coding. It lets you wire Codex, Claude Code, Cursor, OpenCode, and shell commands into repeatable YAML pipelines that run locally and version in Git.
 
 As more engineering work moves into local AI agents, teams need a way to turn the good repetitive parts of their day-to-day workflow into something explicit and reusable: implementation planning, review loops, fix verification, codebase checks, and other multi-step flows that are usually done ad hoc in prompts and terminals.
 
-Rigg lets you capture those workflows as \`.rigg/*.yaml\`, run them locally with tools like Codex and Claude, and keep them in Git alongside the code they operate on. That makes agent workflows easier to review, share, standardize, and evolve as a team, instead of living as private prompt habits.
+Rigg lets you capture those workflows as \`.rigg/*.yaml\`, run them locally with tools like Codex, Claude Code, Cursor, and OpenCode, and keep them in Git alongside the code they operate on. That makes agent workflows easier to review, share, standardize, and evolve as a team, instead of living as private prompt habits.
 
 The goal is to help teams use local coding agents in a safer and more repeatable way: common workflows are versioned, execution is visible, and local run history is available through commands like \`rigg history\`, \`rigg show\`, and \`rigg logs\` when the history database is available.
 

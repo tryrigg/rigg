@@ -88,6 +88,22 @@ Claude YAML fields are `snake_case` and map directly to Claude Agent SDK options
 Do not set `with.kind`, `with.mode`, or `with.action` on Claude steps.
 Use a locally installed and authenticated Claude Code CLI (`claude login`).
 
+## type: opencode
+
+| Field                  | Type                        | Required |
+| ---------------------- | --------------------------- | -------- |
+| `with.prompt`          | template                    | Yes      |
+| `with.model`           | string                      | No       |
+| `with.agent`           | string                      | No       |
+| `with.variant`         | string                      | No       |
+| `with.permission_mode` | `default` \| `auto_approve` | No       |
+
+`opencode` returns the final plain-text assistant response.
+OpenCode uses named agents and defaults `with.agent` to `build`.
+`with.model` must use `provider/model`.
+Headless runs reject permission requests by default unless `with.permission_mode` is `auto_approve`.
+OpenCode steps require a local OpenCode CLI installation. Verify with `opencode --version`.
+
 ## type: cursor
 
 | Field         | Type                       | Required              |
@@ -97,6 +113,7 @@ Use a locally installed and authenticated Claude Code CLI (`claude login`).
 | `with.model`  | string                     | No                    |
 
 `cursor` communicates with Cursor Agent through ACP and returns the final plain-text assistant response.
+If you need structured JSON from Cursor, use a `shell` step to run Cursor headless instead.
 
 ## type: write_file
 

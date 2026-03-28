@@ -3,6 +3,7 @@ import { useMemo, useSyncExternalStore } from "react"
 
 import type { InteractionResolution } from "../../session/interaction"
 import type { WorkflowProject } from "../../project"
+import { currentBarrier, currentInteraction } from "../../session/schema"
 import type { WorkflowDocument } from "../../workflow/schema"
 import type { ApprovalMode } from "../state"
 import { Barrier } from "./barrier"
@@ -44,8 +45,8 @@ export function App({
     [workflow, snapshot, project, retryingByNodePath],
   )
   const stepProgress = useMemo(() => formatProgress(summarize(workflow, snapshot)), [workflow, snapshot])
-  const activeBarrier = snapshot?.active_barrier ?? null
-  const activeInteraction = snapshot?.active_interaction ?? null
+  const activeBarrier = snapshot === null ? null : currentBarrier(snapshot)
+  const activeInteraction = snapshot === null ? null : currentInteraction(snapshot)
 
   useInput((input, key) => {
     if (key.ctrl && input === "c") {

@@ -33,11 +33,9 @@ function frontierNode(
   overrides: Partial<Extract<FrontierNode, { node_kind: "shell" }>> = {},
 ): Extract<FrontierNode, { node_kind: "shell" }> {
   return {
-    detail: null,
     frame_id: "root",
     node_kind: "shell",
     node_path: "/0",
-    user_id: null,
     ...overrides,
   }
 }
@@ -72,13 +70,16 @@ describe("summarize", () => {
         },
       ]),
       snapshot({
-        active_barrier: {
-          barrier_id: "barrier-1",
-          completed: null,
-          created_at: "2026-03-17T00:00:00.000Z",
-          frame_id: "root.loop.iter.2",
-          next: [frontierNode({ node_path: "/0/0" })],
-          reason: "loop_iteration_started",
+        waiting: {
+          barrier: {
+            barrier_id: "barrier-1",
+            completed: null,
+            created_at: "2026-03-17T00:00:00.000Z",
+            frame_id: "root.loop.iter.2",
+            next: [frontierNode({ node_path: "/0/0" })],
+            reason: "loop_iteration_started",
+          },
+          kind: "barrier",
         },
         nodes: [
           nodeSnapshot({
@@ -109,13 +110,16 @@ describe("summarize", () => {
         { id: "finalize", type: "shell", with: { command: "echo done" } },
       ]),
       snapshot({
-        active_barrier: {
-          barrier_id: "barrier-1",
-          completed: null,
-          created_at: "2026-03-17T00:00:00.000Z",
-          frame_id: "root.loop.iter.2",
-          next: [frontierNode({ node_path: "/0/0" })],
-          reason: "loop_iteration_started",
+        waiting: {
+          barrier: {
+            barrier_id: "barrier-1",
+            completed: null,
+            created_at: "2026-03-17T00:00:00.000Z",
+            frame_id: "root.loop.iter.2",
+            next: [frontierNode({ node_path: "/0/0" })],
+            reason: "loop_iteration_started",
+          },
+          kind: "barrier",
         },
         nodes: [
           nodeSnapshot({

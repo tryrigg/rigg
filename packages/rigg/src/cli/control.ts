@@ -1,6 +1,6 @@
 import type { InteractionResolution } from "../session/interaction"
 import type { RunControlRequest, RunControlResolution } from "../session/event"
-import type { RunSnapshot } from "../session/schema"
+import { currentInteraction, type RunSnapshot } from "../session/schema"
 import { setInteraction } from "../session/state"
 import { onAbort } from "../util/abort"
 import { createAbortError } from "../util/error"
@@ -50,7 +50,7 @@ export function addSynthetic(snapshot: RunSnapshot, request: RunControlRequest &
 
 export function removeSynthetic(snapshot: RunSnapshot, interactionId: string): RunSnapshot {
   const next = structuredClone(snapshot)
-  if (next.active_interaction?.interaction_id === interactionId) {
+  if (currentInteraction(next)?.interaction_id === interactionId) {
     setInteraction(next, null)
   }
   return next

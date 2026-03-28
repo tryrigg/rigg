@@ -41,14 +41,14 @@ export type UiState = {
   snapshot: RunSnapshot | null
 }
 
-const labels: Record<string, string> = {
+const labels = {
   claude: "claude",
   codex: "codex",
   cursor: "cursor",
   opencode: "opencode",
   shell: "cmd",
   write_file: "write_file",
-}
+} satisfies Record<FrontierNode["node_kind"], string>
 
 export function createState(barrierMode: ApprovalMode = "manual"): UiState {
   return {

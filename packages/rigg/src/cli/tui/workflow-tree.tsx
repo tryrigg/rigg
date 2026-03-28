@@ -2,12 +2,13 @@ import { Box, Text } from "ink"
 import Spinner from "ink-spinner"
 import { useMemo } from "react"
 
+import type { NodeKind } from "../../session/schema"
 import type { CompletedOutput, LiveLogEntry, LiveOutput, OutputPreview } from "../state"
 import { kindColor, statusSymbol, type DisplayStatus } from "./symbols"
 import { chars, colors } from "./theme"
 import type { TreeEntry } from "./tree"
 
-const KIND_LABELS: Record<string, string> = {
+const KIND_LABELS = {
   shell: "cmd",
   claude: "claude",
   codex: "codex",
@@ -20,7 +21,7 @@ const KIND_LABELS: Record<string, string> = {
   parallel: "parallel",
   branch: "branch",
   branch_case: "case",
-}
+} satisfies Record<NodeKind, string>
 const BASE = "  "
 
 type FlatLine = { isStderr: boolean; muted: boolean; text: string }

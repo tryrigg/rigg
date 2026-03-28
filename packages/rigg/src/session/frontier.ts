@@ -188,11 +188,12 @@ export function createFrontierNode(
   cwd: string,
   detailOverride?: string,
 ): FrontierNode {
+  const detail = detailOverride ?? summarizeFrontierDetail(step)
   const base = {
-    detail: detailOverride ?? summarizeFrontierDetail(step),
     frame_id: frameId,
     node_path: nodePath,
-    user_id: step.id ?? null,
+    ...(detail !== undefined ? { detail } : {}),
+    ...(step.id !== undefined ? { user_id: step.id } : {}),
   }
 
   switch (step.type) {
@@ -200,9 +201,9 @@ export function createFrontierNode(
       return {
         ...base,
         cwd,
-        model: step.with.model ?? null,
+        ...(step.with.model !== undefined ? { model: step.with.model } : {}),
         node_kind: "claude",
-        prompt_preview: frontierPromptPreview(step, context),
+        ...optionalPreview(step, context),
       }
     case "codex":
       return {
@@ -210,29 +211,29 @@ export function createFrontierNode(
         collaboration_mode: step.with.kind === "turn" ? (step.with.collaboration_mode ?? "default") : undefined,
         cwd,
         kind: step.with.kind,
-        model: step.with.model ?? null,
+        ...(step.with.model !== undefined ? { model: step.with.model } : {}),
         node_kind: "codex",
-        prompt_preview: frontierPromptPreview(step, context),
+        ...optionalPreview(step, context),
       }
     case "cursor":
       return {
         ...base,
         cwd,
         mode: step.with.mode,
-        model: step.with.model ?? null,
+        ...(step.with.model !== undefined ? { model: step.with.model } : {}),
         node_kind: "cursor",
-        prompt_preview: frontierPromptPreview(step, context),
+        ...optionalPreview(step, context),
       }
     case "opencode":
       return {
         ...base,
         agent: step.with.agent ?? "build",
         cwd,
-        model: step.with.model ?? null,
+        ...(step.with.model !== undefined ? { model: step.with.model } : {}),
         node_kind: "opencode",
         permission_mode: step.with.permission_mode ?? "default",
-        prompt_preview: frontierPromptPreview(step, context),
-        variant: step.with.variant ?? null,
+        ...optionalPreview(step, context),
+        ...(step.with.variant !== undefined ? { variant: step.with.variant } : {}),
       }
     case "shell":
       return { ...base, node_kind: "shell" }
@@ -241,7 +242,7 @@ export function createFrontierNode(
   }
 }
 
-export function summarizeFrontierDetail(step: ActionNode): string | null {
+export function summarizeFrontierDetail(step: ActionNode): string | undefined {
   if (step.type === "shell") {
     return step.with.command
   }
@@ -268,12 +269,12 @@ export function summarizeFrontierDetail(step: ActionNode): string | null {
   return "codex turn"
 }
 
-function frontierPromptPreview(step: ActionNode, context: RenderContext): string | null {
+function frontierPromptPreview(step: ActionNode, context: RenderContext): string | undefined {
   if (step.type === "claude" || step.type === "cursor" || step.type === "opencode") {
     return preview(renderStringSafely(step.with.prompt, context))
   }
   if (step.type !== "codex") {
-    return null
+    return undefined
   }
   if (step.with.kind === "review") {
     const target = step.with.target
@@ -282,4 +283,9 @@ function frontierPromptPreview(step: ActionNode, context: RenderContext): string
     return `review commit ${renderStringSafely(target.sha, context)}`
   }
   return preview(renderStringSafely(step.with.prompt, context))
+}
+
+function optionalPreview(step: ActionNode, context: RenderContext): { prompt_preview?: string } {
+  const promptPreview = frontierPromptPreview(step, context)
+  return promptPreview === undefined ? {} : { prompt_preview: promptPreview }
 }

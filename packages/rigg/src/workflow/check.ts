@@ -25,6 +25,7 @@ import {
   type ResultShape,
 } from "./shape"
 import {
+  isActionStep,
   isRetryableStep,
   type ActionNode,
   type BranchCase,
@@ -179,15 +180,16 @@ function validateStep(
   validateStepExpressions(step, ctx.filePath, scope, ctx.errors)
   validateRetry(ctx, step)
 
+  if (isActionStep(step)) {
+    const result = validateActionStep(step, ctx.filePath, scope, ctx.errors)
+    return {
+      ...result,
+      guaranteedResultShape: step.if === undefined ? result.resultShape : { kind: "none" },
+    }
+  }
+
   const result = (() => {
     switch (step.type) {
-      case "shell":
-      case "write_file":
-      case "claude":
-      case "codex":
-      case "cursor":
-      case "opencode":
-        return validateActionStep(step, ctx.filePath, scope, ctx.errors)
       case "workflow":
         return validateWorkflowStep(ctx, step, scope)
       case "group":

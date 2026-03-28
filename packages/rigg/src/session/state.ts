@@ -14,8 +14,6 @@ export type MutableNodeSnapshot = NodeSnapshot
 
 export function initRunState(runId: string, workflowId: string, startedAt: string): MutableRunState {
   return {
-    active_barrier: null,
-    active_interaction: null,
     finished_at: null,
     nodes: [],
     phase: "running",
@@ -23,6 +21,7 @@ export function initRunState(runId: string, workflowId: string, startedAt: strin
     run_id: runId,
     started_at: startedAt,
     status: "running",
+    waiting: { kind: "none" },
     workflow_id: workflowId,
   }
 }
@@ -36,8 +35,7 @@ export function finishRun(
   state.status = status
   state.reason = reason
   state.finished_at = finishedAt
-  state.active_barrier = null
-  state.active_interaction = null
+  state.waiting = { kind: "none" }
   recalcPhase(state)
 }
 
@@ -73,12 +71,12 @@ export function clearStaleChildNodes(state: MutableRunState, nodePath: NodePath,
 }
 
 export function setBarrier(state: MutableRunState, barrier: StepBarrier | null): void {
-  state.active_barrier = barrier
+  state.waiting = barrier === null ? { kind: "none" } : { barrier, kind: "barrier" }
   recalcPhase(state)
 }
 
 export function setInteraction(state: MutableRunState, interaction: PendingInteraction | null): void {
-  state.active_interaction = interaction
+  state.waiting = interaction === null ? { kind: "none" } : { interaction, kind: "interaction" }
   recalcPhase(state)
 }
 
@@ -96,14 +94,15 @@ function deriveRunPhase(state: RunSnapshot): RunPhase {
   if (state.status === "aborted") {
     return "aborted"
   }
-  if (state.active_interaction != null) {
-    return phaseForInteraction(state.active_interaction)
-  }
-  if (state.active_barrier != null) {
-    return "waiting_for_barrier"
-  }
 
-  return "running"
+  switch (state.waiting.kind) {
+    case "interaction":
+      return phaseForInteraction(state.waiting.interaction)
+    case "barrier":
+      return "waiting_for_barrier"
+    case "none":
+      return "running"
+  }
 }
 
 function phaseForInteraction(interaction: PendingInteraction): RunPhase {

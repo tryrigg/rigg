@@ -363,6 +363,17 @@ export const WorkflowDocumentSchema: z.ZodType<WorkflowDocument> = z
 export type ActionNode = ClaudeNode | CodexNode | CursorNode | OpenCodeNode | ShellNode | WriteFileNode
 export type RetryableStep = ActionNode | WorkflowNode
 
+export function isActionStep(step: WorkflowStep): step is ActionNode {
+  return (
+    step.type === "shell" ||
+    step.type === "write_file" ||
+    step.type === "claude" ||
+    step.type === "codex" ||
+    step.type === "cursor" ||
+    step.type === "opencode"
+  )
+}
+
 export function isRetryableStep(step: WorkflowStep): step is RetryableStep {
   return (
     step.type === "shell" ||

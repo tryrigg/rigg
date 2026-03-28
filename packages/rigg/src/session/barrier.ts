@@ -7,7 +7,15 @@ import { isInterrupt, runAborted, interrupt } from "./error"
 import { currentNodeSnapshot } from "./node"
 import type { RunControlHandler, RunControlResolution, RunEvent } from "./event"
 import { snapControl } from "./snap"
-import type { BarrierReason, CompletedNodeSummary, FrontierNode, PendingInteraction, RunSnapshot } from "./schema"
+import {
+  currentBarrier,
+  currentInteraction,
+  type BarrierReason,
+  type CompletedNodeSummary,
+  type FrontierNode,
+  type PendingInteraction,
+  type RunSnapshot,
+} from "./schema"
 import { setBarrier, setInteraction, upsertNode } from "./state"
 
 export type ActionContext = {
@@ -198,7 +206,7 @@ export async function waitForBarrier(
           throw new Error(`control handler returned ${resolution.kind} for step_barrier`)
         }
       } finally {
-        if (environment.runState.active_barrier?.barrier_id === barrier.barrier_id) {
+        if (currentBarrier(environment.runState)?.barrier_id === barrier.barrier_id) {
           setBarrier(environment.runState, null)
         }
       }
@@ -271,7 +279,7 @@ export async function resolveInteraction(
           nodeSnapshot.waiting_for = null
           upsertNode(environment.runState, nodeSnapshot)
         }
-        if (environment.runState.active_interaction?.interaction_id === interaction.interaction_id) {
+        if (currentInteraction(environment.runState)?.interaction_id === interaction.interaction_id) {
           setInteraction(environment.runState, null)
         }
       }

@@ -635,28 +635,31 @@ describe("annotateNext", () => {
       },
     ])
     const snapshot: RunSnapshot = runSnapshot({
-      active_barrier: {
-        barrier_id: "barrier-1",
-        completed: null,
-        created_at: "2026-03-15T10:00:00.000Z",
-        frame_id: "root",
-        next: [
-          {
-            detail: "echo left",
-            frame_id: "root",
-            node_kind: "shell",
-            node_path: "/0/0/0",
-            user_id: "left-step",
-          },
-          {
-            detail: "echo right",
-            frame_id: "root",
-            node_kind: "shell",
-            node_path: "/0/1/0",
-            user_id: "right-step",
-          },
-        ],
-        reason: "run_started",
+      waiting: {
+        barrier: {
+          barrier_id: "barrier-1",
+          completed: null,
+          created_at: "2026-03-15T10:00:00.000Z",
+          frame_id: "root",
+          next: [
+            {
+              detail: "echo left",
+              frame_id: "root",
+              node_kind: "shell",
+              node_path: "/0/0/0",
+              user_id: "left-step",
+            },
+            {
+              detail: "echo right",
+              frame_id: "root",
+              node_kind: "shell",
+              node_path: "/0/1/0",
+              user_id: "right-step",
+            },
+          ],
+          reason: "run_started",
+        },
+        kind: "barrier",
       },
       phase: "waiting_for_barrier",
       status: "running",

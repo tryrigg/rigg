@@ -1,14 +1,20 @@
 import { childPath, rootPath } from "../../workflow/id"
 import { StepKind, isRetryableStep, type WorkflowDocument, type WorkflowStep } from "../../workflow/schema"
 import { workflowById, type WorkflowProject } from "../../project"
-import type { NodeStatus, RunSnapshot, NodeSnapshot } from "../../session/schema"
+import {
+  currentBarrier,
+  type NodeKind,
+  type NodeStatus,
+  type RunSnapshot,
+  type NodeSnapshot,
+} from "../../session/schema"
 import { formatLoopReason } from "../out"
 import type { RetryingState } from "../state"
 import { formatDuration } from "./symbols"
 
 type TreeStatus = NodeStatus | "not_started" | "retrying"
 
-export const ACTION_KINDS = new Set<string>([
+export const ACTION_KINDS = new Set<NodeKind>([
   StepKind.Shell,
   StepKind.Claude,
   StepKind.Codex,
@@ -16,7 +22,7 @@ export const ACTION_KINDS = new Set<string>([
   StepKind.OpenCode,
   StepKind.WriteFile,
 ])
-export const SUMMARY_KINDS = new Set<string>([
+export const SUMMARY_KINDS = new Set<NodeKind>([
   StepKind.Shell,
   StepKind.Claude,
   StepKind.Codex,
@@ -39,7 +45,7 @@ export type TreeEntry = {
   label: string
   suffix: string
   nodePath: string
-  nodeKind: string
+  nodeKind: NodeKind
   isActive: boolean
   isNext: boolean
   meta?: string | undefined
@@ -455,7 +461,7 @@ function annotateNext(entries: TreeEntry[], snapshot: RunSnapshot | null): void 
     return
   }
 
-  const barrierFrontier = snapshot?.active_barrier?.next ?? []
+  const barrierFrontier = snapshot === null ? [] : (currentBarrier(snapshot)?.next ?? [])
   if (barrierFrontier.length > 0) {
     const frontierNodePaths = new Set(barrierFrontier.map((node) => node.node_path))
     for (const entry of entries) {

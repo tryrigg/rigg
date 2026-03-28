@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
 import type { RunEvent } from "../session/event"
-import type { NodeSnapshot, NodeStatus, RunSnapshot } from "../session/schema"
+import type { NodeKind, NodeSnapshot, NodeStatus, RunSnapshot } from "../session/schema"
 import { compactJson, parseJson, stringifyOptional } from "../util/json"
 import {
   type EventPayload,
@@ -20,7 +20,7 @@ type StepState = {
   durationMs: number | null
   exitCode: number | null
   finishedAt: string | null
-  nodeKind: string
+  nodeKind: NodeKind
   payload: StepPayload
   startedAt: string | null
   status: NodeStatus
@@ -132,7 +132,7 @@ function ensureStep(
   state: BatchState,
   nodePath: string,
   attempt: number,
-  nodeKind: string,
+  nodeKind: NodeKind,
   userId: string | null,
 ): StepState {
   const found = state.stepStates.get(stepKey(nodePath, attempt))

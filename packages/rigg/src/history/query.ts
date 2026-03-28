@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, gte, lt, notExists, or } from "drizzle-orm"
 import { alias } from "drizzle-orm/sqlite-core"
 
-import type { NodeStatus, RunReason, RunStatus } from "../session/schema"
+import { NodeKindSchema, type NodeKind, type NodeStatus, type RunReason, type RunStatus } from "../session/schema"
 import type { Db } from "../storage/db"
 import { stringifyOptional } from "../util/json"
 import { formatOptionalTimestampMs, formatTimestampMs } from "../util/time"
@@ -44,7 +44,7 @@ export type Step = {
   durationMs: number | null
   exitCode: number | null
   finishedAt: string | null
-  nodeKind: string
+  nodeKind: NodeKind
   nodePath: string
   resultJson: string | null
   startedAt: string | null
@@ -138,7 +138,7 @@ function stepFromRow(row: StepRow): Step {
     durationMs: row.durationMs,
     exitCode: row.exitCode,
     finishedAt: formatOptionalTimestampMs(row.finishedAt),
-    nodeKind: row.nodeKind,
+    nodeKind: NodeKindSchema.parse(row.nodeKind),
     nodePath: row.nodePath,
     resultJson: stringifyOptional(row.payload.result),
     startedAt: formatOptionalTimestampMs(row.startedAt),

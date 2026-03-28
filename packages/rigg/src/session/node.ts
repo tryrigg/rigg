@@ -5,7 +5,7 @@ import { elapsedMs, timestampNow } from "../util/time"
 import { isInterrupt, normalizeExecError, runError } from "./error"
 import type { RunEvent } from "./event"
 import type { StepBinding } from "./render"
-import type { CompletedNodeSummary, NodeProgress, NodeSnapshot, NodeStatus, RunSnapshot } from "./schema"
+import type { CompletedNodeSummary, NodeKind, NodeProgress, NodeSnapshot, NodeStatus, RunSnapshot } from "./schema"
 import { nextAttempt, recalcPhase, upsertNode } from "./state"
 
 export type NodeLifecycle = {
@@ -36,22 +36,7 @@ export function recordSkippedStep(
   snapshot.stderr = reason
   upsertNode(runState, snapshot)
 
-  if (step.type === "group" || step.type === "loop") {
-    markBlockSkipped(runState, step.steps, nodePath, project)
-  }
-  if (step.type === "branch") {
-    for (const [index, caseNode] of step.cases.entries()) {
-      markCaseSkipped(runState, caseNode, `${nodePath}/${index}`, project)
-    }
-  }
-  if (step.type === "parallel") {
-    for (const [index, branch] of step.branches.entries()) {
-      markBlockSkipped(runState, branch.steps, `${nodePath}/${index}`, project)
-    }
-  }
-  if (step.type === "workflow") {
-    markSkippedWorkflow(runState, step, nodePath, project, [])
-  }
+  skipStepChildren(runState, step, nodePath, project)
 
   emitEvent({
     kind: "node_skipped",
@@ -67,7 +52,7 @@ export function startNode(
   runState: RunSnapshot,
   step: WorkflowStep,
   nodePath: NodePath,
-  nodeKind: string,
+  nodeKind: NodeKind,
   emitEvent: EmitEvent,
 ): NodeLifecycle {
   const lifecycle = {
@@ -89,7 +74,7 @@ export function startNode(
 export function startSyntheticNode(
   runState: RunSnapshot,
   nodePath: NodePath,
-  nodeKind: string,
+  nodeKind: NodeKind,
   emitEvent: EmitEvent,
   userId?: string,
 ): NodeLifecycle {
@@ -143,7 +128,7 @@ export function finishThrownControlNode(
 export function createNodeSnapshot(
   userId: string | undefined,
   nodePath: NodePath,
-  nodeKind: string,
+  nodeKind: NodeKind,
   status: NodeStatus,
   lifecycle: NodeLifecycle,
 ): NodeSnapshot {
@@ -230,23 +215,7 @@ function markBlockSkipped(
     snapshot.duration_ms = 0
     snapshot.finished_at = snapshot.started_at
     upsertNode(runState, snapshot)
-
-    if (step.type === "group" || step.type === "loop") {
-      markBlockSkipped(runState, step.steps, nodePath, project, activeWorkflowIds)
-    }
-    if (step.type === "branch") {
-      for (const [caseIndex, caseNode] of step.cases.entries()) {
-        markCaseSkipped(runState, caseNode, `${nodePath}/${caseIndex}`, project, activeWorkflowIds)
-      }
-    }
-    if (step.type === "parallel") {
-      for (const [branchIndex, branch] of step.branches.entries()) {
-        markBlockSkipped(runState, branch.steps, `${nodePath}/${branchIndex}`, project, activeWorkflowIds)
-      }
-    }
-    if (step.type === "workflow") {
-      markSkippedWorkflow(runState, step, nodePath, project, activeWorkflowIds)
-    }
+    skipStepChildren(runState, step, nodePath, project, activeWorkflowIds)
   }
 }
 
@@ -283,4 +252,34 @@ function markSkippedWorkflow(
 
 function formatWorkflowCycle(workflowIds: string[]): string {
   return workflowIds.join(" -> ")
+}
+
+function skipStepChildren(
+  runState: RunSnapshot,
+  step: WorkflowStep,
+  nodePath: NodePath,
+  project?: WorkflowProject,
+  activeWorkflowIds: string[] = [],
+): void {
+  switch (step.type) {
+    case "group":
+    case "loop":
+      markBlockSkipped(runState, step.steps, nodePath, project, activeWorkflowIds)
+      return
+    case "branch":
+      for (const [index, caseNode] of step.cases.entries()) {
+        markCaseSkipped(runState, caseNode, `${nodePath}/${index}`, project, activeWorkflowIds)
+      }
+      return
+    case "parallel":
+      for (const [index, branch] of step.branches.entries()) {
+        markBlockSkipped(runState, branch.steps, `${nodePath}/${index}`, project, activeWorkflowIds)
+      }
+      return
+    case "workflow":
+      markSkippedWorkflow(runState, step, nodePath, project, activeWorkflowIds)
+      return
+    default:
+      return
+  }
 }

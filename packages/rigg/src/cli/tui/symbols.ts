@@ -1,6 +1,6 @@
 import figures from "figures"
 
-import type { NodeStatus, RunStatus } from "../../session/schema"
+import type { NodeKind, NodeStatus, RunStatus } from "../../session/schema"
 import { formatDurationText } from "../../history/render"
 import { colors, kindColors } from "./theme"
 
@@ -32,9 +32,13 @@ export function statusSymbol(status: DisplayStatus): StatusSymbol {
 }
 
 export function kindColor(kind: string): string {
-  return kindColors[kind] ?? "dim"
+  return isNodeKind(kind) ? kindColors[kind] : "dim"
 }
 
 export function formatDuration(ms: number): string {
   return formatDurationText(ms)
+}
+
+function isNodeKind(kind: string): kind is NodeKind {
+  return kind in kindColors
 }

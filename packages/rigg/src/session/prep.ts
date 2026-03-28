@@ -2,7 +2,6 @@ import { renderTemplate, renderString } from "../workflow/expr"
 import { callFrame, type FrameId, type NodePath } from "../workflow/id"
 import type { WorkflowProject } from "../project"
 import type {
-  ActionNode,
   BranchCase,
   BranchNode,
   GroupNode,
@@ -12,6 +11,7 @@ import type {
   WorkflowNode,
   WorkflowStep,
 } from "../workflow/schema"
+import { isActionStep, type ActionNode } from "../workflow/schema"
 import { normalizeError } from "../util/error"
 import { evalError, stepFailed } from "./error"
 import type { RenderContext, StepBinding } from "./render"
@@ -92,19 +92,16 @@ export function prepareStep(
     return { frontier: [], kind: "skipped", step }
   }
 
+  if (isActionStep(step)) {
+    return {
+      env: preparedContext.env,
+      frontier: [createFrontierNode(step, nodePath, scope.frameId, preparedContext.context, cwd)],
+      kind: "action",
+      step,
+    }
+  }
+
   switch (step.type) {
-    case "shell":
-    case "claude":
-    case "codex":
-    case "cursor":
-    case "opencode":
-    case "write_file":
-      return {
-        env: preparedContext.env,
-        frontier: [createFrontierNode(step, nodePath, scope.frameId, preparedContext.context, cwd)],
-        kind: "action",
-        step,
-      }
     case "group":
       return {
         env: preparedContext.env,

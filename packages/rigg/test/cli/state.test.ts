@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import { applyEvent, createState, previewOutput } from "../../src/cli/state"
+import type { NodeSnapshot } from "../../src/session/schema"
 import { runSnapshot } from "../fixture/builders"
 
 describe("cli/state", () => {
@@ -176,7 +177,7 @@ describe("cli/state", () => {
       snapshot,
     })
 
-    const failedNode = {
+    const failedNode: NodeSnapshot = {
       attempt: 1,
       duration_ms: 15,
       exit_code: 1,
@@ -565,7 +566,7 @@ describe("cli/state", () => {
 
   test("applyEvent appends an auto-continue event for completed barriers", () => {
     const state = createState("auto_continue")
-    const completedNode = {
+    const completedNode: NodeSnapshot = {
       attempt: 1,
       duration_ms: 1200,
       exit_code: 0,
@@ -625,39 +626,42 @@ describe("cli/state", () => {
       },
       kind: "barrier_reached",
       snapshot: runSnapshot({
-        active_barrier: {
-          barrier_id: "barrier-1",
-          completed: {
-            node_kind: "shell",
-            node_path: "/0",
-            result: null,
-            status: "succeeded",
-            user_id: "collect_context",
-          },
-          created_at: "2026-03-15T10:01:01.000Z",
-          frame_id: "root",
-          next: [
-            {
-              detail: "echo hi",
-              frame_id: "root",
+        waiting: {
+          barrier: {
+            barrier_id: "barrier-1",
+            completed: {
               node_kind: "shell",
-              node_path: "/1",
-              user_id: "draft_shell",
+              node_path: "/0",
+              result: null,
+              status: "succeeded",
+              user_id: "collect_context",
             },
-            {
-              collaboration_mode: "plan",
-              cwd: "/workspace",
-              detail: "codex turn · plan",
-              frame_id: "root",
-              kind: "turn",
-              model: "gpt-5.4",
-              node_kind: "codex",
-              node_path: "/2",
-              prompt_preview: "Draft a plan",
-              user_id: "draft_plan",
-            },
-          ],
-          reason: "step_completed",
+            created_at: "2026-03-15T10:01:01.000Z",
+            frame_id: "root",
+            next: [
+              {
+                detail: "echo hi",
+                frame_id: "root",
+                node_kind: "shell",
+                node_path: "/1",
+                user_id: "draft_shell",
+              },
+              {
+                collaboration_mode: "plan",
+                cwd: "/workspace",
+                detail: "codex turn · plan",
+                frame_id: "root",
+                kind: "turn",
+                model: "gpt-5.4",
+                node_kind: "codex",
+                node_path: "/2",
+                prompt_preview: "Draft a plan",
+                user_id: "draft_plan",
+              },
+            ],
+            reason: "step_completed",
+          },
+          kind: "barrier",
         },
         nodes: [completedNode],
       }),
@@ -672,7 +676,7 @@ describe("cli/state", () => {
 
   test("applyEvent includes cursor model in auto-continue frontier labels", () => {
     const state = createState("auto_continue")
-    const completedNode = {
+    const completedNode: NodeSnapshot = {
       attempt: 1,
       duration_ms: 1200,
       exit_code: 0,
@@ -724,31 +728,34 @@ describe("cli/state", () => {
       },
       kind: "barrier_reached",
       snapshot: runSnapshot({
-        active_barrier: {
-          barrier_id: "barrier-1",
-          completed: {
-            node_kind: "shell",
-            node_path: "/0",
-            result: null,
-            status: "succeeded",
-            user_id: "collect_context",
-          },
-          created_at: "2026-03-15T10:01:01.000Z",
-          frame_id: "root",
-          next: [
-            {
-              cwd: "/workspace",
-              detail: "cursor ask",
-              frame_id: "root",
-              model: "composer-2",
-              mode: "ask",
-              node_kind: "cursor",
-              node_path: "/1",
-              prompt_preview: "Question?",
-              user_id: "draft_cursor",
+        waiting: {
+          barrier: {
+            barrier_id: "barrier-1",
+            completed: {
+              node_kind: "shell",
+              node_path: "/0",
+              result: null,
+              status: "succeeded",
+              user_id: "collect_context",
             },
-          ],
-          reason: "step_completed",
+            created_at: "2026-03-15T10:01:01.000Z",
+            frame_id: "root",
+            next: [
+              {
+                cwd: "/workspace",
+                detail: "cursor ask",
+                frame_id: "root",
+                model: "composer-2",
+                mode: "ask",
+                node_kind: "cursor",
+                node_path: "/1",
+                prompt_preview: "Question?",
+                user_id: "draft_cursor",
+              },
+            ],
+            reason: "step_completed",
+          },
+          kind: "barrier",
         },
         nodes: [completedNode],
       }),
@@ -763,7 +770,7 @@ describe("cli/state", () => {
 
   test("applyEvent includes claude model in auto-continue frontier labels", () => {
     const state = createState("auto_continue")
-    const completedNode = {
+    const completedNode: NodeSnapshot = {
       attempt: 1,
       duration_ms: 1200,
       exit_code: 0,
@@ -814,30 +821,33 @@ describe("cli/state", () => {
       },
       kind: "barrier_reached",
       snapshot: runSnapshot({
-        active_barrier: {
-          barrier_id: "barrier-1",
-          completed: {
-            node_kind: "shell",
-            node_path: "/0",
-            result: null,
-            status: "succeeded",
-            user_id: "collect_context",
-          },
-          created_at: "2026-03-15T10:01:01.000Z",
-          frame_id: "root",
-          next: [
-            {
-              cwd: "/workspace",
-              detail: "claude",
-              frame_id: "root",
-              model: "claude-opus-4-6",
-              node_kind: "claude",
-              node_path: "/1",
-              prompt_preview: "Implement the change",
-              user_id: "draft_claude",
+        waiting: {
+          barrier: {
+            barrier_id: "barrier-1",
+            completed: {
+              node_kind: "shell",
+              node_path: "/0",
+              result: null,
+              status: "succeeded",
+              user_id: "collect_context",
             },
-          ],
-          reason: "step_completed",
+            created_at: "2026-03-15T10:01:01.000Z",
+            frame_id: "root",
+            next: [
+              {
+                cwd: "/workspace",
+                detail: "claude",
+                frame_id: "root",
+                model: "claude-opus-4-6",
+                node_kind: "claude",
+                node_path: "/1",
+                prompt_preview: "Implement the change",
+                user_id: "draft_claude",
+              },
+            ],
+            reason: "step_completed",
+          },
+          kind: "barrier",
         },
         nodes: [completedNode],
       }),
@@ -852,7 +862,7 @@ describe("cli/state", () => {
 
   test("applyEvent leaves manual barriers unchanged", () => {
     const state = createState("manual")
-    const completedNode = {
+    const completedNode: NodeSnapshot = {
       attempt: 1,
       duration_ms: 1200,
       exit_code: 0,

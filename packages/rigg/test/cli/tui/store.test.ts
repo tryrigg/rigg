@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 
 import { createStore } from "../../../src/cli/tui/store"
+import type { NodeSnapshot } from "../../../src/session/schema"
 import { runSnapshot } from "../../fixture/builders"
 
 describe("Store", () => {
@@ -46,7 +47,7 @@ describe("Store", () => {
     const snapshot = runSnapshot()
     store.dispatch({ kind: "run_started", snapshot })
 
-    const node = {
+    const node: NodeSnapshot = {
       attempt: 1,
       duration_ms: 1200,
       exit_code: 0,
@@ -80,7 +81,7 @@ describe("Store", () => {
     const store = createStore()
     store.dispatch({ kind: "run_started", snapshot: runSnapshot() })
 
-    const groupNode = {
+    const groupNode: NodeSnapshot = {
       attempt: 1,
       duration_ms: 1200,
       exit_code: null,
@@ -111,7 +112,7 @@ describe("Store", () => {
     const store = createStore()
     store.dispatch({ kind: "run_started", snapshot: runSnapshot() })
 
-    const groupNode = {
+    const groupNode: NodeSnapshot = {
       attempt: 1,
       duration_ms: 1200,
       exit_code: null,

@@ -1,3 +1,5 @@
+import type { NodeKind } from "../../session/schema"
+
 export const colors = {
   brand: "cyan",
   success: "green",
@@ -8,7 +10,7 @@ export const colors = {
   file: "blue",
 } as const
 
-export const kindColors: Record<string, string> = {
+export const kindColors = {
   shell: "yellow",
   claude: "magenta",
   codex: "blue",
@@ -21,7 +23,7 @@ export const kindColors: Record<string, string> = {
   parallel: "dim",
   branch: "dim",
   branch_case: "dim",
-}
+} satisfies Record<NodeKind, string>
 
 export const chars = {
   rule: "─",

@@ -1,8 +1,8 @@
 import { childPath, rootPath } from "../../workflow/id"
 import { StepKind, type WorkflowDocument, type WorkflowStep } from "../../workflow/schema"
-import type { NodeSnapshot, RunSnapshot } from "../../session/schema"
+import { currentBarrier, type NodeKind, type NodeSnapshot, type RunSnapshot } from "../../session/schema"
 
-const ACTION_STEP_KINDS = new Set<string>([
+const ACTION_STEP_KINDS = new Set<NodeKind>([
   StepKind.Shell,
   StepKind.Claude,
   StepKind.Codex,
@@ -59,7 +59,7 @@ function collectActionNodes(
   }
 }
 
-function isActionNodeKind(nodeKind: string): boolean {
+function isActionNodeKind(nodeKind: NodeKind): boolean {
   return ACTION_STEP_KINDS.has(nodeKind)
 }
 
@@ -101,7 +101,7 @@ export function summarize(workflow: WorkflowDocument, snapshot: RunSnapshot | nu
     total += Math.max(0, knownExecutions(node) - staticExecutions)
   }
 
-  for (const frontierNode of snapshot.active_barrier?.next ?? []) {
+  for (const frontierNode of currentBarrier(snapshot)?.next ?? []) {
     if (!isActionNodeKind(frontierNode.node_kind)) {
       continue
     }

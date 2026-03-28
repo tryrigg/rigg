@@ -1,6 +1,6 @@
 import { Box, Text, useStdout } from "ink"
 
-import type { RunSnapshot, RunStatus } from "../../session/schema"
+import { currentBarrier, currentInteraction, type RunSnapshot, type RunStatus } from "../../session/schema"
 import type { ApprovalMode } from "../state"
 import { headerLine, renderRule } from "./layout"
 
@@ -19,10 +19,10 @@ function statusColor(status: RunStatus | string): string {
 }
 
 function statusLabel(snapshot: RunSnapshot, barrierMode: ApprovalMode): string {
-  if (snapshot.active_interaction !== null) {
+  if (currentInteraction(snapshot) !== null) {
     return "waiting for input"
   }
-  if (snapshot.active_barrier !== null && barrierMode === "manual") {
+  if (currentBarrier(snapshot) !== null && barrierMode === "manual") {
     return "waiting for approval"
   }
   return snapshot.status

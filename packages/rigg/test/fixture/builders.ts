@@ -29,8 +29,6 @@ export function workflowProject(
 
 export function runSnapshot(overrides: Partial<RunSnapshot> = {}): RunSnapshot {
   return {
-    active_barrier: overrides.active_barrier ?? null,
-    active_interaction: overrides.active_interaction ?? null,
     finished_at: overrides.finished_at ?? null,
     nodes: overrides.nodes ?? [],
     phase: overrides.phase ?? "running",
@@ -38,6 +36,7 @@ export function runSnapshot(overrides: Partial<RunSnapshot> = {}): RunSnapshot {
     run_id: overrides.run_id ?? "run-123",
     started_at: overrides.started_at ?? "2026-03-14T00:00:00.000Z",
     status: overrides.status ?? "running",
+    waiting: overrides.waiting ?? { kind: "none" },
     workflow_id: overrides.workflow_id ?? "workflow",
   }
 }

@@ -16,8 +16,11 @@ type RenderedTree = {
       getSnapshot: () => {
         state: {
           snapshot: {
-            active_interaction: { interaction_id: string } | null
             phase?: string | null
+            waiting:
+              | { kind: "none" }
+              | { interaction: { interaction_id: string }; kind: "interaction" }
+              | { barrier: { barrier_id: string }; kind: "barrier" }
           } | null
         }
       }
@@ -569,10 +572,13 @@ describe("cli/session", () => {
       snapshot: runSnapshot(),
     })
 
-    expect(rendered(renderedTree).props.store.getSnapshot().state.snapshot?.active_interaction?.interaction_id).toBe(
-      "question-1",
-    )
-    expect(rendered(renderedTree).props.store.getSnapshot().state.snapshot?.phase).toBe("waiting_for_question")
+    const firstSnapshot = rendered(renderedTree).props.store.getSnapshot().state.snapshot
+    expect(firstSnapshot?.waiting.kind).toBe("interaction")
+    if (firstSnapshot?.waiting.kind !== "interaction") {
+      throw new Error("missing interaction")
+    }
+    expect(firstSnapshot.waiting.interaction.interaction_id).toBe("question-1")
+    expect(firstSnapshot.phase).toBe("waiting_for_question")
 
     rendered(renderedTree).props.onResolveInteraction("question-1", {
       answers: { name: { answers: ["Rigg"] } },
@@ -583,7 +589,7 @@ describe("cli/session", () => {
       answers: { name: { answers: ["Rigg"] } },
       kind: "user_input",
     })
-    expect(rendered(renderedTree).props.store.getSnapshot().state.snapshot?.active_interaction).toBeNull()
+    expect(rendered(renderedTree).props.store.getSnapshot().state.snapshot?.waiting.kind).toBe("none")
 
     session.close()
   })
@@ -638,14 +644,17 @@ describe("cli/session", () => {
       snapshot: runSnapshot(),
     })
 
-    expect(rendered(renderedTree).props.store.getSnapshot().state.snapshot?.active_interaction?.interaction_id).toBe(
-      "question-1",
-    )
+    const secondSnapshot = rendered(renderedTree).props.store.getSnapshot().state.snapshot
+    expect(secondSnapshot?.waiting.kind).toBe("interaction")
+    if (secondSnapshot?.waiting.kind !== "interaction") {
+      throw new Error("missing interaction")
+    }
+    expect(secondSnapshot.waiting.interaction.interaction_id).toBe("question-1")
 
     controller.abort(new Error("pre-run prompt aborted"))
 
     await expect(pending).rejects.toThrow("pre-run prompt aborted")
-    expect(rendered(renderedTree).props.store.getSnapshot().state.snapshot?.active_interaction).toBeNull()
+    expect(rendered(renderedTree).props.store.getSnapshot().state.snapshot?.waiting.kind).toBe("none")
 
     session.close()
   })

@@ -3318,7 +3318,7 @@ describe("session/engine", () => {
       })
 
       expect(snapshot.status).toBe("failed")
-      expect(snapshot.active_interaction).toBeNull()
+      expect(snapshot.waiting.kind).toBe("none")
       expect(interactionCancelled).toBe(true)
       expect(snapshot.nodes.find((node) => node.user_id === "left_wait")?.status).toBe("interrupted")
       expect(snapshot.nodes.find((node) => node.user_id === "right_fail")?.status).toBe("failed")
@@ -3691,21 +3691,29 @@ describe("session/engine", () => {
 
       expect(finalSnapshot.status).toBe("succeeded")
       expect(runStartedSnapshot).toMatchObject({
-        active_barrier: null,
         nodes: [],
         phase: "running",
         status: "running",
+        waiting: { kind: "none" },
       })
       expect(barrierEvent?.snapshot).toMatchObject({
         phase: "waiting_for_barrier",
         status: "running",
+        waiting: { kind: "barrier" },
       })
-      expect(barrierEvent?.snapshot.active_barrier?.barrier_id).toBe(barrierEvent?.barrier.barrier_id)
+      if (barrierEvent?.snapshot.waiting.kind !== "barrier") {
+        throw new Error("missing barrier wait state")
+      }
+      expect(barrierEvent.snapshot.waiting.barrier.barrier_id).toBe(barrierEvent.barrier.barrier_id)
       expect(barrierRequestSnapshot?.snapshot).toMatchObject({
         phase: "waiting_for_barrier",
         status: "running",
+        waiting: { kind: "barrier" },
       })
-      expect(barrierRequestSnapshot?.snapshot.active_barrier?.barrier_id).toBe(barrierRequestSnapshot?.barrierId)
+      if (barrierRequestSnapshot?.snapshot.waiting.kind !== "barrier") {
+        throw new Error("missing barrier wait state")
+      }
+      expect(barrierRequestSnapshot.snapshot.waiting.barrier.barrier_id).toBe(barrierRequestSnapshot.barrierId)
     } finally {
       await rm(root, { force: true, recursive: true })
     }

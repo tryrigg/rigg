@@ -1,5 +1,5 @@
 import type { CursorNode } from "../../workflow/schema"
-import { createCursorRuntimeSession } from "../../cursor/runtime"
+import { createCursorRuntimeSession } from "../../provider/cursor/runtime"
 import type { RenderContext } from "../render"
 import type { ActionStepOutput, ProviderStepOptions } from "./shell"
 import { withProviderSession } from "./provider"

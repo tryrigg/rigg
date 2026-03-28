@@ -43,7 +43,7 @@ import {
 import { reviewOutput, checkDefs, checkValue } from "./input"
 import { checkIdent } from "./id"
 import { shapeFromSchema } from "./shape"
-import { parseModel } from "../opencode/model"
+import { parseModel } from "../provider/opencode/model"
 import { workflowById, type WorkflowProject } from "../project"
 import { normalizeError } from "../util/error"
 import { parseDuration } from "../util/duration"

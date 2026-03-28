@@ -1,5 +1,5 @@
 import type { OpenCodeNode } from "../../workflow/schema"
-import { createOpencodeRuntimeSession } from "../../opencode/runtime"
+import { createOpencodeRuntimeSession } from "../../provider/opencode/runtime"
 import type { RenderContext } from "../render"
 import type { ActionStepOutput, ProviderStepOptions } from "./shell"
 import { withProviderAbort, withProviderSession } from "./provider"

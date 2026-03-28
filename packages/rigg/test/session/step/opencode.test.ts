@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { AssistantMessage, Event, Part } from "@opencode-ai/sdk/v2"
 
-import type { OpencodeServerLease } from "../../../src/opencode/proc"
+import type { OpencodeServerLease } from "../../../src/provider/opencode/proc"
 import { runOpenCodeStep } from "../../../src/session/step/opencode"
 import { renderContext } from "../../fixture/builders"
 

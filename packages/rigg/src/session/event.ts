@@ -1,7 +1,7 @@
-import type { ClaudeProviderEvent } from "../claude/event"
-import type { CodexProviderEvent } from "../codex/event"
-import type { CursorProviderEvent } from "../cursor/event"
-import type { OpenCodeProviderEvent } from "../opencode/event"
+import type { ClaudeProviderEvent } from "../provider/claude/event"
+import type { CodexProviderEvent } from "../provider/codex/event"
+import type { CursorProviderEvent } from "../provider/cursor/event"
+import type { OpenCodeProviderEvent } from "../provider/opencode/event"
 import type { InteractionResolution } from "./interaction"
 import type { NodeSnapshot, PendingInteraction, RunSnapshot, StepBarrier } from "./schema"
 

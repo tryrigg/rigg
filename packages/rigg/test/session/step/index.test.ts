@@ -6,12 +6,12 @@ import { tmpdir } from "node:os"
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk"
 import type { AssistantMessage, Part } from "@opencode-ai/sdk/v2"
 
-import type { OpencodeServerLease } from "../../../src/opencode/proc"
+import type { OpencodeServerLease } from "../../../src/provider/opencode/proc"
 import type { ActionNode } from "../../../src/workflow/schema"
-import type { ClaudeProviderEvent } from "../../../src/claude/event"
-import type { CodexProviderEvent } from "../../../src/codex/event"
-import type { CursorProviderEvent } from "../../../src/cursor/event"
-import { createCodexRuntimeSession } from "../../../src/codex/runtime"
+import type { ClaudeProviderEvent } from "../../../src/provider/claude/event"
+import type { CodexProviderEvent } from "../../../src/provider/codex/event"
+import type { CursorProviderEvent } from "../../../src/provider/cursor/event"
+import { createCodexRuntimeSession } from "../../../src/provider/codex/runtime"
 import { RIGG_VERSION } from "../../../src/version"
 import { runActionStep } from "../../../src/session/step"
 import { renderContext } from "../../fixture/builders"
@@ -1141,7 +1141,7 @@ describe("session/step", () => {
     try {
       const binDir = await installFakeCodex(root, {})
       const scriptPath = join(root, "close-codex-session.ts")
-      const processModuleUrl = new URL("../../../src/codex/proc.ts", import.meta.url).href
+      const processModuleUrl = new URL("../../../src/provider/codex/proc.ts", import.meta.url).href
 
       await writeFile(
         scriptPath,

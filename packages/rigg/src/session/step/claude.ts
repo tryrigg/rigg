@@ -1,5 +1,5 @@
 import type { ClaudeNode } from "../../workflow/schema"
-import { createClaudeRuntimeSession } from "../../claude/runtime"
+import { createClaudeRuntimeSession } from "../../provider/claude/runtime"
 import type { RenderContext } from "../render"
 import type { ActionStepOutput, ProviderStepOptions } from "./shell"
 import { withProviderSession } from "./provider"

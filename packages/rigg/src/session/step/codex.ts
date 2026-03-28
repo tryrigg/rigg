@@ -1,5 +1,5 @@
 import type { CodexNode } from "../../workflow/schema"
-import { createCodexRuntimeSession } from "../../codex/runtime"
+import { createCodexRuntimeSession } from "../../provider/codex/runtime"
 import type { RenderContext } from "../render"
 import type { ActionStepOutput, ProviderStepOptions } from "./shell"
 import { withProviderSession } from "./provider"

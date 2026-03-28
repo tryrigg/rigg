@@ -1,3 +1,5 @@
+import { normalizeError } from "./error"
+
 export type JsonPrimitive = boolean | null | number | string
 export type JsonObject = { [key: string]: JsonValue }
 export type JsonValue = JsonPrimitive | JsonValue[] | JsonObject
@@ -13,6 +15,15 @@ export function stringifyJson(value: unknown): string {
 
 export function compactJson(value: unknown): string {
   return JSON.stringify(value)
+}
+
+export function parseJsonOutput(text: string | undefined, source: string): unknown {
+  try {
+    return parseJson((text ?? "").trim())
+  } catch (error) {
+    const cause = normalizeError(error)
+    throw new Error(`${source} step returned invalid JSON: ${cause.message}`, { cause })
+  }
 }
 
 export function isJsonObject(value: unknown): value is JsonObject {

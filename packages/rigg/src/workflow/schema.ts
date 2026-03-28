@@ -11,6 +11,7 @@ export const StepKind = {
   Cursor: "cursor",
   Group: "group",
   Loop: "loop",
+  OpenCode: "opencode",
   Parallel: "parallel",
   Shell: "shell",
   Workflow: "workflow",
@@ -77,6 +78,17 @@ const CursorWithSchema = z
     mode: z.enum(["agent", "ask", "plan"]).default("agent"),
     model: z.string().min(1).optional(),
     prompt: z.string().min(1),
+  })
+  .strict()
+
+const OpenCodePermissionModeSchema = z.enum(["default", "auto_approve"])
+const OpenCodeWithSchema = z
+  .object({
+    agent: z.string().min(1).optional(),
+    model: z.string().min(1).optional(),
+    permission_mode: OpenCodePermissionModeSchema.optional(),
+    prompt: z.string().min(1),
+    variant: z.string().min(1).optional(),
   })
   .strict()
 
@@ -147,6 +159,11 @@ export type CursorNode = RetryableBaseNode & {
   with: z.infer<typeof CursorWithSchema>
 }
 
+export type OpenCodeNode = RetryableBaseNode & {
+  type: "opencode"
+  with: z.infer<typeof OpenCodeWithSchema>
+}
+
 export type WriteFileNode = RetryableBaseNode & {
   type: "write_file"
   with: z.infer<typeof WriteFileWithSchema>
@@ -160,7 +177,7 @@ export type GroupNode = BaseNode & {
 
 export type LoopNode = BaseNode & {
   exports?: Record<string, string> | undefined
-  max: number
+  max?: number | undefined
   steps: WorkflowStep[]
   type: "loop"
   until?: string | undefined
@@ -203,6 +220,7 @@ export type WorkflowStep =
   | CursorNode
   | GroupNode
   | LoopNode
+  | OpenCodeNode
   | ParallelNode
   | ShellNode
   | WorkflowNode
@@ -259,6 +277,11 @@ const CursorNodeSchema: z.ZodType<CursorNode> = RetryableNodeSchema.extend({
   with: CursorWithSchema,
 }).strict()
 
+const OpenCodeNodeSchema: z.ZodType<OpenCodeNode> = RetryableNodeSchema.extend({
+  type: z.literal("opencode"),
+  with: OpenCodeWithSchema,
+}).strict()
+
 const WriteFileNodeSchema: z.ZodType<WriteFileNode> = RetryableNodeSchema.extend({
   type: z.literal("write_file"),
   with: WriteFileWithSchema,
@@ -280,11 +303,21 @@ const GroupNodeSchema: z.ZodType<GroupNode> = z.lazy(() =>
 const LoopNodeSchema: z.ZodType<LoopNode> = z.lazy(() =>
   BaseNodeSchema.extend({
     exports: ExportsSchema.optional(),
-    max: z.number().int().positive(),
+    max: z.number().int().positive().optional(),
     steps: z.array(WorkflowStepSchema).min(1),
     type: z.literal("loop"),
     until: z.string().min(1).optional(),
-  }).strict(),
+  })
+    .strict()
+    .superRefine((step, ctx) => {
+      if (step.max !== undefined || step.until !== undefined) {
+        return
+      }
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "`loop` requires at least one termination condition: `max` or `until`",
+      })
+    }),
 )
 
 const BranchNodeSchema: z.ZodType<BranchNode> = z.lazy(() =>
@@ -308,6 +341,7 @@ export const WorkflowStepSchema: z.ZodType<WorkflowStep> = z.lazy(() =>
     CodexNodeSchema,
     ClaudeNodeSchema,
     CursorNodeSchema,
+    OpenCodeNodeSchema,
     WriteFileNodeSchema,
     WorkflowNodeSchema,
     GroupNodeSchema,
@@ -326,7 +360,7 @@ export const WorkflowDocumentSchema: z.ZodType<WorkflowDocument> = z
   })
   .strict()
 
-export type ActionNode = ClaudeNode | CodexNode | CursorNode | ShellNode | WriteFileNode
+export type ActionNode = ClaudeNode | CodexNode | CursorNode | OpenCodeNode | ShellNode | WriteFileNode
 export type RetryableStep = ActionNode | WorkflowNode
 
 export function isRetryableStep(step: WorkflowStep): step is RetryableStep {
@@ -336,6 +370,7 @@ export function isRetryableStep(step: WorkflowStep): step is RetryableStep {
     step.type === "claude" ||
     step.type === "codex" ||
     step.type === "cursor" ||
+    step.type === "opencode" ||
     step.type === "workflow"
   )
 }

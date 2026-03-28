@@ -112,7 +112,7 @@ export function planStepFrontier(
           context.inputs,
           {
             iteration: 1,
-            max_iterations: prepared.step.max,
+            max_iterations: prepared.step.max ?? null,
             node_path: nodePath,
           },
           context.steps,
@@ -188,79 +188,44 @@ export function createFrontierNode(
   cwd: string,
   detailOverride?: string,
 ): FrontierNode {
-  if (step.type === "codex") {
-    if (step.with.kind === "review") {
-      return {
-        codex_collaboration_mode: null,
-        codex_kind: "review",
-        cursor_mode: null,
-        cwd,
-        detail: detailOverride ?? summarizeFrontierDetail(step),
-        frame_id: frameId,
-        model: step.with.model ?? null,
-        node_kind: step.type,
-        node_path: nodePath,
-        prompt_preview: frontierPromptPreview(step, context),
-        user_id: step.id ?? null,
-      }
-    }
-    return {
-      codex_collaboration_mode: step.with.collaboration_mode ?? "default",
-      codex_kind: "turn",
-      cursor_mode: null,
-      cwd,
-      detail: detailOverride ?? summarizeFrontierDetail(step),
-      frame_id: frameId,
-      model: step.with.model ?? null,
-      node_kind: step.type,
-      node_path: nodePath,
-      prompt_preview: frontierPromptPreview(step, context),
-      user_id: step.id ?? null,
-    }
-  }
-  if (step.type === "claude") {
-    return {
-      codex_collaboration_mode: null,
-      codex_kind: null,
-      cursor_mode: null,
-      cwd,
-      detail: detailOverride ?? summarizeFrontierDetail(step),
-      frame_id: frameId,
-      model: step.with.model ?? null,
-      node_kind: step.type,
-      node_path: nodePath,
-      prompt_preview: frontierPromptPreview(step, context),
-      user_id: step.id ?? null,
-    }
-  }
-  if (step.type === "cursor") {
-    return {
-      codex_collaboration_mode: null,
-      codex_kind: null,
-      cursor_mode: step.with.mode,
-      cwd,
-      detail: detailOverride ?? summarizeFrontierDetail(step),
-      frame_id: frameId,
-      model: step.with.model ?? null,
-      node_kind: step.type,
-      node_path: nodePath,
-      prompt_preview: frontierPromptPreview(step, context),
-      user_id: step.id ?? null,
-    }
-  }
-  return {
+  const base: FrontierNode = {
     codex_collaboration_mode: null,
     codex_kind: null,
     cursor_mode: null,
-    cwd: null,
+    cwd,
     detail: detailOverride ?? summarizeFrontierDetail(step),
     frame_id: frameId,
-    model: null,
+    model: step.type === "shell" || step.type === "write_file" ? null : (step.with.model ?? null),
     node_kind: step.type,
     node_path: nodePath,
+    opencode_agent: null,
+    opencode_permission_mode: null,
+    opencode_variant: null,
     prompt_preview: frontierPromptPreview(step, context),
     user_id: step.id ?? null,
   }
+
+  if (step.type === "codex") {
+    if (step.with.kind === "review") {
+      return { ...base, codex_kind: "review" as const }
+    }
+    return { ...base, codex_collaboration_mode: step.with.collaboration_mode ?? "default", codex_kind: "turn" as const }
+  }
+  if (step.type === "cursor") {
+    return { ...base, cursor_mode: step.with.mode }
+  }
+  if (step.type === "opencode") {
+    return {
+      ...base,
+      opencode_agent: step.with.agent ?? "build",
+      opencode_permission_mode: step.with.permission_mode ?? "default",
+      opencode_variant: step.with.variant ?? null,
+    }
+  }
+  if (step.type === "shell" || step.type === "write_file") {
+    return { ...base, cwd: null }
+  }
+  return base
 }
 
 export function summarizeFrontierDetail(step: ActionNode): string | null {
@@ -276,6 +241,9 @@ export function summarizeFrontierDetail(step: ActionNode): string | null {
   if (step.type === "cursor") {
     return `cursor ${step.with.mode}`
   }
+  if (step.type === "opencode") {
+    return "opencode"
+  }
 
   if (step.with.kind === "review") {
     return "codex review"
@@ -288,10 +256,7 @@ export function summarizeFrontierDetail(step: ActionNode): string | null {
 }
 
 function frontierPromptPreview(step: ActionNode, context: RenderContext): string | null {
-  if (step.type === "claude") {
-    return preview(renderStringSafely(step.with.prompt, context))
-  }
-  if (step.type === "cursor") {
+  if (step.type === "claude" || step.type === "cursor" || step.type === "opencode") {
     return preview(renderStringSafely(step.with.prompt, context))
   }
   if (step.type !== "codex") {

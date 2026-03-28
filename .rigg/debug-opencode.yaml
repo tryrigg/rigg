@@ -1,0 +1,26 @@
+id: debug-opencode
+steps:
+  - id: basic
+    type: opencode
+    with:
+      prompt: Reply with exactly "hello from opencode" and nothing else.
+
+  - id: with_agent
+    type: opencode
+    with:
+      agent: general
+      prompt: Reply with exactly "agent mode works" and nothing else.
+
+  - id: auto_approve
+    type: opencode
+    with:
+      permission_mode: auto_approve
+      prompt: Reply with exactly "auto approve works" and nothing else.
+
+  - id: summary
+    type: shell
+    with:
+      command: |
+        echo "basic:        ${{ steps.basic.result }}"
+        echo "with_agent:   ${{ steps.with_agent.result }}"
+        echo "auto_approve: ${{ steps.auto_approve.result }}"

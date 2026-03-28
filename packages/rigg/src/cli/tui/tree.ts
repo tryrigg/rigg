@@ -13,6 +13,7 @@ export const ACTION_KINDS = new Set<string>([
   StepKind.Claude,
   StepKind.Codex,
   StepKind.Cursor,
+  StepKind.OpenCode,
   StepKind.WriteFile,
 ])
 export const SUMMARY_KINDS = new Set<string>([
@@ -20,6 +21,7 @@ export const SUMMARY_KINDS = new Set<string>([
   StepKind.Claude,
   StepKind.Codex,
   StepKind.Cursor,
+  StepKind.OpenCode,
   StepKind.WriteFile,
   StepKind.Group,
   StepKind.Loop,
@@ -192,6 +194,14 @@ export function extractDetail(step: WorkflowStep): string | undefined {
       return joinDetail("claude", step.with.model, step.with.permission_mode, step.with.effort)
     case "cursor":
       return joinDetail(step.with.mode ?? "agent", step.with.model)
+    case "opencode":
+      return joinDetail(
+        "opencode",
+        step.with.agent ?? "build",
+        step.with.model,
+        step.with.variant,
+        step.with.permission_mode,
+      )
     case "write_file":
       return `→ ${step.with.path}`
     default:
@@ -203,8 +213,15 @@ function loopIteration(nodeMap: NodeMap, nodePath: string): number {
   return nodeMap.get(nodePath)?.progress?.current_iteration ?? 0
 }
 
-function loopMaxIterations(nodeMap: NodeMap, nodePath: string, fallback: number): number {
-  return nodeMap.get(nodePath)?.progress?.max_iterations ?? fallback
+function loopMaxIterations(nodeMap: NodeMap, nodePath: string, fallback?: number): number | null {
+  return nodeMap.get(nodePath)?.progress?.max_iterations ?? fallback ?? null
+}
+
+function loopMeta(iteration: number, max: number | null): string {
+  if (max === null) {
+    return `iter ${iteration} · unbounded`
+  }
+  return `iter ${iteration}/${max} · max ${max}`
 }
 
 function walkSteps(
@@ -252,6 +269,7 @@ function walkStep(
     case "claude":
     case "codex":
     case "cursor":
+    case "opencode":
     case "write_file":
       entries.push({
         entryType: "step",
@@ -290,7 +308,6 @@ function walkStep(
     case "loop": {
       const iterCount = loopIteration(nodeMap, nodePath)
       const maxIterations = loopMaxIterations(nodeMap, nodePath, step.max)
-      const meta = `iter ${iterCount}/${maxIterations} · max ${maxIterations}`
       entries.push({
         entryType: "step",
         depth,
@@ -302,7 +319,7 @@ function walkStep(
         nodeKind: "loop",
         isActive,
         isNext: false,
-        meta,
+        meta: loopMeta(iterCount, maxIterations),
         retrying,
       })
       if (iterCount > 0) {

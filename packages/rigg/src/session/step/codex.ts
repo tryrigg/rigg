@@ -1,9 +1,8 @@
 import type { CodexNode } from "../../workflow/schema"
 import { createCodexRuntimeSession } from "../../codex/runtime"
-import { isAbortError } from "../../util/error"
 import type { RenderContext } from "../render"
-import { interrupt } from "../error"
 import type { ActionStepOutput, ProviderStepOptions } from "./shell"
+import { withProviderSession } from "./provider"
 import { applyTemplate } from "./template"
 
 export async function runCodexStep(
@@ -75,22 +74,14 @@ async function withCodexSession(
   options: ProviderStepOptions,
   action: (session: Awaited<ReturnType<typeof createCodexRuntimeSession>>) => Promise<ActionStepOutput>,
 ): Promise<ActionStepOutput> {
-  let session: Awaited<ReturnType<typeof createCodexRuntimeSession>>
-  try {
-    session = await createCodexRuntimeSession({
-      cwd: options.cwd,
-      env: options.env,
-      signal: options.signal,
-    })
-  } catch (error) {
-    if (options.signal?.aborted && isAbortError(error)) {
-      throw interrupt("step interrupted", { cause: error })
-    }
-    throw error
-  }
-  try {
-    return await action(session)
-  } finally {
-    await session.close()
-  }
+  return await withProviderSession(
+    options,
+    () =>
+      createCodexRuntimeSession({
+        cwd: options.cwd,
+        env: options.env,
+        signal: options.signal,
+      }),
+    action,
+  )
 }

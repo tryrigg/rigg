@@ -207,7 +207,7 @@ describe("workflow/schema", () => {
     ).toThrow()
   })
 
-  test("accepts retry shorthand, retry objects, and loop without until", () => {
+  test("accepts retry shorthand, retry objects, and loop with either termination condition", () => {
     expect(RetryConfigSchema.parse(3)).toEqual({ max: 3 })
     expect(RetryConfigSchema.parse({ delay: "500ms", max: 3 })).toEqual({
       delay: "500ms",
@@ -240,6 +240,20 @@ describe("workflow/schema", () => {
             ],
             type: "loop",
           },
+          {
+            id: "until_only",
+            steps: [
+              {
+                id: "poll",
+                type: "shell",
+                with: {
+                  command: "echo waiting",
+                },
+              },
+            ],
+            type: "loop",
+            until: "${{ true }}",
+          },
         ],
       }),
     ).toMatchObject({
@@ -259,8 +273,36 @@ describe("workflow/schema", () => {
           max: 3,
           type: "loop",
         },
+        {
+          id: "until_only",
+          type: "loop",
+          until: "${{ true }}",
+        },
       ],
     })
+  })
+
+  test("rejects loops without max or until", () => {
+    expect(() =>
+      WorkflowDocumentSchema.parse({
+        id: "invalid-loop",
+        steps: [
+          {
+            id: "loop",
+            steps: [
+              {
+                id: "work",
+                type: "shell",
+                with: {
+                  command: "echo hi",
+                },
+              },
+            ],
+            type: "loop",
+          },
+        ],
+      }),
+    ).toThrow("`loop` requires at least one termination condition: `max` or `until`")
   })
 
   test("rejects retry on control-flow nodes", () => {

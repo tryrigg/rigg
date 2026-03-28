@@ -182,6 +182,20 @@ describe("buildTree", () => {
     expect(child?.prefix).toBe("│  ")
   })
 
+  test("builds unbounded loop entries without a max suffix", () => {
+    const wf = workflow([
+      {
+        type: "loop",
+        until: "done",
+        steps: [{ type: "shell", with: { command: "echo iter" } }],
+      },
+    ])
+
+    const entries = buildTree(wf, null)
+    expect(entries[0]?.nodeKind).toBe("loop")
+    expect(entries[0]?.meta).toBe("iter 0 · unbounded")
+  })
+
   test("uses loop progress from the loop node snapshot", () => {
     const wf = workflow([
       {
@@ -251,6 +265,45 @@ describe("buildTree", () => {
 
     const entries = buildTree(wf, snapshot)
     expect(entries[0]?.meta).toBe("iter 2/5 · max 5")
+    expect(entries[1]?.entryType).toBe("label")
+    expect(entries[1]?.label).toBe("iteration 2")
+  })
+
+  test("uses unbounded loop progress from the loop node snapshot", () => {
+    const wf = workflow([
+      {
+        id: "loop",
+        type: "loop",
+        until: "done",
+        steps: [{ id: "first", type: "shell", with: { command: "echo first" } }],
+      },
+    ])
+    const snapshot: RunSnapshot = runSnapshot({
+      nodes: [
+        {
+          attempt: 1,
+          duration_ms: null,
+          exit_code: null,
+          finished_at: null,
+          node_kind: "loop",
+          node_path: "/0",
+          progress: {
+            current_iteration: 2,
+            max_iterations: null,
+          },
+          result: null,
+          started_at: "2026-03-15T10:00:00.000Z",
+          status: "running",
+          stderr: null,
+          stdout: null,
+          user_id: "loop",
+          waiting_for: null,
+        },
+      ],
+    })
+
+    const entries = buildTree(wf, snapshot)
+    expect(entries[0]?.meta).toBe("iter 2 · unbounded")
     expect(entries[1]?.entryType).toBe("label")
     expect(entries[1]?.label).toBe("iteration 2")
   })
@@ -538,6 +591,20 @@ describe("extractDetail", () => {
     expect(extractDetail(step)).toBe("claude · claude-opus-4-6 · accept_edits · high")
   })
 
+  test("returns opencode agent, model, variant, and permission mode", () => {
+    const step: WorkflowStep = {
+      type: "opencode",
+      with: {
+        agent: "build",
+        model: "anthropic/claude-sonnet-4",
+        permission_mode: "auto_approve",
+        prompt: "do stuff",
+        variant: "high",
+      },
+    }
+    expect(extractDetail(step)).toBe("opencode · build · anthropic/claude-sonnet-4 · high · auto_approve")
+  })
+
   test("returns path for write_file steps", () => {
     const step: WorkflowStep = { type: "write_file", with: { path: "out.txt", content: "hi" } }
     expect(extractDetail(step)).toBe("→ out.txt")
@@ -584,6 +651,9 @@ describe("annotateNext", () => {
             model: null,
             node_kind: "shell",
             node_path: "/0/0/0",
+            opencode_agent: null,
+            opencode_permission_mode: null,
+            opencode_variant: null,
             prompt_preview: null,
             user_id: "left-step",
           },
@@ -597,6 +667,9 @@ describe("annotateNext", () => {
             model: null,
             node_kind: "shell",
             node_path: "/0/1/0",
+            opencode_agent: null,
+            opencode_permission_mode: null,
+            opencode_variant: null,
             prompt_preview: null,
             user_id: "right-step",
           },

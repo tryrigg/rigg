@@ -59,25 +59,22 @@ function buildHeaderLeft(options: { budget: number; stepProgress?: string | unde
   }
 
   const appLabel = HEADER_LABEL.slice(0, Math.min(options.budget, HEADER_LABEL.length))
-  let output = appLabel
-  let remaining = options.budget - appLabel.length
+  const remaining = options.budget - appLabel.length
 
   if (remaining <= 1 || options.workflowId.length === 0) {
-    return output + " ".repeat(Math.min(2, remaining))
+    return appLabel + " ".repeat(Math.min(2, remaining))
   }
 
-  output += " "
-  remaining -= 1
-  const workflowLabel = truncateEnd(options.workflowId, remaining)
-  output += workflowLabel
-  remaining -= workflowLabel.length
+  const workflowBudget = remaining - 1
+  const workflowLabel = truncateEnd(options.workflowId, workflowBudget)
+  const stepProgress =
+    options.stepProgress && workflowBudget - workflowLabel.length >= options.stepProgress.length + 2
+      ? `  ${options.stepProgress}`
+      : ""
+  const output = `${appLabel} ${workflowLabel}${stepProgress}`
+  const padding = options.budget - output.length
 
-  if (options.stepProgress && remaining >= options.stepProgress.length + 2) {
-    output += "  " + options.stepProgress
-    remaining -= options.stepProgress.length + 2
-  }
-
-  return " ".repeat(Math.min(2, remaining)) + output
+  return " ".repeat(Math.min(2, padding)) + output
 }
 
 export function headerLine(options: {

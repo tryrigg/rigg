@@ -1,9 +1,8 @@
 import type { ClaudeNode } from "../../workflow/schema"
 import { createClaudeRuntimeSession } from "../../claude/runtime"
-import { isAbortError } from "../../util/error"
 import type { RenderContext } from "../render"
-import { interrupt } from "../error"
 import type { ActionStepOutput, ProviderStepOptions } from "./shell"
+import { withProviderSession } from "./provider"
 import { applyTemplate } from "./template"
 
 export async function runClaudeStep(
@@ -46,24 +45,15 @@ async function withSession(
   options: ProviderStepOptions,
   action: (session: Awaited<ReturnType<typeof createClaudeRuntimeSession>>) => Promise<ActionStepOutput>,
 ): Promise<ActionStepOutput> {
-  let session: Awaited<ReturnType<typeof createClaudeRuntimeSession>>
-  try {
-    session = await createClaudeRuntimeSession({
-      cwd: options.cwd,
-      env: options.env,
-      sdk: options.claudeSdk,
-      signal: options.signal,
-    })
-  } catch (error) {
-    if (options.signal?.aborted && isAbortError(error)) {
-      throw interrupt("step interrupted", { cause: error })
-    }
-    throw error
-  }
-
-  try {
-    return await action(session)
-  } finally {
-    await session.close()
-  }
+  return await withProviderSession(
+    options,
+    () =>
+      createClaudeRuntimeSession({
+        cwd: options.cwd,
+        env: options.env,
+        sdk: options.claudeSdk,
+        signal: options.signal,
+      }),
+    action,
+  )
 }

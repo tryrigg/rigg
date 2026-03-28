@@ -6,7 +6,7 @@ inputs:
     description: Task or change request to implement
 steps:
   - id: build
-    type: claude
+    type: opencode
     with:
       prompt: |
         Implement the following change in the current repository.

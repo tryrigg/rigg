@@ -42,7 +42,7 @@ export const BarrierReasonSchema = z.enum([
 
 export const NodeProgressSchema = z.object({
   current_iteration: z.number().int().nonnegative(),
-  max_iterations: z.number().int().positive(),
+  max_iterations: z.number().int().positive().nullable(),
 })
 
 export const NodeSnapshotSchema = z.object({
@@ -72,6 +72,9 @@ export const FrontierNodeSchema = z.object({
   model: z.string().optional().nullable(),
   node_kind: z.string().min(1),
   node_path: z.string().min(1),
+  opencode_agent: z.string().min(1).nullable(),
+  opencode_permission_mode: z.enum(["default", "auto_approve"]).nullable(),
+  opencode_variant: z.string().min(1).nullable(),
   prompt_preview: z.string().optional().nullable(),
   user_id: z.string().min(1).optional().nullable(),
 })

@@ -114,11 +114,13 @@ For `target` on `kind: review`:
 ```yaml
 - id: remediation
   type: loop
-  max: 5
-  until: ${{ len(steps.review.result.findings) == 0 }}
+  until: ${{ len(steps.review.result.findings) == 0 }} # optional if max is set
   steps: []
 ```
 
+Set at least one termination condition: `max` or `until`.
+When `max` is omitted, `${{ run.max_iterations }}` is `null`.
+For AI remediation loops, prefer setting `max` as a safety valve even when `until` is present.
 Inside loops: `${{ run.iteration }}`, `${{ run.max_iterations }}`, and `${{ run.node_path }}` are available.
 
 ### branch

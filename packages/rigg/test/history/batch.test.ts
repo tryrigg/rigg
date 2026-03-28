@@ -257,6 +257,132 @@ describe("history/batch", () => {
     expect(payloadText(batch.events[1]!)).toContain("tool started: grep")
   })
 
+  test("keeps OpenCode assistant parts separate within one message", () => {
+    const batch = createBatch()
+    const state = makeState()
+
+    apply(batch, state, {
+      kind: "provider_event",
+      event: {
+        kind: "message_delta",
+        messageId: "msg_1",
+        partId: "part_1",
+        provider: "opencode",
+        sessionId: "session_1",
+        text: "Hello",
+      },
+      node_path: "/0",
+      user_id: "opencode-step",
+    })
+    apply(batch, state, {
+      kind: "provider_event",
+      event: {
+        kind: "message_completed",
+        messageId: "msg_1",
+        partId: "part_1",
+        provider: "opencode",
+        sessionId: "session_1",
+        text: "Hello",
+      },
+      node_path: "/0",
+      user_id: "opencode-step",
+    })
+    apply(batch, state, {
+      kind: "provider_event",
+      event: {
+        kind: "message_delta",
+        messageId: "msg_1",
+        partId: "part_2",
+        provider: "opencode",
+        sessionId: "session_1",
+        text: "After tool",
+      },
+      node_path: "/0",
+      user_id: "opencode-step",
+    })
+    apply(batch, state, {
+      kind: "provider_event",
+      event: {
+        kind: "message_completed",
+        messageId: "msg_1",
+        partId: "part_2",
+        provider: "opencode",
+        sessionId: "session_1",
+        text: "After tool",
+      },
+      node_path: "/0",
+      user_id: "opencode-step",
+    })
+
+    expect(batch.events).toHaveLength(2)
+    expect(payloadText(batch.events[0]!)).toBe("Hello")
+    expect(payloadData(batch.events[0]!)).toMatchObject({ kind: "message_completed", provider: "opencode" })
+    expect(payloadText(batch.events[1]!)).toBe("After tool")
+    expect(payloadData(batch.events[1]!)).toMatchObject({ kind: "message_completed", provider: "opencode" })
+  })
+
+  test("keeps OpenCode assistant parts from different sessions separate", () => {
+    const batch = createBatch()
+    const state = makeState()
+
+    apply(batch, state, {
+      kind: "provider_event",
+      event: {
+        kind: "message_delta",
+        messageId: "msg_1",
+        partId: "part_1",
+        provider: "opencode",
+        sessionId: "session_1",
+        text: "Alpha",
+      },
+      node_path: "/0",
+      user_id: "opencode-step-a",
+    })
+    apply(batch, state, {
+      kind: "provider_event",
+      event: {
+        kind: "message_delta",
+        messageId: "msg_2",
+        partId: "part_1",
+        provider: "opencode",
+        sessionId: "session_2",
+        text: "Beta",
+      },
+      node_path: "/1",
+      user_id: "opencode-step-b",
+    })
+    apply(batch, state, {
+      kind: "provider_event",
+      event: {
+        kind: "message_completed",
+        messageId: "msg_1",
+        partId: "part_1",
+        provider: "opencode",
+        sessionId: "session_1",
+        text: "Alpha",
+      },
+      node_path: "/0",
+      user_id: "opencode-step-a",
+    })
+    apply(batch, state, {
+      kind: "provider_event",
+      event: {
+        kind: "message_completed",
+        messageId: "msg_2",
+        partId: "part_1",
+        provider: "opencode",
+        sessionId: "session_2",
+        text: "Beta",
+      },
+      node_path: "/1",
+      user_id: "opencode-step-b",
+    })
+
+    expect(batch.events).toHaveLength(2)
+    expect(batch.events.map((entry) => entry.nodePath)).toEqual(["/0", "/1"])
+    expect(batch.events.map((entry) => payloadText(entry))).toEqual(["Alpha", "Beta"])
+  })
+
   test("records retry events with attempt metadata", () => {
     const batch = createBatch()
     const state = makeState()

@@ -45,6 +45,7 @@ const labels: Record<string, string> = {
   claude: "claude",
   codex: "codex",
   cursor: "cursor",
+  opencode: "opencode",
   shell: "cmd",
   write_file: "write_file",
 }
@@ -239,6 +240,21 @@ export function frontierLabel(node: FrontierNode): string {
     }
     return parts.join(" · ")
   }
+  if (node.node_kind === "opencode") {
+    if (node.opencode_agent) {
+      parts.push(node.opencode_agent)
+    }
+    if (node.model) {
+      parts.push(node.model)
+    }
+    if (node.opencode_variant) {
+      parts.push(node.opencode_variant)
+    }
+    if (node.opencode_permission_mode) {
+      parts.push(node.opencode_permission_mode)
+    }
+    return parts.join(" · ")
+  }
   if (node.node_kind === "cursor" && node.cursor_mode) {
     parts.push(node.cursor_mode)
   }
@@ -271,14 +287,22 @@ function appendProviderEvent(state: UiState, nodePath: string, event: ProviderEv
     case "message_delta":
       upsertAssistant(
         output,
-        event.provider === "codex" ? (event.itemId ?? event.turnId) : (event.messageId ?? event.sessionId),
+        event.provider === "codex"
+          ? (event.itemId ?? event.turnId)
+          : event.provider === "opencode"
+            ? `${event.sessionId}:${event.partId}`
+            : (event.messageId ?? event.sessionId),
         (current) => current + event.text,
       )
       return
     case "message_completed":
       upsertAssistant(
         output,
-        event.provider === "codex" ? (event.itemId ?? event.turnId) : (event.messageId ?? event.sessionId),
+        event.provider === "codex"
+          ? (event.itemId ?? event.turnId)
+          : event.provider === "opencode"
+            ? `${event.sessionId}:${event.partId}`
+            : (event.messageId ?? event.sessionId),
         () => event.text,
       )
       return
@@ -293,6 +317,20 @@ function appendProviderEvent(state: UiState, nodePath: string, event: ProviderEv
       output.entries.push({
         key: null,
         text: `tool completed: ${event.tool}${event.detail ? ` (${event.detail})` : ""}`,
+        variant: "event",
+      })
+      return
+    case "permission_requested":
+      output.entries.push({
+        key: null,
+        text: `permission requested: ${event.tool}${event.detail ? ` (${event.detail})` : ""}`,
+        variant: "event",
+      })
+      return
+    case "permission_resolved":
+      output.entries.push({
+        key: null,
+        text: `permission resolved: ${event.decision}`,
         variant: "event",
       })
       return

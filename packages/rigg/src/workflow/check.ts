@@ -32,6 +32,7 @@ import {
   type ClaudeNode,
   type CodexNode,
   type CursorNode,
+  type OpenCodeNode,
   type GroupNode,
   type LoopNode,
   type ParallelNode,
@@ -42,6 +43,7 @@ import {
 import { reviewOutput, checkDefs, checkValue } from "./input"
 import { checkIdent } from "./id"
 import { shapeFromSchema } from "./shape"
+import { parseModel } from "../opencode/model"
 import { workflowById, type WorkflowProject } from "../project"
 import { normalizeError } from "../util/error"
 import { parseDuration } from "../util/duration"
@@ -184,6 +186,7 @@ function validateStep(
       case "claude":
       case "codex":
       case "cursor":
+      case "opencode":
         return validateActionStep(step, ctx.filePath, scope, ctx.errors)
       case "workflow":
         return validateWorkflowStep(ctx, step, scope)
@@ -234,6 +237,8 @@ function validateActionStep(
       return validateClaude(step, filePath, scope, errors)
     case "cursor":
       return validateCursor(step, filePath, scope, errors)
+    case "opencode":
+      return validateOpenCode(step, filePath, scope, errors)
   }
 }
 
@@ -577,6 +582,24 @@ function validateClaude(
   errors: CompileDiagnostic[],
 ): ValidationSummary & { guaranteedResultShape: ResultShape; resultShape: ResultShape } {
   checkTpl(step.with.prompt, filePath, scope, errors)
+  return {
+    availableStepShapes: new Map(scope.availableStepShapes),
+    guaranteedResultShape: StringShape,
+    resultShape: StringShape,
+  }
+}
+
+function validateOpenCode(
+  step: OpenCodeNode,
+  filePath: string,
+  scope: VisibleScope,
+  errors: CompileDiagnostic[],
+): ValidationSummary & { guaranteedResultShape: ResultShape; resultShape: ResultShape } {
+  checkTpl(step.with.prompt, filePath, scope, errors)
+  const model = parseModel(step.with.model)
+  if (model.kind === "invalid") {
+    errors.push(createDiag(CompileDiagnosticCode.InvalidWorkflow, model.message, { filePath }))
+  }
   return {
     availableStepShapes: new Map(scope.availableStepShapes),
     guaranteedResultShape: StringShape,
@@ -1046,7 +1069,13 @@ function resolveShape(ref: PathReference, scope: CheckScope): ResultShape {
 
   if (ref.root === "run") {
     const [field] = ref.segments
-    return field === "iteration" || field === "max_iterations" ? IntegerShape : StringShape
+    if (field === "iteration") {
+      return IntegerShape
+    }
+    if (field === "max_iterations") {
+      return mergeShapes(IntegerShape, NullShape)
+    }
+    return StringShape
   }
 
   return AnyJsonShape

@@ -4,7 +4,9 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk"
+import type { AssistantMessage, Part } from "@opencode-ai/sdk/v2"
 
+import type { OpencodeServerLease } from "../../../src/opencode/proc"
 import type { ActionNode } from "../../../src/workflow/schema"
 import type { ClaudeProviderEvent } from "../../../src/claude/event"
 import type { CodexProviderEvent } from "../../../src/codex/event"
@@ -44,6 +46,96 @@ function claudeResult(text: string): SDKMessage {
     },
     uuid: "00000000-0000-4000-8000-000000000001",
   } as unknown as SDKMessage
+}
+
+function opencodeAssistant(text: string): AssistantMessage {
+  return {
+    agent: "build",
+    cost: 0,
+    id: "msg_1",
+    mode: "chat",
+    modelID: "claude-sonnet",
+    parentID: "user_1",
+    path: {
+      cwd: process.cwd(),
+      root: process.cwd(),
+    },
+    providerID: "anthropic",
+    role: "assistant",
+    sessionID: "session_1",
+    summary: false,
+    time: {
+      completed: Date.now(),
+      created: Date.now(),
+    },
+    tokens: {
+      cache: {
+        read: 0,
+        write: 0,
+      },
+      input: 0,
+      output: 0,
+      reasoning: 0,
+      total: 0,
+    },
+  }
+}
+
+function opencodeTextPart(text: string): Part {
+  return {
+    id: "part_1",
+    messageID: "msg_1",
+    sessionID: "session_1",
+    text,
+    time: {
+      end: Date.now(),
+      start: Date.now(),
+    },
+    type: "text",
+  }
+}
+
+function ok<T>(data: T) {
+  return {
+    data,
+    error: undefined,
+    request: new Request("http://localhost"),
+    response: new Response(),
+  } as const
+}
+
+function createOpenCodeLease(text: string): OpencodeServerLease {
+  return {
+    client: {
+      app: {
+        agents: async () => ok([{ name: "build" }]),
+      },
+      event: {
+        subscribe: async () => ({
+          stream: (async function* () {})(),
+        }),
+      },
+      global: {
+        health: async () => ok({ healthy: true, version: "1.3.3" }),
+      },
+      permission: {
+        reply: async () => ok(true),
+      },
+      session: {
+        abort: async () => ok(true),
+        create: async () => ok({ id: "session_1" }),
+        prompt: async () =>
+          ok({
+            info: opencodeAssistant(text),
+            parts: [opencodeTextPart(text)],
+          }),
+      },
+    } as never,
+    close: async () => {},
+    markStale: () => {},
+    stopNow: async () => {},
+    url: "http://127.0.0.1:4096",
+  }
 }
 
 async function readFakeCodexLifecycleEvents(root: string): Promise<string[]> {
@@ -151,6 +243,29 @@ describe("session/step", () => {
     } finally {
       await rm(root, { force: true, recursive: true })
     }
+  })
+
+  test("runs opencode steps through the shared action dispatcher", async () => {
+    const result = await runActionStep(
+      {
+        type: "opencode",
+        with: {
+          prompt: "Implement the change.",
+        },
+      },
+      renderContext(),
+      {
+        cwd: process.cwd(),
+        env: process.env,
+        opencodeInternals: {
+          acquireServer: async () => createOpenCodeLease("done"),
+        },
+      },
+    )
+
+    expect(result.exitCode).toBe(0)
+    expect(result.result).toBe("done")
+    expect(result.stdout).toBe("done")
   })
 
   test("runs codex run steps through app-server", async () => {

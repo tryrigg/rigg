@@ -376,4 +376,121 @@ steps:
       kind: "invalid_workflow",
     })
   })
+
+  test("decodes valid opencode steps and rejects invalid opencode fields", () => {
+    const valid = decode(
+      {
+        id: "check",
+        steps: [
+          {
+            type: "opencode",
+            with: {
+              agent: "build",
+              model: "anthropic/claude-sonnet-4",
+              permission_mode: "auto_approve",
+              prompt: "Implement the change.",
+              variant: "high",
+            },
+          },
+        ],
+      },
+      "/workspace/.rigg/check.yaml",
+    )
+    const emptyPrompt = decode(
+      {
+        id: "check",
+        steps: [
+          {
+            type: "opencode",
+            with: {
+              prompt: "",
+            },
+          },
+        ],
+      },
+      "/workspace/.rigg/check.yaml",
+    )
+    const invalidPermissionMode = decode(
+      {
+        id: "check",
+        steps: [
+          {
+            type: "opencode",
+            with: {
+              permission_mode: "always_allow",
+              prompt: "Implement the change.",
+            },
+          },
+        ],
+      },
+      "/workspace/.rigg/check.yaml",
+    )
+    const customVariant = decode(
+      {
+        id: "check",
+        steps: [
+          {
+            type: "opencode",
+            with: {
+              prompt: "Implement the change.",
+              variant: "quality",
+            },
+          },
+        ],
+      },
+      "/workspace/.rigg/check.yaml",
+    )
+    const unknownKey = decode(
+      {
+        id: "check",
+        steps: [
+          {
+            type: "opencode",
+            with: {
+              prompt: "Implement the change.",
+              temperature: 0,
+            },
+          },
+        ],
+      },
+      "/workspace/.rigg/check.yaml",
+    )
+
+    expect(valid).toEqual({
+      kind: "decoded",
+      workflow: {
+        id: "check",
+        steps: [
+          {
+            type: "opencode",
+            with: {
+              agent: "build",
+              model: "anthropic/claude-sonnet-4",
+              permission_mode: "auto_approve",
+              prompt: "Implement the change.",
+              variant: "high",
+            },
+          },
+        ],
+      },
+    })
+    expect(emptyPrompt.kind).toBe("invalid_workflow")
+    expect(invalidPermissionMode.kind).toBe("invalid_workflow")
+    expect(customVariant).toEqual({
+      kind: "decoded",
+      workflow: {
+        id: "check",
+        steps: [
+          {
+            type: "opencode",
+            with: {
+              prompt: "Implement the change.",
+              variant: "quality",
+            },
+          },
+        ],
+      },
+    })
+    expect(unknownKey.kind).toBe("invalid_workflow")
+  })
 })

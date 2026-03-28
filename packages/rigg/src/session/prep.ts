@@ -97,6 +97,7 @@ export function prepareStep(
     case "claude":
     case "codex":
     case "cursor":
+    case "opencode":
     case "write_file":
       return {
         env: preparedContext.env,

@@ -65,6 +65,13 @@ type AssistantEvent =
       provider: "cursor"
       sessionId: string
     }
+  | {
+      kind: "message_completed" | "message_delta"
+      messageId: string | null
+      partId: string
+      provider: "opencode"
+      sessionId: string
+    }
 
 export type WriteBatch = {
   events: PendingEvent[]
@@ -459,6 +466,10 @@ function assistantKey(state: BatchState, nodePath: string, event: AssistantEvent
     return key
   }
 
+  if (event.provider === "opencode") {
+    return `${event.sessionId}:${event.partId}`
+  }
+
   return event.messageId ?? event.sessionId
 }
 
@@ -628,6 +639,38 @@ export function pushEvent(
               payload: {
                 data: jsonValue(event.event),
                 text: `${event.event.kind === "tool_started" ? "tool started" : "tool completed"}: ${event.event.tool}${event.event.detail ? ` (${event.event.detail})` : ""}`,
+                user_id: event.user_id,
+              },
+              stream: null,
+            }),
+          )
+          return false
+        case "permission_requested":
+          addEvents(
+            batch,
+            queueEvent(state, {
+              attempt: event.attempt ?? currentAttempt(state, event.node_path),
+              kind: "event",
+              nodePath: event.node_path,
+              payload: {
+                data: jsonValue(event.event),
+                text: `permission requested: ${event.event.tool}${event.event.detail ? ` (${event.event.detail})` : ""}`,
+                user_id: event.user_id,
+              },
+              stream: null,
+            }),
+          )
+          return false
+        case "permission_resolved":
+          addEvents(
+            batch,
+            queueEvent(state, {
+              attempt: event.attempt ?? currentAttempt(state, event.node_path),
+              kind: "event",
+              nodePath: event.node_path,
+              payload: {
+                data: jsonValue(event.event),
+                text: `permission resolved: ${event.event.decision}`,
                 user_id: event.user_id,
               },
               stream: null,

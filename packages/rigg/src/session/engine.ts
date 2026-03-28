@@ -442,6 +442,7 @@ async function executeAction(
         env,
         interactionHandler: async (request) =>
           await resolveInteraction(environment, request, { nodePath, userId: step.id ?? null }, scope.signal),
+        opencodeScopeId: environment.runState.run_id,
         onOutput: async (stream, chunk) => {
           environment.emitEvent({
             attempt: lifecycle.attempt,
@@ -556,7 +557,7 @@ async function executeLoop(
   let lastBindings: Record<string, StepBinding> = {}
   let lastRun: Record<string, unknown> = {
     iteration: 0,
-    max_iterations: step.max,
+    max_iterations: step.max ?? null,
     node_path: nodePath,
   }
   const loopScopeId = loopScope(scope.frameId, nodePath)
@@ -566,15 +567,18 @@ async function executeLoop(
   } satisfies BarrierContext
 
   return await executeControlNode(environment, step, nodePath, async (lifecycle) => {
-    for (let iteration = 1; iteration <= step.max; iteration += 1) {
+    for (let iteration = 1; ; iteration += 1) {
+      if (step.max !== undefined && iteration > step.max) {
+        break
+      }
       setNodeProgress(environment.runState, nodePath, {
         current_iteration: iteration,
-        max_iterations: step.max,
+        max_iterations: step.max ?? null,
       })
       const iterationFrameId = loopFrame(loopScopeId, iteration)
       const iterationRun = {
         iteration,
-        max_iterations: step.max,
+        max_iterations: step.max ?? null,
         node_path: nodePath,
       }
       lastRun = iterationRun

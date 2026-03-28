@@ -13,6 +13,7 @@ export const kindColors: Record<string, string> = {
   claude: "magenta",
   codex: "blue",
   cursor: "cyan",
+  opencode: "white",
   write_file: "magenta",
   group: "dim",
   loop: "cyan",

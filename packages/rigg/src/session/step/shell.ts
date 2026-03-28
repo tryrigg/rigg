@@ -1,6 +1,7 @@
 import { onAbort } from "../../util/abort"
 import { filterEnv } from "../../util/env"
 import { parseJsonOutput } from "../../codex/parse"
+import type { OpencodeRuntimeInternals } from "../../opencode/runtime"
 import type { InteractionHandler } from "../interaction"
 import type { ProviderEvent } from "../event"
 import { timedOut } from "../error"
@@ -28,6 +29,9 @@ export type ActionExecutionOptions = {
 export type ProviderStepOptions = ActionExecutionOptions & {
   claudeSdk?: Pick<typeof import("@anthropic-ai/claude-agent-sdk"), "query"> | undefined
   interactionHandler?: InteractionHandler | undefined
+  opencodeBinaryPath?: string | undefined
+  opencodeInternals?: OpencodeRuntimeInternals | undefined
+  opencodeScopeId?: string | undefined
   onProviderEvent?: ((event: ProviderEvent) => Promise<void> | void) | undefined
 }
 

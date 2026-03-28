@@ -368,6 +368,122 @@ describe("cli/state", () => {
     ])
   })
 
+  test("applyEvent keeps OpenCode text parts separate within one message", () => {
+    const state = createState()
+    const snapshot = runSnapshot()
+    applyEvent(state, { kind: "run_started", snapshot })
+    applyEvent(state, {
+      kind: "provider_event",
+      event: {
+        kind: "message_delta",
+        messageId: "msg_1",
+        partId: "part_1",
+        provider: "opencode",
+        sessionId: "session_1",
+        text: "Hello",
+      },
+      node_path: "/0",
+      user_id: "opencode-step",
+    })
+    applyEvent(state, {
+      kind: "provider_event",
+      event: {
+        kind: "message_completed",
+        messageId: "msg_1",
+        partId: "part_1",
+        provider: "opencode",
+        sessionId: "session_1",
+        text: "Hello",
+      },
+      node_path: "/0",
+      user_id: "opencode-step",
+    })
+    applyEvent(state, {
+      kind: "provider_event",
+      event: {
+        kind: "message_delta",
+        messageId: "msg_1",
+        partId: "part_2",
+        provider: "opencode",
+        sessionId: "session_1",
+        text: "After tool",
+      },
+      node_path: "/0",
+      user_id: "opencode-step",
+    })
+    applyEvent(state, {
+      kind: "provider_event",
+      event: {
+        kind: "message_completed",
+        messageId: "msg_1",
+        partId: "part_2",
+        provider: "opencode",
+        sessionId: "session_1",
+        text: "After tool",
+      },
+      node_path: "/0",
+      user_id: "opencode-step",
+    })
+
+    expect(state.liveOutputs["/0"]?.entries).toEqual([
+      {
+        key: "session_1:part_1",
+        text: "Hello",
+        variant: "assistant",
+      },
+      {
+        key: "session_1:part_2",
+        text: "After tool",
+        variant: "assistant",
+      },
+    ])
+  })
+
+  test("applyEvent scopes OpenCode text parts by session", () => {
+    const state = createState()
+    const snapshot = runSnapshot()
+    applyEvent(state, { kind: "run_started", snapshot })
+    applyEvent(state, {
+      kind: "provider_event",
+      event: {
+        kind: "message_delta",
+        messageId: "msg_1",
+        partId: "part_1",
+        provider: "opencode",
+        sessionId: "session_1",
+        text: "Alpha",
+      },
+      node_path: "/0",
+      user_id: "opencode-step",
+    })
+    applyEvent(state, {
+      kind: "provider_event",
+      event: {
+        kind: "message_delta",
+        messageId: "msg_2",
+        partId: "part_1",
+        provider: "opencode",
+        sessionId: "session_2",
+        text: "Beta",
+      },
+      node_path: "/0",
+      user_id: "opencode-step",
+    })
+
+    expect(state.liveOutputs["/0"]?.entries).toEqual([
+      {
+        key: "session_1:part_1",
+        text: "Alpha",
+        variant: "assistant",
+      },
+      {
+        key: "session_2:part_1",
+        text: "Beta",
+        variant: "assistant",
+      },
+    ])
+  })
+
   test("previewOutput prefers stderr for failed nodes and stdout for succeeded nodes", () => {
     expect(
       previewOutput({
@@ -495,6 +611,9 @@ describe("cli/state", () => {
             model: null,
             node_kind: "shell",
             node_path: "/1",
+            opencode_agent: null,
+            opencode_permission_mode: null,
+            opencode_variant: null,
             prompt_preview: null,
             user_id: "draft_shell",
           },
@@ -508,6 +627,9 @@ describe("cli/state", () => {
             model: "gpt-5.4",
             node_kind: "codex",
             node_path: "/2",
+            opencode_agent: null,
+            opencode_permission_mode: null,
+            opencode_variant: null,
             prompt_preview: "Draft a plan",
             user_id: "draft_plan",
           },
@@ -538,6 +660,9 @@ describe("cli/state", () => {
               model: null,
               node_kind: "shell",
               node_path: "/1",
+              opencode_agent: null,
+              opencode_permission_mode: null,
+              opencode_variant: null,
               prompt_preview: null,
               user_id: "draft_shell",
             },
@@ -551,6 +676,9 @@ describe("cli/state", () => {
               model: "gpt-5.4",
               node_kind: "codex",
               node_path: "/2",
+              opencode_agent: null,
+              opencode_permission_mode: null,
+              opencode_variant: null,
               prompt_preview: "Draft a plan",
               user_id: "draft_plan",
             },
@@ -616,6 +744,9 @@ describe("cli/state", () => {
             model: "composer-2",
             node_kind: "cursor",
             node_path: "/1",
+            opencode_agent: null,
+            opencode_permission_mode: null,
+            opencode_variant: null,
             prompt_preview: "Question?",
             user_id: "draft_cursor",
           },
@@ -646,6 +777,9 @@ describe("cli/state", () => {
               model: "composer-2",
               node_kind: "cursor",
               node_path: "/1",
+              opencode_agent: null,
+              opencode_permission_mode: null,
+              opencode_variant: null,
               prompt_preview: "Question?",
               user_id: "draft_cursor",
             },
@@ -711,6 +845,9 @@ describe("cli/state", () => {
             model: "claude-opus-4-6",
             node_kind: "claude",
             node_path: "/1",
+            opencode_agent: null,
+            opencode_permission_mode: null,
+            opencode_variant: null,
             prompt_preview: "Implement the change",
             user_id: "draft_claude",
           },
@@ -741,6 +878,9 @@ describe("cli/state", () => {
               model: "claude-opus-4-6",
               node_kind: "claude",
               node_path: "/1",
+              opencode_agent: null,
+              opencode_permission_mode: null,
+              opencode_variant: null,
               prompt_preview: "Implement the change",
               user_id: "draft_claude",
             },
@@ -806,6 +946,9 @@ describe("cli/state", () => {
             model: null,
             node_kind: "shell",
             node_path: "/1",
+            opencode_agent: null,
+            opencode_permission_mode: null,
+            opencode_variant: null,
             prompt_preview: null,
             user_id: "draft_shell",
           },

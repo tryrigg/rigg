@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.2.81",
+    "@opencode-ai/sdk": "1.3.3",
     "drizzle-orm": "0.45.1",
     "figures": "^6.1.0",
     "ink": "^6.8.0",

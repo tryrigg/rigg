@@ -12,6 +12,7 @@ const KIND_LABELS: Record<string, string> = {
   claude: "claude",
   codex: "codex",
   cursor: "cursor",
+  opencode: "opencode",
   write_file: "write_file",
   group: "group",
   loop: "loop",
@@ -28,27 +29,25 @@ function isSameFlatLine(a: FlatLine, b: FlatLine): boolean {
   return a.isStderr === b.isStderr && a.muted === b.muted && a.text === b.text
 }
 
-function flattenEntriesToLines(entries: LiveLogEntry[], options: { labelStderr: boolean }): FlatLine[] {
-  const lines: FlatLine[] = []
-  for (const entry of entries) {
-    const entryLines = entry.text.replace(/\r\n?/g, "\n").split("\n").filter(Boolean)
-    const isStderr = entry.variant === "stream" && entry.stream === "stderr"
-    for (const [index, line] of entryLines.entries()) {
-      if (entry.variant === "event") {
-        lines.push({ isStderr: false, muted: true, text: `[${line}]` })
-        continue
-      }
+function splitOutputLines(text: string): string[] {
+  return text.replace(/\r\n?/g, "\n").split("\n").filter(Boolean)
+}
 
-      if (isStderr && options.labelStderr) {
-        const prefix = index === 0 ? "stderr: " : ""
-        lines.push({ isStderr: true, muted: false, text: `${prefix}${line}` })
-        continue
-      }
-
-      lines.push({ isStderr, muted: false, text: line })
+function flatEntryLines(entry: LiveLogEntry, options: { labelStderr: boolean }): FlatLine[] {
+  const isStderr = entry.variant === "stream" && entry.stream === "stderr"
+  return splitOutputLines(entry.text).map((line, index) => {
+    if (entry.variant === "event") {
+      return { isStderr: false, muted: true, text: `[${line}]` }
     }
-  }
-  return lines
+    if (!isStderr || !options.labelStderr) {
+      return { isStderr, muted: false, text: line }
+    }
+    return { isStderr: true, muted: false, text: `${index === 0 ? "stderr: " : ""}${line}` }
+  })
+}
+
+function flattenEntriesToLines(entries: LiveLogEntry[], options: { labelStderr: boolean }): FlatLine[] {
+  return entries.flatMap((entry) => flatEntryLines(entry, options))
 }
 
 function liveOutputToLines(live: LiveOutput | undefined): FlatLine[] | null {
@@ -61,13 +60,7 @@ function liveOutputToLines(live: LiveOutput | undefined): FlatLine[] | null {
 }
 
 export function countLiveOutputs(liveOutputs: Record<string, LiveOutput>): number {
-  let count = 0
-  for (const live of Object.values(liveOutputs)) {
-    if (liveOutputToLines(live) !== null) {
-      count++
-    }
-  }
-  return count
+  return Object.values(liveOutputs).filter((live) => liveOutputToLines(live) !== null).length
 }
 
 function previewToLines(preview: OutputPreview | null): FlatLine[] {
@@ -76,14 +69,19 @@ function previewToLines(preview: OutputPreview | null): FlatLine[] {
   }
 
   const isStderr = preview.stream === "stderr"
-  return preview.text
-    .split("\n")
-    .filter(Boolean)
-    .map((text: string, index: number) => ({
-      isStderr,
-      muted: false,
-      text: isStderr && index === 0 ? `stderr: ${text}` : text,
-    }))
+  return splitOutputLines(preview.text).map((text, index) => ({
+    isStderr,
+    muted: false,
+    text: isStderr && index === 0 ? `stderr: ${text}` : text,
+  }))
+}
+
+function mergePreviewLines(lines: FlatLine[], previewLines: FlatLine[]): FlatLine[] {
+  if (lines.length === 0) {
+    return previewLines
+  }
+
+  return [...lines, ...previewLines.filter((line) => !lines.some((candidate) => isSameFlatLine(candidate, line)))]
 }
 
 export function completedOutputToLines(completed: CompletedOutput | undefined): FlatLine[] | null {
@@ -96,16 +94,10 @@ export function completedOutputToLines(completed: CompletedOutput | undefined): 
   if (lines.length === 0 && previewLines.length === 0) {
     return null
   }
-  if (lines.length === 0) {
-    return previewLines
-  }
 
-  const merged = [...lines]
-  const uniquePreviewLines = previewLines.filter(
-    (previewLine) => !merged.some((candidate) => isSameFlatLine(candidate, previewLine)),
-  )
-  for (const previewLine of uniquePreviewLines) {
-    merged.push(previewLine)
+  const merged = mergePreviewLines(lines, previewLines)
+  if (lines.length === 0) {
+    return merged
   }
 
   return merged.length > 0 ? merged.slice(-2) : null
@@ -230,6 +222,78 @@ function OutputLine({ line, border, alwaysDim }: { line: FlatLine; border: strin
   )
 }
 
+function StepLabel({
+  entry,
+  isActive,
+  isDimmed,
+  isRetrying,
+  isRunningStatus,
+}: {
+  entry: TreeEntry
+  isActive: boolean
+  isDimmed: boolean
+  isRetrying: boolean
+  isRunningStatus: boolean
+}) {
+  if (isRunningStatus) {
+    return (
+      <Text inverse color="cyan">
+        {entry.label}
+      </Text>
+    )
+  }
+  if (entry.isNext) {
+    return (
+      <Text inverse color="yellow">
+        {entry.label}
+      </Text>
+    )
+  }
+  if (isRetrying) {
+    return (
+      <Text bold color="cyan">
+        {entry.label}
+      </Text>
+    )
+  }
+  return (
+    <Text bold={isActive} dimColor={isDimmed && !isActive}>
+      {entry.label}
+    </Text>
+  )
+}
+
+function StepSpinner({ entry }: { entry: TreeEntry }) {
+  if (!entry.isActive) {
+    return null
+  }
+  if (entry.status === "running") {
+    return (
+      <Text color="cyan">
+        {"  "}
+        <Spinner type="dots" />
+      </Text>
+    )
+  }
+  if (entry.status === "retrying") {
+    return (
+      <Text color="cyan">
+        {"  "}
+        <Spinner type="dots" /> retrying
+      </Text>
+    )
+  }
+  if (entry.status !== "waiting_for_interaction") {
+    return null
+  }
+  return (
+    <Text color="yellow">
+      {"  "}
+      <Spinner type="dots" /> waiting
+    </Text>
+  )
+}
+
 function InlineOutput({
   nodePath,
   status,
@@ -321,23 +385,13 @@ function StepRow({ entry, prefixRailColors }: { entry: TreeEntry; prefixRailColo
         {renderColoredRails(entry.prefix, prefixRailColors)}
         <Text color={entry.isNext ? "yellow" : sym.color}>{sym.icon}</Text>
         {"  "}
-        {isRunningStatus ? (
-          <Text inverse color="cyan">
-            {entry.label}
-          </Text>
-        ) : entry.isNext ? (
-          <Text inverse color="yellow">
-            {entry.label}
-          </Text>
-        ) : isRetrying ? (
-          <Text bold color="cyan">
-            {entry.label}
-          </Text>
-        ) : (
-          <Text bold={isActive} dimColor={isDimmed && !isActive}>
-            {entry.label}
-          </Text>
-        )}
+        <StepLabel
+          entry={entry}
+          isActive={isActive}
+          isDimmed={isDimmed}
+          isRetrying={isRetrying}
+          isRunningStatus={isRunningStatus}
+        />
         {showKind && (
           <Text color={kc} dimColor={kc === "dim"}>
             {"  "}({kindLabel})
@@ -355,24 +409,7 @@ function StepRow({ entry, prefixRailColors }: { entry: TreeEntry; prefixRailColo
           </Text>
         ) : null}
       </Text>
-      {isRunningStatus && entry.isActive && (
-        <Text color="cyan">
-          {"  "}
-          <Spinner type="dots" />
-        </Text>
-      )}
-      {isRetrying && entry.isActive && (
-        <Text color="cyan">
-          {"  "}
-          <Spinner type="dots" /> retrying
-        </Text>
-      )}
-      {isWaiting && entry.isActive && (
-        <Text color="yellow">
-          {"  "}
-          <Spinner type="dots" /> waiting
-        </Text>
-      )}
+      <StepSpinner entry={entry} />
     </Box>
   )
 }

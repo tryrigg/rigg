@@ -94,10 +94,13 @@ overall_confidence_score: number
 
 | Field     | Type                  | Required |
 | --------- | --------------------- | -------- |
-| `max`     | integer               | Yes      |
-| `until`   | expression            | Yes      |
+| `max`     | integer               | No       |
+| `until`   | expression            | No       |
 | `steps`   | array<Step>           | Yes      |
 | `exports` | map<string, template> | No       |
+
+Loop must set at least one of `max` or `until`.
+When `max` is omitted, `run.max_iterations` is `null`.
 
 ## type: branch
 

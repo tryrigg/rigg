@@ -206,6 +206,24 @@ describe("workflow/check", () => {
     expect(error?.message).toBe("`steps.triage.result` does not support nested field access")
   })
 
+  test("rejects OpenCode models that do not use provider/model", () => {
+    const error = expectSingleError({
+      id: "opencode-model",
+      steps: [
+        {
+          id: "build",
+          type: "opencode",
+          with: {
+            model: "claude-sonnet-4",
+            prompt: "Implement the change",
+          },
+        },
+      ],
+    })
+
+    expect(error?.message).toBe('Invalid OpenCode model "claude-sonnet-4". Use "provider/model".')
+  })
+
   test("validates branch else rules and export shape consistency", () => {
     const missingElse = expectSingleError({
       id: "missing-else",
@@ -816,7 +834,7 @@ describe("workflow/check", () => {
     ).toEqual([])
   })
 
-  test("accepts workflow retry and loop without until", () => {
+  test("accepts workflow retry and loop with either termination condition", () => {
     const project = workflowProject([
       {
         workflow: {
@@ -841,6 +859,12 @@ describe("workflow/check", () => {
               max: 2,
               steps: [shellStep("echo loop", "work")],
               type: "loop",
+            },
+            {
+              id: "until_only",
+              steps: [shellStep("echo until", "poll")],
+              type: "loop",
+              until: "${{ true }}",
             },
           ],
         },

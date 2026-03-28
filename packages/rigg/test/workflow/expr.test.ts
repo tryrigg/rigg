@@ -73,6 +73,21 @@ describe("workflow/expr", () => {
     expect(extractExprs("Hello ${{ inputs.name }} from ${{ env.CI }}")).toEqual(["inputs.name", "env.CI"])
   })
 
+  test("treats missing loop max as null in expressions", () => {
+    expect(
+      evalExpr("run.max_iterations == null", {
+        ...context,
+        run: { iteration: 2, max_iterations: null, node_path: "/0/1" },
+      }),
+    ).toBe(true)
+    expect(
+      renderTemplate("${{ run.max_iterations }}", {
+        ...context,
+        run: { iteration: 2, max_iterations: null, node_path: "/0/1" },
+      }),
+    ).toBeNull()
+  })
+
   test("detects whole-expression templates and unwraps them", () => {
     expect(isWholeTemplate("${{ steps.check.result.count }}")).toBe(true)
     expect(isWholeTemplate("prefix ${{ steps.check.result.count }}")).toBe(false)

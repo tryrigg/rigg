@@ -3,6 +3,7 @@ import type { RenderContext } from "../render"
 import { runClaudeStep } from "./claude"
 import { runCodexStep } from "./codex"
 import { runCursorStep } from "./cursor"
+import { runOpenCodeStep } from "./opencode"
 import { runShellStep, type ActionStepOutput, type ProviderStepOptions } from "./shell"
 import { applyTemplate } from "./template"
 import { runWriteFileStep } from "./write-file"
@@ -47,5 +48,7 @@ export async function runActionStep(
       return await runClaudeStep(step, context, options)
     case "cursor":
       return await runCursorStep(step, context, options)
+    case "opencode":
+      return await runOpenCodeStep(step, context, options)
   }
 }

@@ -1413,6 +1413,63 @@ describe("session/engine", () => {
     }
   })
 
+  test("exposes null max_iterations when loop max is omitted", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rigg-execute-loop-unbounded-"))
+
+    try {
+      const snapshot = await runWorkflow({
+        internals: {
+          runActionStep: async () => ({
+            exitCode: 0,
+            providerEvents: [],
+            result: "ok",
+            stderr: "",
+            stdout: "ok",
+            termination: "completed",
+          }),
+        },
+        invocationInputs: {},
+        parentEnv: process.env,
+        projectRoot: root,
+        workflow: {
+          id: "loop-unbounded",
+          steps: [
+            {
+              exports: {
+                max_iterations: "${{ run.max_iterations }}",
+              },
+              id: "loop",
+              steps: [
+                {
+                  id: "work",
+                  type: "shell",
+                  with: {
+                    command: "inside-loop",
+                    stdout: { mode: "text" },
+                  },
+                },
+              ],
+              type: "loop",
+              until: "${{ run.iteration == 2 }}",
+            },
+          ],
+        },
+      })
+
+      expect(snapshot.status).toBe("succeeded")
+      expect(snapshot.nodes.find((node) => node.user_id === "loop")?.progress).toEqual({
+        current_iteration: 2,
+        max_iterations: null,
+      })
+      expect(snapshot.nodes.find((node) => node.user_id === "loop")?.result).toEqual({
+        max_iterations: null,
+        reason: "until_satisfied",
+      })
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
   test("retries failed action steps and emits retry events", async () => {
     const root = await mkdtemp(join(tmpdir(), "rigg-execute-retry-action-"))
     const events: RunEvent[] = []

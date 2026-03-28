@@ -43,10 +43,7 @@ export function App({
     () => buildTree(workflow, snapshot, project, retryingByNodePath),
     [workflow, snapshot, project, retryingByNodePath],
   )
-  const stepProgress = useMemo(
-    () => formatProgress(summarize(workflow, snapshot, project)),
-    [workflow, snapshot, project],
-  )
+  const stepProgress = useMemo(() => formatProgress(summarize(workflow, snapshot)), [workflow, snapshot])
   const activeBarrier = snapshot?.active_barrier ?? null
   const activeInteraction = snapshot?.active_interaction ?? null
 

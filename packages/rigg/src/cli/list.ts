@@ -13,6 +13,7 @@ const ACTION_STEP_KINDS = new Set<string>([
   StepKind.Claude,
   StepKind.Codex,
   StepKind.Cursor,
+  StepKind.OpenCode,
   StepKind.WriteFile,
   StepKind.Workflow,
 ])

@@ -62,22 +62,51 @@ export const NodeSnapshotSchema = z.object({
   waiting_for: InteractionKindSchema.optional().nullable(),
 })
 
-export const FrontierNodeSchema = z.object({
-  codex_collaboration_mode: z.enum(["default", "plan"]).nullable(),
-  codex_kind: z.enum(["turn", "review"]).nullable(),
-  cursor_mode: z.enum(["agent", "ask", "plan"]).nullable(),
-  cwd: z.string().optional().nullable(),
+const BaseFrontierNodeSchema = z.object({
   detail: z.string().optional().nullable(),
   frame_id: z.string().min(1),
-  model: z.string().optional().nullable(),
-  node_kind: z.string().min(1),
   node_path: z.string().min(1),
-  opencode_agent: z.string().min(1).nullable(),
-  opencode_permission_mode: z.enum(["default", "auto_approve"]).nullable(),
-  opencode_variant: z.string().min(1).nullable(),
-  prompt_preview: z.string().optional().nullable(),
   user_id: z.string().min(1).optional().nullable(),
 })
+
+export const FrontierNodeSchema = z.discriminatedUnion("node_kind", [
+  BaseFrontierNodeSchema.extend({
+    node_kind: z.literal("claude"),
+    cwd: z.string(),
+    model: z.string().optional().nullable(),
+    prompt_preview: z.string().optional().nullable(),
+  }).strict(),
+  BaseFrontierNodeSchema.extend({
+    collaboration_mode: z.enum(["default", "plan"]).optional(),
+    cwd: z.string(),
+    kind: z.enum(["turn", "review"]),
+    model: z.string().optional().nullable(),
+    node_kind: z.literal("codex"),
+    prompt_preview: z.string().optional().nullable(),
+  }).strict(),
+  BaseFrontierNodeSchema.extend({
+    cwd: z.string(),
+    mode: z.enum(["agent", "ask", "plan"]),
+    model: z.string().optional().nullable(),
+    node_kind: z.literal("cursor"),
+    prompt_preview: z.string().optional().nullable(),
+  }).strict(),
+  BaseFrontierNodeSchema.extend({
+    agent: z.string().min(1).optional(),
+    cwd: z.string(),
+    model: z.string().optional().nullable(),
+    node_kind: z.literal("opencode"),
+    permission_mode: z.enum(["default", "auto_approve"]).optional(),
+    prompt_preview: z.string().optional().nullable(),
+    variant: z.string().min(1).optional().nullable(),
+  }).strict(),
+  BaseFrontierNodeSchema.extend({
+    node_kind: z.literal("shell"),
+  }).strict(),
+  BaseFrontierNodeSchema.extend({
+    node_kind: z.literal("write_file"),
+  }).strict(),
+])
 
 export const CompletedNodeSummarySchema = z.object({
   node_kind: z.string().min(1),

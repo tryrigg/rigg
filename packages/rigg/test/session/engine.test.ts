@@ -3382,11 +3382,11 @@ describe("session/engine", () => {
         throw new Error("missing barrier")
       }
       expect(firstBarrier.barrier.next[0]).toMatchObject({
-        codex_collaboration_mode: "default",
-        codex_kind: "turn",
-        cursor_mode: null,
+        collaboration_mode: "default",
         cwd: root,
+        kind: "turn",
         model: "gpt-5.4",
+        node_kind: "codex",
         prompt_preview: "Review branch main",
         user_id: "review",
       })
@@ -3449,9 +3449,6 @@ describe("session/engine", () => {
         throw new Error("missing barrier")
       }
       expect(firstBarrier.barrier.next[0]).toMatchObject({
-        codex_collaboration_mode: null,
-        codex_kind: null,
-        cursor_mode: null,
         cwd: root,
         model: "claude-opus-4-6",
         node_kind: "claude",

@@ -228,38 +228,41 @@ function barrierLabel(next: FrontierNode[]): string | null {
 
 export function frontierLabel(node: FrontierNode): string {
   const parts = [`${node.user_id ?? node.node_path} [${labels[node.node_kind] ?? node.node_kind}]`]
-  if (node.node_kind === "codex" && node.codex_kind) {
-    parts.push(node.codex_kind)
-    if (node.codex_kind === "turn" && node.codex_collaboration_mode === "plan") {
-      parts.push("plan")
-    }
-  }
-  if (node.node_kind === "claude") {
-    if (node.model) {
-      parts.push(node.model)
-    }
-    return parts.join(" · ")
-  }
-  if (node.node_kind === "opencode") {
-    if (node.opencode_agent) {
-      parts.push(node.opencode_agent)
-    }
-    if (node.model) {
-      parts.push(node.model)
-    }
-    if (node.opencode_variant) {
-      parts.push(node.opencode_variant)
-    }
-    if (node.opencode_permission_mode) {
-      parts.push(node.opencode_permission_mode)
-    }
-    return parts.join(" · ")
-  }
-  if (node.node_kind === "cursor" && node.cursor_mode) {
-    parts.push(node.cursor_mode)
-  }
-  if ((node.node_kind === "codex" || node.node_kind === "cursor") && node.model) {
-    parts.push(node.model)
+  switch (node.node_kind) {
+    case "codex":
+      parts.push(node.kind)
+      if (node.kind === "turn" && node.collaboration_mode === "plan") {
+        parts.push("plan")
+      }
+      if (node.model) {
+        parts.push(node.model)
+      }
+      return parts.join(" · ")
+    case "claude":
+      if (node.model) {
+        parts.push(node.model)
+      }
+      return parts.join(" · ")
+    case "opencode":
+      if (node.agent) {
+        parts.push(node.agent)
+      }
+      if (node.model) {
+        parts.push(node.model)
+      }
+      if (node.variant) {
+        parts.push(node.variant)
+      }
+      if (node.permission_mode) {
+        parts.push(node.permission_mode)
+      }
+      return parts.join(" · ")
+    case "cursor":
+      parts.push(node.mode)
+      if (node.model) {
+        parts.push(node.model)
+      }
+      return parts.join(" · ")
   }
   return parts.join(" · ")
 }

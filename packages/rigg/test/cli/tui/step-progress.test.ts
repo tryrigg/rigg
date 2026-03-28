@@ -29,21 +29,14 @@ function nodeSnapshot(overrides: Partial<NodeSnapshot> = {}): NodeSnapshot {
   }
 }
 
-function frontierNode(overrides: Partial<FrontierNode> = {}): FrontierNode {
+function frontierNode(
+  overrides: Partial<Extract<FrontierNode, { node_kind: "shell" }>> = {},
+): Extract<FrontierNode, { node_kind: "shell" }> {
   return {
-    codex_collaboration_mode: null,
-    codex_kind: null,
-    cursor_mode: null,
-    cwd: null,
     detail: null,
     frame_id: "root",
-    model: null,
     node_kind: "shell",
     node_path: "/0",
-    opencode_agent: null,
-    opencode_permission_mode: null,
-    opencode_variant: null,
-    prompt_preview: null,
     user_id: null,
     ...overrides,
   }

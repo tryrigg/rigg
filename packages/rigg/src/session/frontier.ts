@@ -188,44 +188,57 @@ export function createFrontierNode(
   cwd: string,
   detailOverride?: string,
 ): FrontierNode {
-  const base: FrontierNode = {
-    codex_collaboration_mode: null,
-    codex_kind: null,
-    cursor_mode: null,
-    cwd,
+  const base = {
     detail: detailOverride ?? summarizeFrontierDetail(step),
     frame_id: frameId,
-    model: step.type === "shell" || step.type === "write_file" ? null : (step.with.model ?? null),
-    node_kind: step.type,
     node_path: nodePath,
-    opencode_agent: null,
-    opencode_permission_mode: null,
-    opencode_variant: null,
-    prompt_preview: frontierPromptPreview(step, context),
     user_id: step.id ?? null,
   }
 
-  if (step.type === "codex") {
-    if (step.with.kind === "review") {
-      return { ...base, codex_kind: "review" as const }
-    }
-    return { ...base, codex_collaboration_mode: step.with.collaboration_mode ?? "default", codex_kind: "turn" as const }
+  switch (step.type) {
+    case "claude":
+      return {
+        ...base,
+        cwd,
+        model: step.with.model ?? null,
+        node_kind: "claude",
+        prompt_preview: frontierPromptPreview(step, context),
+      }
+    case "codex":
+      return {
+        ...base,
+        collaboration_mode: step.with.kind === "turn" ? (step.with.collaboration_mode ?? "default") : undefined,
+        cwd,
+        kind: step.with.kind,
+        model: step.with.model ?? null,
+        node_kind: "codex",
+        prompt_preview: frontierPromptPreview(step, context),
+      }
+    case "cursor":
+      return {
+        ...base,
+        cwd,
+        mode: step.with.mode,
+        model: step.with.model ?? null,
+        node_kind: "cursor",
+        prompt_preview: frontierPromptPreview(step, context),
+      }
+    case "opencode":
+      return {
+        ...base,
+        agent: step.with.agent ?? "build",
+        cwd,
+        model: step.with.model ?? null,
+        node_kind: "opencode",
+        permission_mode: step.with.permission_mode ?? "default",
+        prompt_preview: frontierPromptPreview(step, context),
+        variant: step.with.variant ?? null,
+      }
+    case "shell":
+      return { ...base, node_kind: "shell" }
+    case "write_file":
+      return { ...base, node_kind: "write_file" }
   }
-  if (step.type === "cursor") {
-    return { ...base, cursor_mode: step.with.mode }
-  }
-  if (step.type === "opencode") {
-    return {
-      ...base,
-      opencode_agent: step.with.agent ?? "build",
-      opencode_permission_mode: step.with.permission_mode ?? "default",
-      opencode_variant: step.with.variant ?? null,
-    }
-  }
-  if (step.type === "shell" || step.type === "write_file") {
-    return { ...base, cwd: null }
-  }
-  return base
 }
 
 export function summarizeFrontierDetail(step: ActionNode): string | null {

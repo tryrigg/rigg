@@ -1,6 +1,7 @@
 {
   "name": "rigg",
   "private": true,
+  "license": "MIT",
   "packageManager": "bun@1.3.10",
   "workspaces": [
     "packages/*"

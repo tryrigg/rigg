@@ -37,17 +37,22 @@ export const PH_HEIGHT = 760
 export const BG = "#f7f6f3"
 export const GRADIENT_BG = "linear-gradient(145deg, #f0f5f1 0%, #e8f0ea 50%, #e2ede6 100%)"
 
-export async function renderPng(element: Parameters<typeof satori>[0]): Promise<Response> {
+export async function renderPng(
+  element: Parameters<typeof satori>[0],
+  opts?: { width?: number; height?: number },
+): Promise<Response> {
+  const w = opts?.width ?? PH_WIDTH
+  const h = opts?.height ?? PH_HEIGHT
   const svg = await satori(element, {
-    width: PH_WIDTH,
-    height: PH_HEIGHT,
+    width: w,
+    height: h,
     fonts: [
       { name: "Source Serif 4", data: SourceSerifMedium, weight: 500, style: "normal" },
       { name: "JetBrains Mono", data: JetBrainsMonoRegular, weight: 400, style: "normal" },
     ],
   })
 
-  const resvg = new Resvg(svg, { fitTo: { mode: "width", value: PH_WIDTH } })
+  const resvg = new Resvg(svg, { fitTo: { mode: "width", value: w } })
   const png = resvg.render().asPng()
 
   return new Response(new Uint8Array(png), {

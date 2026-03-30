@@ -7,41 +7,57 @@ import { formatDuration, statusSymbol } from "./symbols"
 import { runDurationMs } from "./time"
 import { SUMMARY_KINDS, type TreeEntry } from "./tree"
 
-export function countStatuses(entries: TreeEntry[]): {
+type FailedStep = {
+  label: string
+  suffix: string
+}
+
+type StatusCounts = {
   failedCount: number
-  failedSteps: Array<{ label: string; suffix: string }>
+  failedSteps: FailedStep[]
   interruptedCount: number
   skippedCount: number
   succeededCount: number
-} {
-  let failedCount = 0
-  let interruptedCount = 0
-  let skippedCount = 0
-  let succeededCount = 0
-  const failedSteps: Array<{ label: string; suffix: string }> = []
+}
 
-  for (const entry of entries) {
-    if (entry.entryType !== "step" || !SUMMARY_KINDS.has(entry.nodeKind)) {
-      continue
+function createStatusCounts(): StatusCounts {
+  return {
+    failedCount: 0,
+    failedSteps: [],
+    interruptedCount: 0,
+    skippedCount: 0,
+    succeededCount: 0,
+  }
+}
+
+function isSummaryEntry(entry: TreeEntry): boolean {
+  return entry.entryType === "step" && SUMMARY_KINDS.has(entry.nodeKind)
+}
+
+export function countStatuses(entries: TreeEntry[]): StatusCounts {
+  return entries.reduce((counts, entry) => {
+    if (!isSummaryEntry(entry)) {
+      return counts
     }
+
     switch (entry.status) {
       case "failed":
-        failedCount++
-        failedSteps.push({ label: entry.label, suffix: entry.suffix })
-        break
+        counts.failedCount += 1
+        counts.failedSteps.push({ label: entry.label, suffix: entry.suffix })
+        return counts
       case "interrupted":
-        interruptedCount++
-        break
+        counts.interruptedCount += 1
+        return counts
       case "skipped":
-        skippedCount++
-        break
+        counts.skippedCount += 1
+        return counts
       case "succeeded":
-        succeededCount++
-        break
+        counts.succeededCount += 1
+        return counts
+      default:
+        return counts
     }
-  }
-
-  return { failedCount, failedSteps, interruptedCount, skippedCount, succeededCount }
+  }, createStatusCounts())
 }
 
 export function summaryRunId(runId: string): string {
@@ -53,10 +69,10 @@ export function Summary({ snapshot, entries }: { snapshot: RunSnapshot | null; e
     return null
   }
 
-  const { stdout } = useStdout()
+  const stdout = useStdout().stdout
   const cols = stdout?.columns ?? 80
 
-  const { failedCount, failedSteps, interruptedCount, skippedCount, succeededCount } = countStatuses(entries)
+  const counts = countStatuses(entries)
   const totalMs = runDurationMs(snapshot)
   const statusLabel = snapshot.status.charAt(0).toUpperCase() + snapshot.status.slice(1)
   const statusColor = snapshot.status === "succeeded" ? "green" : "red"
@@ -75,24 +91,24 @@ export function Summary({ snapshot, entries }: { snapshot: RunSnapshot | null; e
           <Text>
             {"  "}
             <Text color={succeededSym.color}>
-              {succeededSym.icon} {succeededCount} succeeded
+              {succeededSym.icon} {counts.succeededCount} succeeded
             </Text>
-            {failedCount > 0 && (
+            {counts.failedCount > 0 && (
               <Text color={failedSym.color}>
                 {"  "}
-                {failedSym.icon} {failedCount} failed
+                {failedSym.icon} {counts.failedCount} failed
               </Text>
             )}
-            {interruptedCount > 0 && (
+            {counts.interruptedCount > 0 && (
               <Text color={interruptedSym.color}>
                 {"  "}
-                {interruptedSym.icon} {interruptedCount} interrupted
+                {interruptedSym.icon} {counts.interruptedCount} interrupted
               </Text>
             )}
-            {skippedCount > 0 && (
+            {counts.skippedCount > 0 && (
               <Text color={skippedSym.color}>
                 {"  "}
-                {skippedSym.icon} {skippedCount} skipped
+                {skippedSym.icon} {counts.skippedCount} skipped
               </Text>
             )}
           </Text>
@@ -104,9 +120,9 @@ export function Summary({ snapshot, entries }: { snapshot: RunSnapshot | null; e
           </Text>
         </Box>
       </Box>
-      {failedSteps.length > 0 && <Text>{""}</Text>}
-      {failedSteps.length > 0 &&
-        failedSteps.map((step, i) => (
+      {counts.failedSteps.length > 0 && <Text>{""}</Text>}
+      {counts.failedSteps.length > 0 &&
+        counts.failedSteps.map((step, i) => (
           <Text key={i} color="red">
             {"    "}
             {failedSym.icon} {step.label}

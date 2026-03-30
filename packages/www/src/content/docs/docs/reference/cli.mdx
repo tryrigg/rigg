@@ -31,6 +31,28 @@ rigg list
 
 When local run history is available, `rigg list` also shows the last recorded run status for each workflow.
 
+## rigg serve
+
+Start the local HTTP API server.
+
+```bash
+rigg serve [--host <host>] [--port <n>] [--json]
+```
+
+| Flag            | Description                                                            |
+| --------------- | ---------------------------------------------------------------------- |
+| `--host <host>` | Bind address for the HTTP server. Default: `127.0.0.1`.                |
+| `--port <n>`    | Listen port for the HTTP server. Default: `3000`.                      |
+| `--json`        | Print machine-readable startup info as a single JSON object on stdout. |
+
+Examples:
+
+```bash
+rigg serve
+rigg serve --port 3847
+rigg serve --host 0.0.0.0 --json
+```
+
 ## rigg upgrade
 
 Upgrade an installed Rigg release binary to the latest or a specific version.

@@ -80,6 +80,58 @@ describe("cli/args", () => {
     })
   })
 
+  test("rejects missing values for shared option readers", () => {
+    expect(parseCommand(["serve", "--host", "--json"])).toEqual({
+      kind: "invalid",
+      message: "`rigg serve --host` requires a host.",
+    })
+
+    expect(parseCommand(["history", "--status", "--json"])).toEqual({
+      kind: "invalid",
+      message: "`rigg history --status` requires one of: running, succeeded, failed, aborted.",
+    })
+
+    expect(parseCommand(["run", "--input"])).toEqual({
+      kind: "invalid",
+      message: "`rigg run --input` requires a following KEY=VALUE argument.",
+    })
+  })
+
+  test("parses serve flags", () => {
+    expect(parseCommand(["serve"])).toEqual({
+      host: "127.0.0.1",
+      json: false,
+      kind: "serve",
+      port: 3000,
+    })
+
+    expect(parseCommand(["serve", "--port", "4000"])).toEqual({
+      host: "127.0.0.1",
+      json: false,
+      kind: "serve",
+      port: 4000,
+    })
+
+    expect(parseCommand(["serve", "--host", "0.0.0.0", "--json"])).toEqual({
+      host: "0.0.0.0",
+      json: true,
+      kind: "serve",
+      port: 3000,
+    })
+  })
+
+  test("rejects invalid serve flags", () => {
+    expect(parseCommand(["serve", "--port", "nope"])).toEqual({
+      kind: "invalid",
+      message: "`rigg serve --port` requires a non-negative integer.",
+    })
+
+    expect(parseCommand(["serve", "--wat"])).toEqual({
+      kind: "invalid",
+      message: "Unknown serve option: --wat",
+    })
+  })
+
   test("rejects invalid headless run combinations", () => {
     expect(parseCommand(["run", "plan", "--output-format"])).toEqual({
       kind: "invalid",
